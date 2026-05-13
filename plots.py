@@ -108,29 +108,34 @@ def plot_channel_response(sample_rate: float, signal_bw: float,
 
 def plot_wideband_results(results: dict,
                            sample_rate: float,
-                           native_rate_slow: float,
-                           native_rate_fast: float,
-                           symbol_rate_slow: float,
-                           symbol_rate_fast: float,
                            save_path: str | None = None) -> None:
     """
-    Three-panel figure:
-      top          — wideband PSD pre-NL vs post-NL
-      bottom-left  — slow carrier PSD pre-NL vs post-NL at native rate
-      bottom-right — fast carrier PSD pre-NL vs post-NL at native rate
+    Two-row figure:
+      top    — wideband PSD: pre-NL, post-NL, and (if present) post-noise
+      bottom — one panel per carrier: baseband PSD pre-NL vs post-NL
     """
-    fig = plt.figure(figsize=(13, 7))
-    fig.suptitle(
-        f"Wideband NL Simulation\n"
-        f"Slow: {symbol_rate_slow/1e6:.3g} MHz sym/s  |  "
-        f"Fast: {symbol_rate_fast/1e6:.3g} MHz sym/s  |  "
-        f"Wideband: {sample_rate/1e9:.3g} GHz")
+    from matplotlib.gridspec import GridSpec
 
-    ax_wb = fig.add_subplot(2, 1, 1)
-    f, p = psd_db(results['wideband'], sample_rate)
-    ax_wb.plot(f, p, lw=0.8, color='tab:blue', label='Pre-NL')
-    f, p = psd_db(results['wideband_nl'], sample_rate)
-    ax_wb.plot(f, p, lw=0.8, color='tab:orange', alpha=0.85, label='Post-NL')
+    carriers = results["carriers"]
+    n_carriers = len(carriers)
+    fig_w = max(13, 5 * n_carriers)
+    fig = plt.figure(figsize=(fig_w, 7))
+
+    carrier_labels = "  |  ".join(
+        f"{cr['name']}: {cr['symbol_rate']/1e6:.3g} MHz sym/s" for cr in carriers)
+    fig.suptitle(
+        f"Wideband NL Simulation — {sample_rate/1e9:.3g} GHz\n{carrier_labels}")
+
+    gs = GridSpec(2, n_carriers, figure=fig, hspace=0.45, wspace=0.35)
+
+    ax_wb = fig.add_subplot(gs[0, :])
+    f, p = psd_db(results["wideband"], sample_rate)
+    ax_wb.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
+    f, p = psd_db(results["wideband_nl"], sample_rate)
+    ax_wb.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
+    if results.get("wideband_noisy") is not results["wideband_nl"]:
+        f, p = psd_db(results["wideband_noisy"], sample_rate)
+        ax_wb.plot(f, p, lw=0.6, color="tab:green", alpha=0.7, label="Post-NL + noise")
     ax_wb.set_title("Wideband PSD")
     ax_wb.set_xlabel("Frequency (Hz)")
     ax_wb.set_ylabel("dB")
@@ -138,30 +143,18 @@ def plot_wideband_results(results: dict,
     ax_wb.legend()
     ax_wb.grid(True)
 
-    ax_slow = fig.add_subplot(2, 2, 3)
-    f, p = psd_db(results['slow_bb'], native_rate_slow)
-    ax_slow.plot(f, p, lw=0.8, color='tab:blue', label='Pre-NL')
-    f, p = psd_db(results['slow_nl'], native_rate_slow)
-    ax_slow.plot(f, p, lw=0.8, color='tab:orange', alpha=0.85, label='Post-NL')
-    ax_slow.set_title(f"Slow carrier  ({symbol_rate_slow/1e6:.3g} MHz sym/s)")
-    ax_slow.set_xlabel("Frequency (Hz)")
-    ax_slow.set_ylabel("dB")
-    ax_slow.set_ylim(bottom=-100)
-    ax_slow.legend()
-    ax_slow.grid(True)
+    for col, cr in enumerate(carriers):
+        ax = fig.add_subplot(gs[1, col])
+        f, p = psd_db(cr["bb"], cr["native_rate"])
+        ax.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
+        f, p = psd_db(cr["nl"], cr["native_rate"])
+        ax.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
+        ax.set_title(f"{cr['name']}  ({cr['symbol_rate']/1e6:.3g} MHz sym/s)")
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("dB")
+        ax.set_ylim(bottom=-100)
+        ax.legend(fontsize=8)
+        ax.grid(True)
 
-    ax_fast = fig.add_subplot(2, 2, 4)
-    f, p = psd_db(results['fast_bb'], native_rate_fast)
-    ax_fast.plot(f, p, lw=0.8, color='tab:blue', label='Pre-NL')
-    f, p = psd_db(results['fast_nl'], native_rate_fast)
-    ax_fast.plot(f, p, lw=0.8, color='tab:orange', alpha=0.85, label='Post-NL')
-    ax_fast.set_title(f"Fast carrier  ({symbol_rate_fast/1e6:.3g} MHz sym/s)")
-    ax_fast.set_xlabel("Frequency (Hz)")
-    ax_fast.set_ylabel("dB")
-    ax_fast.set_ylim(bottom=-100)
-    ax_fast.legend()
-    ax_fast.grid(True)
-
-    plt.tight_layout()
     if save_path is not None:
         fig.savefig(save_path)

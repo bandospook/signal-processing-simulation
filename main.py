@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 
 from config import load_config
 from simulation import wideband_bpsk_simulation
-from plots import plot_wideband_results, plot_nl_tables, plot_channel_response
+from plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
+                   print_metrics_table, plot_sweep_results)
+from sweep import parameter_sweep
 
 
 def main():
@@ -32,6 +34,8 @@ def main():
         seed               = sim["seed"],
     )
 
+    print_metrics_table(results["carriers"])
+
     plot_wideband_results(results, sample_rate=wb["sample_rate"],
                           save_path=out.get("wideband"))
 
@@ -49,6 +53,25 @@ def main():
                 title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
                 save_path=ch_cfg.get("plot"),
             )
+
+    sweep_cfg = cfg.get("sweep", {})
+    ibo_sweep   = sweep_cfg.get("ibo_db", [])
+    noise_sweep = sweep_cfg.get("noise_density_dbfs", [])
+    if len(ibo_sweep) > 0 and len(noise_sweep) > 0:
+        print(f"\nRunning sweep: {len(ibo_sweep)} IBO × {len(noise_sweep)} noise "
+              f"= {len(ibo_sweep) * len(noise_sweep)} points …")
+        sweep_results = parameter_sweep(
+            carriers=carriers,
+            sample_rate=wb["sample_rate"],
+            am_am_cfg=amp["am_am"],
+            am_pm_cfg=amp["am_pm"],
+            ibo_db_values=ibo_sweep,
+            noise_density_dbfs_values=noise_sweep,
+            ola_filter_span=ola["filter_span"],
+            ola_block_size=ola["block_size"],
+            seed=sim["seed"],
+        )
+        plot_sweep_results(sweep_results, save_path=out.get("sweep"))
 
     plt.show()
 

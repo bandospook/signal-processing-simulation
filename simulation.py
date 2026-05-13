@@ -2,6 +2,7 @@ import numpy as np
 from bpsk import rrc_bpsk_baseband
 from filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
 from nonlinear_amplifier import nonlinear_amplifier
+from receiver import bpsk_receive
 
 
 def wideband_bpsk_simulation(carriers: list[dict],
@@ -41,7 +42,9 @@ def wideband_bpsk_simulation(carriers: list[dict],
         wideband_noisy  combined signal after NL + noise (== wideband_nl if no noise)
         t_wb            wideband time axis
         carriers        list of per-carrier result dicts, each containing:
-                          name, bb, nl, symbols, t, symbol_rate, native_rate
+                          name, bb, nl, symbols, t, symbol_rate, native_rate,
+                          samples, decisions, ber, evm_rms,
+                          cnr_db, cir_db, cnir_db
     """
     rng = np.random.default_rng(seed)
     per_carrier_seeds = rng.integers(0, 2 ** 31, len(carriers))
@@ -81,7 +84,8 @@ def wideband_bpsk_simulation(carriers: list[dict],
 
         carrier_state.append(dict(
             name=carr["name"], bb=bb, symbols=symbols, t=t,
-            symbol_rate=symbol_rate, native_rate=native_rate, freq=freq, L=L))
+            symbol_rate=symbol_rate, native_rate=native_rate, freq=freq, L=L,
+            rolloff=rolloff, filter_span=filter_span, sps=sps))
 
     # Trim all carriers to the same wideband length and form the composite
     N = min(len(u) for u, _, _ in upsampled_signals)
@@ -93,8 +97,8 @@ def wideband_bpsk_simulation(carriers: list[dict],
 
     # Normalise composite to unit peak then apply drive level (input backoff)
     drive = 10 ** (-input_backoff_db / 20)
-    wideband_nl = nonlinear_amplifier(
-        wideband * drive / np.max(np.abs(wideband)), am_am_cfg, am_pm_cfg)
+    wideband_normed = wideband * (drive / np.max(np.abs(wideband)))
+    wideband_nl = nonlinear_amplifier(wideband_normed, am_am_cfg, am_pm_cfg)
 
     # Add wideband AWGN after the amplifier
     if noise_density_dbfs is not None:
@@ -105,12 +109,45 @@ def wideband_bpsk_simulation(carriers: list[dict],
     else:
         wideband_noisy = wideband_nl
 
-    # Extract each carrier: downconvert → OLA downsample
+    # Extract each carrier: downconvert → OLA downsample → matched filter → decide
+    # Three extractions per carrier: pre-NL reference, post-NL noiseless, post-NL+noise.
     for cr in carrier_state:
-        nl_down = fft_ola_downsample(
-            wideband_noisy * np.exp(-1j * 2 * np.pi * cr["freq"] * t_wb),
-            cr["L"], ola_filter_span, ola_block_size)
-        cr["nl"] = nl_down
+        shift = np.exp(-1j * 2 * np.pi * cr["freq"] * t_wb)
+
+        bb_rx   = fft_ola_downsample(wideband_normed * shift,
+                                     cr["L"], ola_filter_span, ola_block_size)
+        nl_pure = fft_ola_downsample(wideband_nl * shift,
+                                     cr["L"], ola_filter_span, ola_block_size)
+        nl_down = fft_ola_downsample(wideband_noisy * shift,
+                                     cr["L"], ola_filter_span, ola_block_size)
+
+        # Project nl_pure onto bb_rx to separate AM-AM/AM-PM from true IM distortion.
+        # alpha captures the deterministic gain+phase change; residual is in-band IMD.
+        alpha        = np.vdot(bb_rx, nl_pure) / np.vdot(bb_rx, bb_rx)
+        sig          = alpha * bb_rx
+        distortion   = nl_pure - sig
+
+        p_sig  = float(np.mean(np.abs(sig) ** 2))
+        p_dist = float(np.mean(np.abs(distortion) ** 2))
+        p_noise = (float(np.mean(np.abs(nl_down - nl_pure) ** 2))
+                   if wideband_noisy is not wideband_nl else 0.0)
+
+        eps = 1e-30
+        cir_db  = 10.0 * np.log10(p_sig / (p_dist + eps))
+        cnr_db  = (10.0 * np.log10(p_sig / p_noise) if p_noise > 0 else float("inf"))
+        cnir_db = 10.0 * np.log10(p_sig / (p_dist + p_noise + eps))
+
+        cr["nl"]      = nl_down
+        cr["cnr_db"]  = cnr_db
+        cr["cir_db"]  = cir_db
+        cr["cnir_db"] = cnir_db
+        cr.update(bpsk_receive(
+            nl_down,
+            rolloff=cr["rolloff"],
+            filter_span=cr["filter_span"],
+            sps=cr["sps"],
+            reference_symbols=cr["symbols"],
+        ))
 
     return dict(wideband=wideband, wideband_nl=wideband_nl,
                 wideband_noisy=wideband_noisy, t_wb=t_wb,

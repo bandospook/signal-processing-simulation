@@ -32,6 +32,17 @@ block_size  = 4096              # FFT block size per OLA segment
 [output]
 wideband  = "wideband_bpsk.png"
 nl_tables = "amplifier_nl.png"
+sweep     = "sweep_results.png"
+
+# ── Parameter sweep ──────────────────────────────────────────────────────────
+# Remove or leave empty to skip the sweep.
+# ibo_db             : input backoff values (dB) to sweep
+# noise_density_dbfs : noise density values (dBFS/Hz) to sweep
+# Both are swept as a full 2-D grid (ibo × noise).
+
+[sweep]
+ibo_db             = [0.0, 1.5, 3.0, 4.5, 6.0]
+noise_density_dbfs = [-180.0, -165.0, -150.0, -140.0]
 
 # ── Carriers ─────────────────────────────────────────────────────────────────
 # Add more [[carrier]] blocks to include additional signals in the composite.

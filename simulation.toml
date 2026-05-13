@@ -1,0 +1,60 @@
+# Signal Processing Simulation Configuration
+
+[simulation]
+num_symbols_slow = 500
+seed             = 42
+
+[signals]
+symbol_rate_slow = 1_000_000    # Hz  slow carrier symbol rate (1 MHz)
+rate_ratio       = 20            # fast symbol rate = rate_ratio × symbol_rate_slow (20 MHz)
+sps              = 10            # samples per symbol at each signal's native rate
+rolloff          = 0.35          # RRC rolloff factor (0–1)
+filter_span      = 10            # RRC filter length in symbols
+
+[wideband]
+sample_rate = 2_000_000_000      # Hz  wideband sample rate (2 GHz)
+freq_slow   = -200_000_000       # Hz  slow carrier centre frequency (-200 MHz)
+freq_fast   =  100_000_000       # Hz  fast carrier centre frequency (+100 MHz)
+
+# ── Per-signal channel impairments (applied at each signal's native rate) ───────
+# ripple_cycles     : complete amplitude ripple cycles across the signal bandwidth
+# max_phase_dev_deg : peak phase deviation from linear at the band edge (degrees)
+# phase_poly_order  : polynomial order of the phase shape (2 = quadratic, 3 = cubic)
+
+[channel.slow]
+enabled           = true
+ripple_db         = 0.5
+ripple_cycles     = 2.0
+max_phase_dev_deg = 5.0
+phase_poly_order  = 2
+
+[channel.fast]
+enabled           = true
+ripple_db         = 0.3
+ripple_cycles     = 1.5
+max_phase_dev_deg = 3.0
+phase_poly_order  = 2
+
+# ── Nonlinear amplifier (applied to combined wideband signal) ────────────────────
+# input_backoff_db : how far below saturation the peak signal drives the amp (dB).
+#                   0 dB = peak hits the saturation knee; 6 dB = peak at half amplitude.
+# AM-AM table uses the Rapp model (p = 2), normalised so output = 1 at input = 1.
+# AM-PM table is a quadratic phase shift typical of a solid-state PA (~5° at saturation).
+
+[amplifier]
+input_backoff_db = 3.0
+
+[amplifier.am_am]
+input  = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+output = [0.000, 0.119, 0.238, 0.356, 0.473, 0.586, 0.692, 0.788, 0.873, 0.944, 1.000]
+
+[amplifier.am_pm]
+input     = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+phase_deg = [0.000, 0.050, 0.200, 0.450, 0.800, 1.250, 1.800, 2.450, 3.200, 4.050, 5.000]
+
+[ola]
+filter_span = 16                 # half-span in symbols for interpolation filter
+block_size  = 4096               # FFT block size per OLA segment
+
+[output]
+save_path = "wideband_bpsk.png"

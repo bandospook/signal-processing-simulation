@@ -1,5 +1,7 @@
+"""Receive chain: matched filter, symbol sampling, decisions, BER, and EVM."""
 import numpy as np
 from .filters import rrc_coeffs, ola_convolve
+from .modulation import decide, differential_decode, rotational_symmetry
 
 
 def matched_filter(signal: np.ndarray, rolloff: float,
@@ -17,10 +19,124 @@ def matched_filter(signal: np.ndarray, rolloff: float,
     return y_full[delay : delay + len(signal)]
 
 
-def symbol_sample(filtered: np.ndarray, sps: int) -> np.ndarray:
-    """Decimate matched-filtered signal to one sample per symbol."""
-    return filtered[::sps]
+def measure_evm_rms(samples: np.ndarray, ideal: np.ndarray) -> float:
+    """
+    RMS EVM as a percentage of the RMS constellation radius.
 
+    samples : complex received samples (one per symbol)
+    ideal   : complex ideal constellation points (nearest decision)
+    """
+    n = min(len(samples), len(ideal))
+    s = samples[:n]
+    d = np.asarray(ideal[:n], dtype=complex)
+    rms_rx = float(np.sqrt(np.mean(np.abs(s) ** 2)))
+    if rms_rx < 1e-30:
+        return float("nan")
+    norm = s / rms_rx
+    # Normalise ideal by its own RMS so EVM is reference-independent
+    rms_ref = float(np.sqrt(np.mean(np.abs(d) ** 2)))
+    d_norm = d / rms_ref if rms_ref > 1e-30 else d
+    return 100.0 * float(np.sqrt(np.mean(np.abs(norm - d_norm) ** 2)))
+
+
+def receive(signal: np.ndarray,
+            modulation: str,
+            rolloff: float,
+            filter_span: int,
+            sps: int,
+            reference_bits: np.ndarray | None = None,
+            **mod_kwargs) -> dict:
+    """
+    Full receive chain for any supported modulation.
+
+    Steps
+    -----
+    1. RRC matched filter (group-delay compensated)
+    2. Symbol sampling  — I at [0::sps]; for OQPSK also Q at [sps//2::sps]
+    3. Nearest-neighbour hard decision
+    4. For DBPSK: differential decode
+    5. Phase-ambiguity-resolved BER (tries all rotationally symmetric equivalents)
+    6. RMS EVM
+
+    Parameters
+    ----------
+    signal         : complex baseband at native sample rate
+    modulation     : modulation name string
+    rolloff        : RRC rolloff factor
+    filter_span    : RRC filter half-span in symbols
+    sps            : samples per symbol
+    reference_bits : transmitted data bits for BER (None → BER not computed)
+    **mod_kwargs   : passed to constellation/decide (e.g. apsk_gamma)
+
+    Returns
+    -------
+    dict with keys: samples, decisions, ber, evm_rms
+    """
+    mod = modulation.upper()
+    mf = matched_filter(signal, rolloff, filter_span, sps)
+
+    if mod == "OQPSK":
+        # I rail peaks at [0::sps], Q rail (delayed T/2 at TX) peaks at [sps//2::sps]
+        I_samp = mf.real[0::sps]
+        Q_samp = mf.imag[sps // 2::sps]
+        n = min(len(I_samp), len(Q_samp))
+        samples = (I_samp[:n] + 1j * Q_samp[:n]).astype(complex)
+    else:
+        samples = mf[::sps]
+
+    # Normalise to the unit-average-power constellation before nearest-neighbour
+    # decision.  The baseband generator normalises signal RMS, not symbol amplitude,
+    # so the received symbol values are scaled by a factor k ≠ 1 for multi-amplitude
+    # constellations (QAM, APSK).  Dividing by the sample RMS recovers the correct
+    # scale for distance comparisons.
+    rms_s = float(np.sqrt(np.mean(np.abs(samples) ** 2)))
+    samples_norm = samples / rms_s if rms_s > 1e-30 else samples
+
+    sym_decisions, bit_decisions = decide(samples_norm, mod, **mod_kwargs)
+
+    if mod == "DBPSK":
+        # Differential decode: N decisions → N-1 bits; compare with reference[1:]
+        bit_decisions = differential_decode(sym_decisions)
+        if reference_bits is not None:
+            ref = np.asarray(reference_bits, dtype=int)
+            n = min(len(bit_decisions), len(ref) - 1)
+            ber = float(np.mean(bit_decisions[:n] != ref[1 : n + 1]))
+        else:
+            ber = None
+    elif reference_bits is not None:
+        ber = _ber_with_ambiguity(samples_norm, reference_bits, mod, **mod_kwargs)
+    else:
+        ber = None
+
+    evm = measure_evm_rms(samples_norm, sym_decisions)
+    return dict(samples=samples_norm, decisions=bit_decisions, ber=ber, evm_rms=evm)
+
+
+def _ber_with_ambiguity(samples: np.ndarray, reference_bits: np.ndarray,
+                        mod: str, **mod_kwargs) -> float:
+    """
+    BER with phase-ambiguity resolution.
+
+    Tries all N rotationally equivalent orientations of the received samples
+    (where N = rotational_symmetry(mod)) and returns the minimum BER.
+    This handles the systematic phase offset introduced by AM-PM without
+    requiring explicit carrier phase recovery.
+    """
+    ref = np.asarray(reference_bits, dtype=int)
+    n_rot = rotational_symmetry(mod)
+    best = 1.0
+    for k in range(n_rot):
+        angle = k * 2 * np.pi / n_rot
+        rotated = samples * np.exp(1j * angle)
+        _, bit_dec = decide(rotated, mod, **mod_kwargs)
+        n = min(len(bit_dec), len(ref))
+        ber_k = float(np.mean(bit_dec[:n] != ref[:n]))
+        if ber_k < best:
+            best = ber_k
+    return best
+
+
+# ── Backward-compatible aliases ───────────────────────────────────────────────
 
 def bpsk_decide(samples: np.ndarray) -> np.ndarray:
     """Hard BPSK decisions on the real part; returns +1 / -1 array."""
@@ -28,53 +144,22 @@ def bpsk_decide(samples: np.ndarray) -> np.ndarray:
 
 
 def measure_ber(decisions: np.ndarray, reference: np.ndarray) -> float:
-    """
-    BER against reference symbols (+1/-1).
-
-    Checks both polarities and returns the lower error rate, resolving
-    the inherent BPSK 0/π phase ambiguity.
-    """
+    """BER for BPSK ±1 decisions with polarity-ambiguity resolution."""
     n = min(len(decisions), len(reference))
-    dec = decisions[:n]
-    ref = np.asarray(reference[:n], dtype=int)
-    errors = min(np.sum(dec != ref), np.sum(dec != -ref))
-    return float(errors) / n
-
-
-def measure_evm_rms(samples: np.ndarray, decisions: np.ndarray) -> float:
-    """
-    RMS EVM as a percentage of the unit constellation radius.
-
-    Samples are normalised to unit RMS power before comparison against
-    the ideal ±1 BPSK constellation points.
-    """
-    n = min(len(samples), len(decisions))
-    s = samples[:n]
-    d = decisions[:n].astype(complex)
-    rms = float(np.sqrt(np.mean(np.abs(s) ** 2)))
-    if rms < 1e-30:
-        return float("nan")
-    norm = s / rms
-    return 100.0 * float(np.sqrt(np.mean(np.abs(norm - d) ** 2)))
+    dec, ref = decisions[:n], np.asarray(reference[:n], dtype=int)
+    return float(min(np.sum(dec != ref), np.sum(dec != -ref))) / n
 
 
 def bpsk_receive(signal: np.ndarray, rolloff: float,
                  filter_span: int, sps: int,
                  reference_symbols: np.ndarray | None = None) -> dict:
-    """
-    Full BPSK receive chain: matched filter → symbol sample → decide → metrics.
-
-    Returns:
-        samples    complex samples at 1 sample/symbol
-        decisions  hard decisions (+1 / -1)
-        ber        bit error rate (None if no reference provided)
-        evm_rms    RMS EVM in percent
-    """
-    mf = matched_filter(signal, rolloff, filter_span, sps)
-    samples = symbol_sample(mf, sps)
-    decisions = bpsk_decide(samples)
-
-    ber = measure_ber(decisions, reference_symbols) if reference_symbols is not None else None
-    evm = measure_evm_rms(samples, decisions)
-
-    return dict(samples=samples, decisions=decisions, ber=ber, evm_rms=evm)
+    """Legacy BPSK-only wrapper around receive()."""
+    ref_bits = None
+    if reference_symbols is not None:
+        # Convert ±1 symbols to 0/1 bits for the general interface
+        ref_bits = ((np.asarray(reference_symbols) < 0)).astype(int)
+    result = receive(signal, "BPSK", rolloff, filter_span, sps,
+                     reference_bits=ref_bits)
+    # Re-express decisions as ±1 for callers that expect the old format
+    result["decisions"] = np.where(result["decisions"] == 0, 1, -1)
+    return result

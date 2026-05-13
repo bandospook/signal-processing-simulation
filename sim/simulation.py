@@ -1,8 +1,8 @@
 import numpy as np
-from .bpsk import rrc_bpsk_baseband
+from .bpsk import rrc_baseband
 from .filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
 from .nonlinear_amplifier import nonlinear_amplifier
-from .receiver import bpsk_receive
+from .receiver import receive
 
 
 def wideband_bpsk_simulation(carriers: list[dict],
@@ -69,9 +69,13 @@ def wideband_bpsk_simulation(carriers: list[dict],
                 f"Carrier '{carr['name']}': upsample factor {L:.4f} is not an integer >= 1")
         L = int(round(L))
 
-        bb, t, symbols = rrc_bpsk_baseband(
-            num_symbols, symbol_rate, native_rate,
-            rolloff, filter_span, seed=int(per_carrier_seeds[i]))
+        modulation  = carr.get("modulation", "BPSK").upper()
+        mod_kwargs  = {k: carr[k] for k in ("apsk_gamma", "apsk_gamma1", "apsk_gamma2")
+                       if k in carr}
+
+        bb, t, bits, symbols = rrc_baseband(
+            modulation, num_symbols, symbol_rate, native_rate,
+            rolloff, filter_span, seed=int(per_carrier_seeds[i]), **mod_kwargs)
 
         signal_bw = (1 + rolloff) * symbol_rate
         bb_ch = (apply_channel_impairment(bb, native_rate, signal_bw, channel_cfg)
@@ -83,7 +87,8 @@ def wideband_bpsk_simulation(carriers: list[dict],
         upsampled_signals.append((bb_up, freq, amplitude_scale))
 
         carrier_state.append(dict(
-            name=carr["name"], bb=bb, symbols=symbols, t=t,
+            name=carr["name"], bb=bb, bits=bits, symbols=symbols, t=t,
+            modulation=modulation, mod_kwargs=mod_kwargs,
             symbol_rate=symbol_rate, native_rate=native_rate, freq=freq, L=L,
             rolloff=rolloff, filter_span=filter_span, sps=sps))
 
@@ -141,12 +146,14 @@ def wideband_bpsk_simulation(carriers: list[dict],
         cr["cnr_db"]  = cnr_db
         cr["cir_db"]  = cir_db
         cr["cnir_db"] = cnir_db
-        cr.update(bpsk_receive(
+        cr.update(receive(
             nl_down,
+            modulation=cr["modulation"],
             rolloff=cr["rolloff"],
             filter_span=cr["filter_span"],
             sps=cr["sps"],
-            reference_symbols=cr["symbols"],
+            reference_bits=cr["bits"],
+            **cr["mod_kwargs"],
         ))
 
     return dict(wideband=wideband, wideband_nl=wideband_nl,

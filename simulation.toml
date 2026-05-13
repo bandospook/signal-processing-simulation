@@ -30,7 +30,8 @@ filter_span = 16                # half-span in symbols for interpolation filter
 block_size  = 4096              # FFT block size per OLA segment
 
 [output]
-save_path = "wideband_bpsk.png"
+wideband  = "wideband_bpsk.png"
+nl_tables = "amplifier_nl.png"
 
 # ── Carriers ─────────────────────────────────────────────────────────────────
 # Add more [[carrier]] blocks to include additional signals in the composite.
@@ -58,6 +59,7 @@ ripple_db         = 0.5
 ripple_cycles     = 2.0
 max_phase_dev_deg = 5.0
 phase_poly_order  = 2
+plot              = "channel_slow.png"
 
 [[carrier]]
 name        = "fast"
@@ -75,3 +77,4 @@ ripple_db         = 0.3
 ripple_cycles     = 1.5
 max_phase_dev_deg = 3.0
 phase_poly_order  = 2
+plot              = "channel_fast.png"

@@ -33,10 +33,11 @@ def main():
     )
 
     plot_wideband_results(results, sample_rate=wb["sample_rate"],
-                          save_path=out.get("save_path"))
+                          save_path=out.get("wideband"))
 
     plot_nl_tables(amp["am_am"], amp["am_pm"],
-                   input_backoff_db=amp["input_backoff_db"])
+                   input_backoff_db=amp["input_backoff_db"],
+                   save_path=out.get("nl_tables"))
 
     for carr in carriers:
         ch_cfg = carr.get("channel")
@@ -46,6 +47,7 @@ def main():
             plot_channel_response(
                 native_rate, signal_bw, ch_cfg,
                 title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
+                save_path=ch_cfg.get("plot"),
             )
 
     plt.show()

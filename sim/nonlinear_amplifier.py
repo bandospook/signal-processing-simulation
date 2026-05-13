@@ -32,7 +32,7 @@ def nonlinear_amplifier(signal_in: np.ndarray,
 
 
 if __name__ == "__main__":
-    from plots import plot_nl_tables
+    from sim.plots import plot_nl_tables
 
     _am_am = {
         "input":  [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],

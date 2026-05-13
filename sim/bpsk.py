@@ -1,5 +1,5 @@
 import numpy as np
-from filters import rrc_coeffs
+from .filters import rrc_coeffs
 
 
 def rrc_bpsk_baseband(num_symbols: int, symbol_rate: float, sample_rate: float,

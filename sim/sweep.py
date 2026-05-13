@@ -1,4 +1,4 @@
-from simulation import wideband_bpsk_simulation
+from .simulation import wideband_bpsk_simulation
 
 
 def parameter_sweep(carriers: list[dict],

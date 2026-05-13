@@ -1,8 +1,8 @@
 import numpy as np
-from bpsk import rrc_bpsk_baseband
-from filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
-from nonlinear_amplifier import nonlinear_amplifier
-from receiver import bpsk_receive
+from .bpsk import rrc_bpsk_baseband
+from .filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
+from .nonlinear_amplifier import nonlinear_amplifier
+from .receiver import bpsk_receive
 
 
 def wideband_bpsk_simulation(carriers: list[dict],

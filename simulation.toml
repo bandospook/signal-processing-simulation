@@ -30,9 +30,10 @@ filter_span = 16                # half-span in symbols for interpolation filter
 block_size  = 4096              # FFT block size per OLA segment
 
 [output]
-wideband  = "wideband_bpsk.png"
-nl_tables = "amplifier_nl.png"
-sweep     = "sweep_results.png"
+output_dir = "output"
+wideband   = "wideband_bpsk.png"
+nl_tables  = "amplifier_nl.png"
+sweep      = "sweep_results.png"
 
 # ── Parameter sweep ──────────────────────────────────────────────────────────
 # Remove or leave empty to skip the sweep.

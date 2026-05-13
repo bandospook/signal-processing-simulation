@@ -23,7 +23,7 @@ python main.py
 # 3. Inspect the console metrics table and the output PNGs
 ```
 
-See [GUIDE.md](GUIDE.md) for a full walkthrough, configuration reference, and annotated example results.
+See [GUIDE.md](docs/GUIDE.md) for a full walkthrough, configuration reference, and annotated example results.
 
 ## Requirements
 

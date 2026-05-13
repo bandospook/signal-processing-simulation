@@ -9,8 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Output plots
-*.png
+# Simulation output
+output/
 
 # IDE
 .vscode/

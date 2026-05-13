@@ -123,7 +123,7 @@ python main.py
 This will:
 1. Print a metrics table to the console.
 2. Open interactive matplotlib windows showing the wideband PSD, amplifier curves, and channel responses.
-3. Save PNG files to the project directory (names configured in `[output]`).
+3. Save PNG files into the `output/` directory (created automatically; configurable via `output_dir` in `[output]`).
 4. If `[sweep]` is present in `simulation.toml`, run the full IBO × noise grid and save `sweep_results.png`.
 
 ### Step 4 — Adjust the operating point
@@ -138,24 +138,43 @@ Comment out or remove the `[sweep]` block in `simulation.toml`. The single-point
 
 ## 4. Source files
 
+```
+signal-processing-simulation/
+├── sim/                      ← all simulation modules (Python package)
+│   ├── bpsk.py
+│   ├── config.py
+│   ├── filters.py
+│   ├── nonlinear_amplifier.py
+│   ├── plots.py
+│   ├── receiver.py
+│   ├── simulation.py
+│   └── sweep.py
+├── docs/
+│   └── GUIDE.md              ← this file
+├── output/                   ← generated PNG files (created on first run)
+├── main.py                   ← entry point
+├── simulation.toml           ← configuration
+└── pyproject.toml
+```
+
 | File | Role |
 |---|---|
 | `simulation.toml` | All simulation parameters — edit this to change scenarios |
 | `main.py` | Entry point: loads config, runs simulation, calls all plots |
-| `config.py` | TOML loader (thin wrapper around `tomllib`) |
-| `bpsk.py` | Generates RRC-filtered BPSK baseband signal at native rate |
-| `filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample, channel impairment |
-| `nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model using interpolated lookup tables |
-| `simulation.py` | Orchestrates the full wideband signal chain and per-carrier metric extraction |
-| `receiver.py` | Matched filter, symbol sampling, BPSK decisions, BER, EVM |
-| `sweep.py` | 2-D parameter sweep over IBO × noise; calls `wideband_bpsk_simulation` repeatedly |
-| `plots.py` | All visualisation: wideband PSD, amplifier curves, channel response, metrics table, sweep plots |
+| `sim/config.py` | TOML loader (thin wrapper around `tomllib`) |
+| `sim/bpsk.py` | Generates RRC-filtered BPSK baseband signal at native rate |
+| `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample, channel impairment |
+| `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model using interpolated lookup tables |
+| `sim/simulation.py` | Orchestrates the full wideband signal chain and per-carrier metric extraction |
+| `sim/receiver.py` | Matched filter, symbol sampling, BPSK decisions, BER, EVM |
+| `sim/sweep.py` | 2-D parameter sweep over IBO × noise; calls `wideband_bpsk_simulation` repeatedly |
+| `sim/plots.py` | All visualisation: wideband PSD, amplifier curves, channel response, metrics table, sweep plots |
 
-### `bpsk.py`
+### `sim/bpsk.py`
 
 Generates a complex baseband BPSK signal filtered through a root raised-cosine (RRC) transmit filter. Output is normalised to unit RMS power. Returns the signal, a time axis, and the underlying symbol sequence (used later for BER comparison).
 
-### `filters.py`
+### `sim/filters.py`
 
 Four public functions:
 
@@ -165,15 +184,15 @@ Four public functions:
 - **`fft_ola_downsample`** — applies a Kaiser-windowed sinc anti-alias filter (cutoff at new Nyquist, ≈80 dB stopband) then decimates. Prevents aliasing when extracting a narrowband carrier from the wideband composite.
 - **`apply_channel_impairment`** — applies per-carrier amplitude ripple and phase nonlinearity in the frequency domain before upsampling.
 
-### `nonlinear_amplifier.py`
+### `sim/nonlinear_amplifier.py`
 
 A memoryless (no memory, instantaneous) nonlinear model. The input complex envelope is split into amplitude and phase. Amplitude is mapped through the AM-AM table (piecewise linear interpolation). A phase shift read from the AM-PM table is added. The model is parameterised entirely by the two lookup tables in `simulation.toml`.
 
-### `simulation.py`
+### `sim/simulation.py`
 
 The main computation loop. Calls all the above modules in order, then performs three OLA downsampling extractions per carrier (pre-NL reference, post-NL noiseless, post-NL+noise) and computes CNR/CIR/CNIR via the projection method described in §2. Returns a results dict consumed by `main.py`.
 
-### `receiver.py`
+### `sim/receiver.py`
 
 Implements the digital receive chain independently of the simulation waveform generation:
 
@@ -184,7 +203,7 @@ Implements the digital receive chain independently of the simulation waveform ge
 - **`measure_evm_rms`** — normalises received samples to unit RMS power, then computes the RMS distance from ideal ±1 constellation points, expressed as a percentage.
 - **`bpsk_receive`** — chains all of the above; returns `samples`, `decisions`, `ber`, `evm_rms`.
 
-### `sweep.py`
+### `sim/sweep.py`
 
 Runs `wideband_bpsk_simulation` on every point in the Cartesian product of `ibo_db_values × noise_density_dbfs_values`. Prints progress to the console. Returns a flat list of result dicts for `plot_sweep_results`.
 
@@ -238,7 +257,8 @@ All parameters live in `simulation.toml`. Sections and keys:
 
 | Key | Type | Description |
 |---|---|---|
-| `wideband` | string | Filename for the wideband PSD + per-carrier baseband PSD figure. |
+| `output_dir` | string | Directory where all PNG files are written. Created automatically on first run. Defaults to `"output"`. |
+| `wideband` | string | Filename (inside `output_dir`) for the wideband PSD + per-carrier baseband PSD figure. |
 | `nl_tables` | string | Filename for the AM-AM / AM-PM characteristic plot. |
 | `sweep` | string | Filename for the sweep results figure. |
 
@@ -281,15 +301,15 @@ Remove this subsection or set `enabled = false` to bypass channel impairments fo
 
 ## 6. Output files
 
-Running `python main.py` with the default configuration produces the following files:
+Running `python main.py` with the default configuration writes all PNG files into the `output/` directory (configured via `output_dir` in `[output]`; created automatically if it does not exist).
 
 | File | Contents |
 |---|---|
-| `wideband_bpsk.png` | **Top row**: wideband PSD (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised noise floor between and around the carriers. **Bottom row**: one panel per carrier showing the baseband PSD before and after the NL, so in-band distortion is directly visible. |
-| `amplifier_nl.png` | AM-AM and AM-PM curves with the peak operating point (determined by IBO) marked in red. A large gap between the AM-AM curve and the ideal linear line indicates significant compression. |
-| `channel_slow.png` | Amplitude ripple (dB vs MHz) and phase nonlinearity (° vs MHz) across the slow carrier's passband. |
-| `channel_fast.png` | Same as above for the fast carrier. |
-| `sweep_results.png` | Three columns per carrier row: BER vs IBO, EVM vs IBO, and CNR/CIR/CNIR vs IBO. Multiple curves (one per noise level) are colour-coded. Points where BER = 0 (no errors observed) are omitted from the log-scale BER plot. |
+| `output/wideband_bpsk.png` | **Top row**: wideband PSD (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised noise floor between and around the carriers. **Bottom row**: one panel per carrier showing the baseband PSD before and after the NL, so in-band distortion is directly visible. |
+| `output/amplifier_nl.png` | AM-AM and AM-PM curves with the peak operating point (determined by IBO) marked in red. A large gap between the AM-AM curve and the ideal linear line indicates significant compression. |
+| `output/channel_slow.png` | Amplitude ripple (dB vs MHz) and phase nonlinearity (° vs MHz) across the slow carrier's passband. |
+| `output/channel_fast.png` | Same as above for the fast carrier. |
+| `output/sweep_results.png` | Three columns per carrier row: BER vs IBO, EVM vs IBO, and CNR/CIR/CNIR vs IBO. Multiple curves (one per noise level) are colour-coded. Points where BER = 0 (no errors observed) are omitted from the log-scale BER plot. |
 
 ---
 

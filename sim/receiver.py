@@ -1,5 +1,5 @@
 import numpy as np
-from filters import rrc_coeffs, ola_convolve
+from .filters import rrc_coeffs, ola_convolve
 
 
 def matched_filter(signal: np.ndarray, rolloff: float,

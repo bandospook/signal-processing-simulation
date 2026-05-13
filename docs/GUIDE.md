@@ -11,6 +11,8 @@
 7. [Example results](#7-example-results)
 8. [Sweep mode](#8-sweep-mode)
 9. [Adding or modifying carriers](#9-adding-or-modifying-carriers)
+10. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
+11. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
 
 ---
 

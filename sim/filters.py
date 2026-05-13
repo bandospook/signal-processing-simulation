@@ -100,21 +100,31 @@ def apply_channel_impairment(signal: np.ndarray, sample_rate: float,
 
     where f_norm = f / (signal_bw / 2) ∈ [-1, +1] at band edges
     and r = (10^(ripple_db/20) - 1) / (10^(ripple_db/20) + 1)
+
+    The DFT is zero-padded so that multiplication by H(f) is equivalent to linear
+    (not circular) convolution.  The amplitude ripple term creates an implicit delay
+    tap at ±ripple_cycles/signal_bw seconds; padding by that extent keeps circular
+    wrap-around in the zero region.
     """
     if not channel_cfg.get("enabled", True):
         return signal
 
     N = len(signal)
-    freqs = np.fft.fftfreq(N, 1.0 / sample_rate)
-
-    half_bw = signal_bw / 2.0
-    in_band = np.abs(freqs) <= half_bw
-    f_norm = np.where(in_band, freqs / half_bw, 0.0)
-
     ripple_db      = channel_cfg.get("ripple_db", 0.0)
     ripple_cycles  = channel_cfg.get("ripple_cycles", 1.0)
     max_phase_deg  = channel_cfg.get("max_phase_dev_deg", 0.0)
     poly_order     = channel_cfg.get("phase_poly_order", 2)
+
+    # Delay tap of the cosine ripple is at ±ripple_cycles/signal_bw seconds.
+    # Pad by that many samples (+ 8 for sinc sidelobe decay) so wrap-around is harmless.
+    pad = int(np.ceil(ripple_cycles * sample_rate / signal_bw)) + 8
+    N_fft = 2 ** int(np.ceil(np.log2(N + pad)))
+
+    freqs = np.fft.fftfreq(N_fft, 1.0 / sample_rate)
+
+    half_bw = signal_bw / 2.0
+    in_band = np.abs(freqs) <= half_bw
+    f_norm = np.where(in_band, freqs / half_bw, 0.0)
 
     r = (10 ** (ripple_db / 20) - 1) / (10 ** (ripple_db / 20) + 1)
     ampl = np.where(in_band, 1.0 + r * np.cos(np.pi * ripple_cycles * f_norm), 1.0)
@@ -124,4 +134,7 @@ def apply_channel_impairment(signal: np.ndarray, sample_rate: float,
                                * np.sign(f_norm) ** (poly_order % 2), 0.0)
 
     H = ampl * np.exp(1j * phase)
-    return np.fft.ifft(np.fft.fft(signal) * H)
+
+    padded = np.zeros(N_fft, dtype=complex)
+    padded[:N] = signal
+    return np.fft.ifft(np.fft.fft(padded) * H)[:N]

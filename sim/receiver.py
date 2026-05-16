@@ -134,32 +134,3 @@ def _ber_with_ambiguity(samples: np.ndarray, reference_bits: np.ndarray,
         if ber_k < best:
             best = ber_k
     return best
-
-
-# ── Backward-compatible aliases ───────────────────────────────────────────────
-
-def bpsk_decide(samples: np.ndarray) -> np.ndarray:
-    """Hard BPSK decisions on the real part; returns +1 / -1 array."""
-    return np.where(samples.real >= 0, 1, -1)
-
-
-def measure_ber(decisions: np.ndarray, reference: np.ndarray) -> float:
-    """BER for BPSK ±1 decisions with polarity-ambiguity resolution."""
-    n = min(len(decisions), len(reference))
-    dec, ref = decisions[:n], np.asarray(reference[:n], dtype=int)
-    return float(min(np.sum(dec != ref), np.sum(dec != -ref))) / n
-
-
-def bpsk_receive(signal: np.ndarray, rolloff: float,
-                 filter_span: int, sps: int,
-                 reference_symbols: np.ndarray | None = None) -> dict:
-    """Legacy BPSK-only wrapper around receive()."""
-    ref_bits = None
-    if reference_symbols is not None:
-        # Convert ±1 symbols to 0/1 bits for the general interface
-        ref_bits = ((np.asarray(reference_symbols) < 0)).astype(int)
-    result = receive(signal, "BPSK", rolloff, filter_span, sps,
-                     reference_bits=ref_bits)
-    # Re-express decisions as ±1 for callers that expect the old format
-    result["decisions"] = np.where(result["decisions"] == 0, 1, -1)
-    return result

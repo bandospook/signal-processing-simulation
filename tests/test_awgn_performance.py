@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from sim.bpsk import rrc_baseband
+from sim.baseband import rrc_baseband
 from sim.modulation import bits_per_symbol
 from sim.receiver import matched_filter, receive
 

@@ -59,7 +59,7 @@ def rrc_baseband(modulation: str,
     h = rrc_coeffs(filter_span, rolloff, sps)
 
     if mod == "OQPSK":
-        bb = _oqpsk_baseband(bits, symbols, sps, h)
+        bb = _oqpsk_baseband(symbols, sps, h)
     else:
         upsampled = np.zeros(num_symbols * sps, dtype=complex)
         upsampled[::sps] = symbols
@@ -73,8 +73,7 @@ def rrc_baseband(modulation: str,
     return bb, t, bits, symbols
 
 
-def _oqpsk_baseband(bits: np.ndarray, symbols: np.ndarray,
-                    sps: int, h: np.ndarray) -> np.ndarray:
+def _oqpsk_baseband(symbols: np.ndarray, sps: int, h: np.ndarray) -> np.ndarray:
     """
     OQPSK baseband: RRC-filter I and Q rails separately, then delay Q by T/2.
 
@@ -83,33 +82,17 @@ def _oqpsk_baseband(bits: np.ndarray, symbols: np.ndarray,
     changes at each symbol boundary, reducing envelope variation.
     """
     n_sym = len(symbols)
-    I_syms = symbols.real
-    Q_syms = symbols.imag
 
     I_up = np.zeros(n_sym * sps)
     Q_up = np.zeros(n_sym * sps)
-    I_up[::sps] = I_syms
-    Q_up[::sps] = Q_syms
+    I_up[::sps] = symbols.real
+    Q_up[::sps] = symbols.imag
 
     I_filt = np.convolve(I_up, h, mode='same')
     Q_filt = np.convolve(Q_up, h, mode='same')
 
-    # Delay Q rail by half a symbol period
     half = sps // 2
     Q_delayed = np.zeros_like(Q_filt)
     Q_delayed[half:] = Q_filt[:-half]
 
     return (I_filt + 1j * Q_delayed).astype(complex)
-
-
-# ── Backward-compatible alias ─────────────────────────────────────────────────
-
-def rrc_bpsk_baseband(num_symbols: int, symbol_rate: float, sample_rate: float,
-                      rolloff: float = 0.35, filter_span: int = 10,
-                      seed: int | None = None,
-                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Legacy wrapper — returns (bb, t, symbols) for BPSK only."""
-    bb, t, bits, symbols = rrc_baseband(
-        "BPSK", num_symbols, symbol_rate, sample_rate, rolloff, filter_span, seed)
-    # Convert ±1 complex back to ±1 int for callers that expect the old signature
-    return bb, t, (symbols.real).astype(int)

@@ -1,5 +1,5 @@
 import numpy as np
-from .bpsk import rrc_baseband
+from .baseband import rrc_baseband
 from .filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive

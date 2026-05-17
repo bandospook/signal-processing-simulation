@@ -11,21 +11,31 @@
 7. [Example results](#7-example-results)
 8. [Sweep mode](#8-sweep-mode)
 9. [Adding or modifying carriers](#9-adding-or-modifying-carriers)
-10. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
-11. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
+10. [GUI](#10-gui)
+11. [Test suite](#11-test-suite)
+12. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
+13. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
 
 ---
 
 ## 1. What this tool does
 
-This simulation models a satellite or RF ground-station scenario where multiple BPSK carriers — potentially at very different symbol rates — share a single power amplifier. It lets you answer questions like:
+This simulation models a satellite or RF ground-station scenario where multiple
+carriers — potentially at very different symbol rates and modulations — share a single
+power amplifier. It lets you answer questions like:
 
-- How much intermodulation distortion (IMD) does the amplifier inject into each carrier at a given input backoff?
-- What is the carrier-to-interference ratio (CIR) and how does it compare to the carrier-to-noise ratio (CNR)?
+- How much intermodulation distortion (IMD) does the amplifier inject into each
+  carrier at a given input backoff?
+- What is the carrier-to-interference ratio (CIR) and how does it compare to the
+  carrier-to-noise ratio (CNR)?
 - At what IBO does BER become unacceptable for each carrier?
-- How does a passband channel impairment (amplitude ripple, phase nonlinearity) interact with the NL distortion?
+- How does a passband channel impairment (amplitude ripple, phase nonlinearity)
+  interact with the NL distortion?
+- How do EVM and BER track across a 2-D sweep of IBO and noise density?
 
-The simulation is fully deterministic (fixed seed), TOML-configured, and produces both console tables and PNG plots. No code changes are needed to explore new operating points.
+The simulation is fully deterministic (fixed seed), TOML-configured, and produces
+both console tables and PNG plots. No code changes are needed to explore new
+operating points.
 
 ---
 
@@ -34,9 +44,10 @@ The simulation is fully deterministic (fixed seed), TOML-configured, and produce
 ```
  Per carrier (native rate = sps × symbol_rate)
  ─────────────────────────────────────────────
-  Random BPSK symbols (+1 / −1)
+  Random symbols — modulation set per carrier
+  (BPSK / DBPSK / QPSK / OQPSK / 8PSK / 16QAM / 16APSK / 32APSK)
         │
-        ▼  RRC transmit filter  (bpsk.py)
+        ▼  RRC transmit filter  (baseband.py)
         │
         ▼  Channel impairment — optional  (filters.py)
         │    amplitude ripple: cosine across passband
@@ -56,9 +67,11 @@ The simulation is fully deterministic (fixed seed), TOML-configured, and produce
         │
         ▼  Nonlinear amplifier — AM-AM + AM-PM  (nonlinear_amplifier.py)
         │
-        ▼  Add wideband AWGN  (optional)
+        ▼  Add wideband AWGN — models receiver thermal noise
+        │  (AWGN is added AFTER the amp: satellite downlink model where
+        │   uplink noise is a separate link-budget item)
 
- Per carrier — extraction and receive
+ Per carrier — extraction and receive  (if sweep_demod = true)
  ─────────────────────────────────────
         ▼  Downconvert (multiply by exp(−j 2π f_c t))
         │
@@ -69,14 +82,30 @@ The simulation is fully deterministic (fixed seed), TOML-configured, and produce
         │
         ▼  Symbol sampling (1 sample / symbol)
         │
-        ▼  Hard BPSK decisions  →  BER
+        ▼  Hard decisions + phase-ambiguity resolution  →  BER
         │
         ▼  Metrics: EVM, CNR, CIR, CNIR  (simulation.py / receiver.py)
 ```
 
-**CNR / CIR / CNIR computation**
+### AWGN placement
 
-Three separate extractions are performed per carrier: from the NL input, the noiseless NL output, and the noisy NL output. A complex projection separates the deterministic AM-AM/AM-PM effect from the residual in-band IM distortion:
+AWGN is added after the nonlinear amplifier. This models a single-hop satellite
+downlink where thermal noise is primarily at the receiver. The uplink noise
+contribution (retransmitted by the transponder) is handled as a separate link budget
+item using the reciprocal sum:
+
+```
+1/(C/N)_total = 1/(C/N)_UL + 1/(C/N)_DL + 1/(C/N)_IM
+```
+
+Placing noise before the amp would couple the noise level to the IM products,
+making the noise-vs-distortion trade-off analysis ill-conditioned.
+
+### CNR / CIR / CNIR computation
+
+Three OLA downsampling extractions per carrier: pre-NL reference, post-NL noiseless,
+post-NL+noise. A complex projection separates the deterministic AM-AM/AM-PM effect
+from residual in-band IM distortion:
 
 ```
 α          = ⟨bb_rx, nl_pure⟩ / ⟨bb_rx, bb_rx⟩   (complex gain of desired component)
@@ -89,7 +118,8 @@ CNR  (dB)  = 10 log₁₀( P_signal / P_noise )
 CNIR (dB)  = 10 log₁₀( P_signal / (P_distortion + P_noise) )
 ```
 
-This correctly attributes AM-AM compression as a gain change rather than distortion, and is independent of absolute amplitude scaling.
+This correctly attributes AM-AM compression as a gain change rather than distortion,
+and is independent of absolute amplitude scaling.
 
 ---
 
@@ -114,8 +144,6 @@ uv sync          # creates .venv and installs numpy + matplotlib
 .\.venv\Scripts\Activate.ps1
 ```
 
-Your prompt will change to show `(signal-processing-simulation)`.
-
 ### Step 3 — Run with the default configuration
 
 ```powershell
@@ -124,17 +152,20 @@ python main.py
 
 This will:
 1. Print a metrics table to the console.
-2. Open interactive matplotlib windows showing the wideband PSD, amplifier curves, and channel responses.
-3. Save PNG files into the `output/` directory (created automatically; configurable via `output_dir` in `[output]`).
-4. If `[sweep]` is present in `simulation.toml`, run the full IBO × noise grid and save `sweep_results.png`.
+2. Open interactive matplotlib windows showing the wideband PSD, amplifier curves,
+   and channel responses.
+3. Save PNG files into the `output/` directory.
+4. If `[sweep]` is present, run the full IBO × noise grid and save
+   `sweep_results.png` and `sweep_table.md`.
 
-### Step 4 — Adjust the operating point
+### Step 4 — Use the GUI
 
-Open `simulation.toml` and change `input_backoff_db` under `[amplifier]` to a lower value (e.g., `1.0`) to drive the amplifier harder and observe increased distortion. Re-run `python main.py`.
+```powershell
+python gui.py
+```
 
-### Step 5 — Disable the sweep for faster iteration
-
-Comment out or remove the `[sweep]` block in `simulation.toml`. The single-point run completes in a few seconds; the full 5 × 4 sweep takes a couple of minutes.
+Load any `.toml` config, edit all parameters in a tabbed interface, save, and launch
+`main.py` with that config directly from the GUI. See [§10 GUI](#10-gui).
 
 ---
 
@@ -142,273 +173,306 @@ Comment out or remove the `[sweep]` block in `simulation.toml`. The single-point
 
 ```
 signal-processing-simulation/
-├── sim/                      ← all simulation modules (Python package)
-│   ├── bpsk.py
-│   ├── config.py
-│   ├── filters.py
-│   ├── nonlinear_amplifier.py
-│   ├── plots.py
-│   ├── receiver.py
-│   ├── simulation.py
-│   └── sweep.py
+├── sim/                      ← simulation package
+│   ├── baseband.py           ← multi-modulation RRC baseband generation
+│   ├── modulation.py         ← constellation definitions (all 8 modulations)
+│   ├── config.py             ← TOML loader
+│   ├── filters.py            ← RRC, OLA convolution, upsample/downsample, channel impairment
+│   ├── nonlinear_amplifier.py← memoryless AM-AM + AM-PM model
+│   ├── plots.py              ← all visualisation and sweep markdown report
+│   ├── receiver.py           ← matched filter, decisions, BER (phase-ambiguity resolved), EVM
+│   ├── simulation.py         ← full wideband signal chain, per-carrier metric extraction
+│   └── sweep.py              ← 2-D IBO × noise sweep
+├── tests/
+│   ├── test_awgn_performance.py  ← BER vs theory (see §11)
+│   ├── test_filters.py           ← RRC and OLA correctness
+│   ├── test_nonlinear_amplifier.py
+│   ├── test_main.py              ← end-to-end smoke test
+│   └── test_wideband.py          ← wideband simulation integration
 ├── docs/
-│   └── GUIDE.md              ← this file
-├── output/                   ← generated PNG files (created on first run)
-├── main.py                   ← entry point
+│   ├── GUIDE.md              ← this file
+│   ├── memory_scaling.md
+│   └── filter_analysis.md
+├── output/                   ← generated files (git-ignored)
+├── gui.py                    ← standalone TOML editor + launcher
+├── main.py                   ← CLI entry point
 ├── simulation.toml           ← configuration
 └── pyproject.toml
 ```
 
 | File | Role |
 |---|---|
-| `simulation.toml` | All simulation parameters — edit this to change scenarios |
-| `main.py` | Entry point: loads config, runs simulation, calls all plots |
-| `sim/config.py` | TOML loader (thin wrapper around `tomllib`) |
-| `sim/bpsk.py` | Generates RRC-filtered BPSK baseband signal at native rate |
-| `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample, channel impairment |
-| `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model using interpolated lookup tables |
-| `sim/simulation.py` | Orchestrates the full wideband signal chain and per-carrier metric extraction |
-| `sim/receiver.py` | Matched filter, symbol sampling, BPSK decisions, BER, EVM |
-| `sim/sweep.py` | 2-D parameter sweep over IBO × noise; calls `wideband_bpsk_simulation` repeatedly |
-| `sim/plots.py` | All visualisation: wideband PSD, amplifier curves, channel response, metrics table, sweep plots |
-
-### `sim/bpsk.py`
-
-Generates a complex baseband BPSK signal filtered through a root raised-cosine (RRC) transmit filter. Output is normalised to unit RMS power. Returns the signal, a time axis, and the underlying symbol sequence (used later for BER comparison).
-
-### `sim/filters.py`
-
-Four public functions:
-
-- **`rrc_coeffs`** — computes RRC filter taps for a given rolloff factor and samples-per-symbol. Both transmitter and receiver use this with the same parameters, so the combined response is a raised cosine with controlled ISI-free sample points.
-- **`ola_convolve`** — linear convolution via the FFT overlap-and-add algorithm. Used internally for efficiency when the signal is much longer than the filter.
-- **`fft_ola_upsample`** — inserts zeros then applies a Kaiser-windowed sinc anti-imaging filter. Upsamples from native to wideband rate.
-- **`fft_ola_downsample`** — applies a Kaiser-windowed sinc anti-alias filter (cutoff at new Nyquist, ≈80 dB stopband) then decimates. Prevents aliasing when extracting a narrowband carrier from the wideband composite.
-- **`apply_channel_impairment`** — applies per-carrier amplitude ripple and phase nonlinearity in the frequency domain before upsampling.
-
-### `sim/nonlinear_amplifier.py`
-
-A memoryless (no memory, instantaneous) nonlinear model. The input complex envelope is split into amplitude and phase. Amplitude is mapped through the AM-AM table (piecewise linear interpolation). A phase shift read from the AM-PM table is added. The model is parameterised entirely by the two lookup tables in `simulation.toml`.
-
-### `sim/simulation.py`
-
-The main computation loop. Calls all the above modules in order, then performs three OLA downsampling extractions per carrier (pre-NL reference, post-NL noiseless, post-NL+noise) and computes CNR/CIR/CNIR via the projection method described in §2. Returns a results dict consumed by `main.py`.
-
-### `sim/receiver.py`
-
-Implements the digital receive chain independently of the simulation waveform generation:
-
-- **`matched_filter`** — RRC filter (same coefficients as transmitter), group delay stripped.
-- **`symbol_sample`** — decimates to 1 sample per symbol at the correct timing phase.
-- **`bpsk_decide`** — hard decision on real part; returns ±1 array.
-- **`measure_ber`** — compares decisions against reference symbols, resolving the inherent BPSK 0/π phase ambiguity by testing both polarities.
-- **`measure_evm_rms`** — normalises received samples to unit RMS power, then computes the RMS distance from ideal ±1 constellation points, expressed as a percentage.
-- **`bpsk_receive`** — chains all of the above; returns `samples`, `decisions`, `ber`, `evm_rms`.
-
-### `sim/sweep.py`
-
-Runs `wideband_bpsk_simulation` on every point in the Cartesian product of `ibo_db_values × noise_density_dbfs_values`. Prints progress to the console. Returns a flat list of result dicts for `plot_sweep_results`.
+| `sim/baseband.py` | Generates RRC-filtered complex baseband signal for any supported modulation at native sample rate. Normalised to unit RMS power. |
+| `sim/modulation.py` | Constellation definitions, Gray coding, APSK ring ratios, `bits_per_symbol()`. All constellations normalised to unit average power. |
+| `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample (anti-alias Kaiser sinc), per-carrier channel impairments. |
+| `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model; piecewise linear interpolation of user-supplied lookup tables. |
+| `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set. Returns CNR/CIR/CNIR per carrier via projection method. |
+| `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
+| `sim/sweep.py` | 2-D sweep over IBO × noise; honours `sweep_demod` per carrier. |
+| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, `write_sweep_report` (markdown). |
 
 ---
 
 ## 5. Configuration reference
 
-All parameters live in `simulation.toml`. Sections and keys:
+All parameters live in `simulation.toml`. Large integers may use underscores
+(`2_000_000_000`); `tomllib` and the GUI serialiser both preserve this convention.
 
 ### `[simulation]`
 
 | Key | Type | Description |
 |---|---|---|
-| `seed` | int | Random seed for reproducible symbol sequences and noise. |
+| `seed` | int | Global random seed for reproducible symbol sequences and noise. |
 
 ### `[wideband]`
 
 | Key | Type | Description |
 |---|---|---|
 | `sample_rate` | int (Hz) | Common sample rate for the composite signal. Must be an integer multiple of every carrier's native rate (`sps × symbol_rate`). |
-| `noise_density_dbfs` | float (dBFS/Hz) | One-sided AWGN spectral density added after the amplifier. Total noise power = 10^(N₀/10) × sample_rate. Remove this key to disable noise entirely. |
+| `noise_density_dbfs` | float (dBFS/Hz) | One-sided AWGN PSD added **after** the amplifier. Total noise power = 10^(N₀/10) × sample_rate. Remove to disable noise. |
 
 ### `[amplifier]`
 
 | Key | Type | Description |
 |---|---|---|
-| `input_backoff_db` | float (dB) | Peak drive level relative to the saturation knee. 0 dB = peak signal reaches amplitude 1.0 on the AM-AM curve (full saturation). 3 dB = peak reaches 0.71 (typical backed-off operation). Higher values = more linear but less efficient. |
+| `input_backoff_db` | float (dB) | Peak drive level relative to saturation. 0 dB = full saturation; 3 dB = peak at 0.71 of saturation (typical). Higher = more linear, less efficient. |
 
-### `[amplifier.am_am]`
-
-| Key | Type | Description |
-|---|---|---|
-| `input` | float list | Input amplitude breakpoints (normalised, 0–1). |
-| `output` | float list | Corresponding output amplitudes. Must be the same length as `input`. Piecewise linear interpolation is used between breakpoints. |
-
-### `[amplifier.am_pm]`
+### `[amplifier.am_am]` and `[amplifier.am_pm]`
 
 | Key | Type | Description |
 |---|---|---|
-| `input` | float list | Input amplitude breakpoints (normalised, 0–1). |
-| `phase_deg` | float list | Phase shift in degrees at each amplitude. Positive = phase lead. |
+| `input` | float list | Normalised input amplitude breakpoints (0–1). |
+| `output` | float list | (am_am) Output amplitude at each breakpoint. |
+| `phase_deg` | float list | (am_pm) Phase shift in degrees at each amplitude. |
 
 ### `[ola]`
 
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `filter_span` | int | 16 | Half-span of the Kaiser-sinc interpolation filter in symbols. Larger values give better stopband rejection at the cost of longer computation. |
-| `block_size` | int | 4096 | FFT block size for the overlap-and-add convolution. Tune for memory/speed trade-off; must be a power of two for efficiency. |
+| Key | Default | Description |
+|---|---|---|
+| `filter_span` | 16 | Half-span of the Kaiser-sinc interpolation filter in symbols. Larger = better stopband, slower. |
+| `block_size` | 4096 | FFT block size for OLA convolution. Powers of two are most efficient. |
 
 ### `[output]`
 
-| Key | Type | Description |
-|---|---|---|
-| `output_dir` | string | Directory where all PNG files are written. Created automatically on first run. Defaults to `"output"`. |
-| `wideband` | string | Filename (inside `output_dir`) for the wideband PSD + per-carrier baseband PSD figure. |
-| `nl_tables` | string | Filename for the AM-AM / AM-PM characteristic plot. |
-| `sweep` | string | Filename for the sweep results figure. |
+| Key | Description |
+|---|---|
+| `output_dir` | Directory for all output files. Created automatically. |
+| `wideband` | Filename for the wideband PSD figure. |
+| `nl_tables` | Filename for the AM-AM/AM-PM plot. |
+| `sweep` | Filename for the sweep results PNG. |
+| `sweep_table` | Filename for the sweep markdown report. |
 
 ### `[sweep]`
 
-Remove this section entirely to disable the sweep. Both keys must be present and non-empty to trigger a sweep run.
+Remove this section to disable the sweep. Both keys required to trigger a run.
+
+| Key | Description |
+|---|---|
+| `ibo_db` | List of IBO values (dB) to sweep. |
+| `noise_density_dbfs` | List of noise densities (dBFS/Hz) to sweep. |
+
+### `[[carrier]]` (repeated block, one per carrier)
 
 | Key | Type | Description |
 |---|---|---|
-| `ibo_db` | float list | IBO values (dB) to sweep. |
-| `noise_density_dbfs` | float list | Noise density values (dBFS/Hz) to sweep. Every combination is run. |
-
-### `[[carrier]]` (repeat for each carrier)
-
-| Key | Type | Description |
-|---|---|---|
-| `name` | string | Label used in plots and the console table. |
-| `symbol_rate` | int (Hz) | Symbol rate. The carrier's native sample rate = `sps × symbol_rate`. |
-| `sps` | int | Samples per symbol at native rate. Must divide evenly into `sample_rate / symbol_rate`. |
-| `rolloff` | float | RRC rolloff factor (0–1). Occupied bandwidth ≈ `(1 + rolloff) × symbol_rate`. |
-| `filter_span` | int | RRC filter length in symbols (both TX and RX use this). |
-| `num_symbols` | int | Number of BPSK symbols to generate. Longer sequences give more stable BER estimates but increase memory. |
-| `power_db` | float (dB) | Carrier power relative to the 0 dB reference carrier. Used to set the carrier-to-carrier power ratio before the amplifier. The composite is peak-normalised before the NL, so this controls the *ratio* between carriers, not the absolute level. |
-| `freq` | int (Hz) | Centre frequency in the wideband spectrum. Carriers must not overlap: check that `|f_a − f_b| > ((1+rolloff_a)×sr_a + (1+rolloff_b)×sr_b) / 2` for each pair. |
+| `name` | string | Label used in plots and console. |
+| `modulation` | string | One of: `BPSK`, `DBPSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. Defaults to `BPSK` if omitted. |
+| `symbol_rate` | int (Hz) | Symbol rate. Native sample rate = `sps × symbol_rate`. |
+| `sps` | int | Samples per symbol at native rate. |
+| `rolloff` | float | RRC rolloff factor (0–1). Occupied BW ≈ `(1+rolloff) × symbol_rate`. |
+| `filter_span` | int | RRC filter half-span in symbols (TX and RX use the same value). Total taps = `filter_span × sps + 1`. |
+| `num_symbols` | int | Symbols to generate. More = better BER statistics, more memory. |
+| `power_db` | float (dB) | Carrier power relative to the 0 dB reference. Controls inter-carrier ratio before the amp; the composite is peak-normalised before the NL. |
+| `freq` | int (Hz) | Centre frequency in the wideband spectrum. Carriers must not overlap. |
+| `sweep_demod` | bool | If `false`, skip demodulation and metrics for this carrier during sweep (default `true`). The carrier still appears in the composite and contributes to IM products. |
 
 ### `[carrier.channel]` (optional, per carrier)
 
-Remove this subsection or set `enabled = false` to bypass channel impairments for that carrier.
-
-| Key | Type | Description |
-|---|---|---|
-| `enabled` | bool | Master enable. Set to `false` to bypass all impairments without removing the block. |
-| `ripple_db` | float (dB) | Peak-to-peak amplitude ripple across the passband. Realised as a cosine: `A(f) = 1 + r·cos(π·cycles·f_norm)`. |
-| `ripple_cycles` | float | Number of complete ripple cycles across the signal bandwidth (from −BW/2 to +BW/2). 1.0 = one full cycle, 2.0 = two cycles, etc. |
-| `max_phase_dev_deg` | float (°) | Peak phase deviation from linear phase at the band edge. |
-| `phase_poly_order` | int | Polynomial order of the phase shape vs normalised frequency. 2 = quadratic (even symmetry). |
-| `plot` | string | Filename for the channel impairment response plot for this carrier. |
+| Key | Description |
+|---|---|
+| `enabled` | Master enable. `false` = bypass all impairments. |
+| `ripple_db` | Peak-to-peak amplitude ripple across passband (dB). |
+| `ripple_cycles` | Number of complete ripple cycles across the signal bandwidth. |
+| `max_phase_dev_deg` | Peak phase deviation from linear phase at band edge (°). |
+| `phase_poly_order` | Polynomial order of the phase shape (2 = quadratic). |
+| `plot` | Filename for the channel impairment response plot. |
 
 ---
 
 ## 6. Output files
 
-Running `python main.py` with the default configuration writes all PNG files into the `output/` directory (configured via `output_dir` in `[output]`; created automatically if it does not exist).
-
 | File | Contents |
 |---|---|
-| `output/wideband_bpsk.png` | **Top row**: wideband PSD (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised noise floor between and around the carriers. **Bottom row**: one panel per carrier showing the baseband PSD before and after the NL, so in-band distortion is directly visible. |
-| `output/amplifier_nl.png` | AM-AM and AM-PM curves with the peak operating point (determined by IBO) marked in red. A large gap between the AM-AM curve and the ideal linear line indicates significant compression. |
-| `output/channel_slow.png` | Amplitude ripple (dB vs MHz) and phase nonlinearity (° vs MHz) across the slow carrier's passband. |
-| `output/channel_fast.png` | Same as above for the fast carrier. |
-| `output/sweep_results.png` | Three columns per carrier row: BER vs IBO, EVM vs IBO, and CNR/CIR/CNIR vs IBO. Multiple curves (one per noise level) are colour-coded. Points where BER = 0 (no errors observed) are omitted from the log-scale BER plot. |
+| `output/wideband.png` | Wideband PSD (pre-NL, post-NL, post-NL+noise) plus per-carrier baseband PSD panels. Spectral regrowth from the NL amplifier is visible as raised floor between carriers. |
+| `output/amplifier_nl.png` | AM-AM and AM-PM curves with peak operating point (red marker). |
+| `output/channel_<name>.png` | Amplitude ripple and phase nonlinearity across each carrier's passband. |
+| `output/sweep_results.png` | Per-carrier rows: BER vs IBO, EVM vs IBO, CNR/CIR/CNIR vs IBO. Multiple noise levels colour-coded. |
+| `output/sweep_table.md` | Markdown report: configuration summary, performance summary (min/max ranges), full IBO × noise grid table. |
 
 ---
 
 ## 7. Example results
 
-The following output is produced by `python main.py` with the default `simulation.toml` (IBO = 3.0 dB, noise density = −160 dBFS/Hz, two carriers).
-
 ### Console metrics table
 
 ```
----------------------------------------------------------------
-Carrier     CNR (dB)  CIR (dB)  CNIR (dB)  EVM (%)          BER
----------------------------------------------------------------
-slow            78.9      48.1       48.1     4.84            0
-fast            65.8      40.8       40.8     3.33            0
----------------------------------------------------------------
+Carrier     CNR (dB)  CIR (dB)  CNIR (dB)  EVM (%)  BER
+slow            78.9      48.1       48.1     4.84    0.000
+fast            65.8      40.8       40.8     3.33    0.000
 ```
 
 **Interpreting these numbers:**
 
-- **CNR 79 / 66 dB** — The noise density of −160 dBFS/Hz is very low relative to the carrier power, so thermal noise is negligible. If you raise `noise_density_dbfs` toward −140 dBFS/Hz, CNR will drop and eventually dominate CNIR.
-- **CIR 48 / 41 dB** — At 3 dB IBO the amplifier is not saturating heavily, but in-band IM distortion is already measurable. Reducing IBO to 1 dB will drop CIR noticeably; increasing it to 6 dB will raise it.
-- **CNIR ≈ CIR** — Because CNR >> CIR here, distortion is the dominant impairment. CNIR will only diverge significantly from CIR when noise and distortion are of comparable power.
-- **EVM 4.8 / 3.3%** — Includes both amplitude/phase distortion from the NL and the channel impairments. The slow carrier sees slightly higher EVM because its channel has larger ripple and phase deviation (0.5 dB / 5°) versus the fast carrier (0.3 dB / 3°).
-- **BER = 0** — At this operating point no bit errors occur in 500 / 10 000 symbols. Drive the amplifier harder (IBO = 0–1 dB) or increase noise to push the system into error.
-
-### What to check if results look wrong
-
-| Symptom | Likely cause |
-|---|---|
-| BER = 0.5 for all IBO values | Timing or phase error — check `sps` and `filter_span` are consistent with symbol generation |
-| CIR does not change with IBO | AM-AM table is linear (output ≈ input); add compression by reducing high-amplitude output values |
-| CNR unchanged when `noise_density_dbfs` is varied | Noise may be disabled (key absent) or the noise level is far below CIR — look at the raw power difference |
-| `ValueError: upsample factor ... is not an integer` | `sample_rate` is not an integer multiple of `sps × symbol_rate` for one of the carriers |
-| Wideband PSD shows carrier overlap | Carrier centre frequencies are too close; increase separation or reduce rolloff |
+- **CNR 79/66 dB** — Noise density of −160 dBFS/Hz is far below the carrier power;
+  thermal noise is negligible. Raise `noise_density_dbfs` toward −140 dBFS/Hz to
+  bring CNR into the picture.
+- **CIR 48/41 dB** — At 3 dB IBO the amp is moderately backed off; measurable but
+  not severe IM distortion. Reduce IBO to 1 dB to drop CIR sharply.
+- **CNIR ≈ CIR** — Distortion-limited regime; noise is not yet a factor.
+- **EVM 4.8/3.3%** — Includes NL distortion and channel impairments. The slow
+  carrier has larger ripple (0.5 dB vs 0.3 dB) hence slightly higher EVM.
+- **BER = 0** — No errors in the simulated symbols. Drive harder (IBO = 0–1 dB)
+  or increase noise to push into error.
 
 ---
 
 ## 8. Sweep mode
 
-The sweep runs the full simulation on every (IBO, noise) pair in the Cartesian product of the two lists in `[sweep]`. Progress is printed to the console:
+The sweep runs the full simulation on every (IBO, noise) pair in the Cartesian
+product of the two lists in `[sweep]`. Only carriers with `sweep_demod = true`
+have demodulation performed at each sweep point; others contribute to the wideband
+IM environment but their BER/EVM are not computed, saving significant time.
 
-```
-Running sweep: 5 IBO × 4 noise = 20 points …
-  [ 1/20] IBO=0.0 dB  noise=-180.0 dBFS/Hz  done
-  [ 2/20] IBO=0.0 dB  noise=-165.0 dBFS/Hz  done
-  ...
-  [20/20] IBO=6.0 dB  noise=-140.0 dBFS/Hz  done
-```
-
-**Sweep plot layout** (`sweep_results.png`):
-
-- One row of subplots per carrier.
-- Column 1: BER vs IBO (log scale). Points where BER = 0 are omitted.
-- Column 2: EVM (%) vs IBO.
-- Column 3: CNR (solid), CIR (dashed), and CNIR (dotted) vs IBO. Each noise level gets a distinct colour from the viridis colourmap.
-
-**Typical sweep behaviour to expect:**
-
-- As IBO decreases toward 0 dB: CIR drops steeply, EVM rises, BER eventually appears. CNR is unchanged (it depends only on noise level and signal power, not on IBO directly).
-- As noise density increases (less negative): CNR drops. At high noise levels, CNIR tracks CNR rather than CIR, meaning the system becomes noise-limited rather than distortion-limited.
-- The crossover point where CNR ≈ CIR is the most sensitive operating region — small changes in either IBO or noise level produce large changes in BER.
-
-**To disable the sweep**, remove the `[sweep]` section from `simulation.toml` or delete both keys. The single-point run (which still computes all metrics) completes in a few seconds.
+**Markdown report** (`sweep_table.md`) contains:
+- Configuration summary (IBO range, noise range, carrier list)
+- Performance summary (min/max BER, EVM, CNIR across the grid)
+- Full table of every IBO × noise combination
 
 ---
 
 ## 9. Adding or modifying carriers
 
-Each `[[carrier]]` block in `simulation.toml` adds one signal to the composite. The constraints are:
+**Constraints:**
 
-1. **Integer upsample factor**: `sample_rate` must be an exact integer multiple of `sps × symbol_rate`. For example, with `sample_rate = 2_000_000_000`, a carrier with `symbol_rate = 5_000_000` and `sps = 10` has native rate 50 MHz and upsample factor 40 — valid. A `symbol_rate = 3_000_000` with `sps = 10` gives native rate 30 MHz and factor 66.67 — invalid.
+1. **Integer upsample factor** — `sample_rate` must be an exact integer multiple of
+   `sps × symbol_rate`. E.g., at 2 GHz, `symbol_rate=5_000_000` with `sps=10`
+   gives native rate 50 MHz and factor 40 (valid). `symbol_rate=3_000_000` gives
+   factor 66.67 (invalid → `ValueError`).
 
-2. **No spectral overlap**: carriers must not overlap in the wideband spectrum. A carrier at frequency `f` occupies roughly `[f − (1+rolloff)·sr/2, f + (1+rolloff)·sr/2]`. Check all pairs.
+2. **No spectral overlap** — each carrier occupies roughly
+   `[freq − (1+rolloff)·sr/2, freq + (1+rolloff)·sr/2]`. Check all pairs.
 
-3. **Wideband bandwidth**: all carriers must fit within `[−sample_rate/2, +sample_rate/2]`. At 2 GHz, that is ±1 GHz.
+3. **Within wideband bandwidth** — all carriers must fit within
+   `[−sample_rate/2, +sample_rate/2]`.
 
-### Example: adding a third carrier
+### Example: adding a 16QAM carrier
 
 ```toml
 [[carrier]]
 name        = "medium"
-symbol_rate = 5_000_000        # 5 Msym/s
-sps         = 8                # native rate = 40 MHz; upsample factor = 50
+modulation  = "16QAM"
+symbol_rate = 5_000_000
+sps         = 8
 rolloff     = 0.25
 filter_span = 10
-num_symbols = 2500
-power_db    = -3.0             # 3 dB below the reference carriers
-freq        = -500_000_000     # −500 MHz centre frequency
+num_symbols = 5_000
+power_db    = 0
+freq        = -500_000_000
+sweep_demod = true
 
 [carrier.channel]
-enabled           = true
-ripple_db         = 0.2
-ripple_cycles     = 1.0
-max_phase_dev_deg = 2.0
-phase_poly_order  = 2
-plot              = "channel_medium.png"
+enabled           = false
 ```
 
-Re-run `python main.py`; the new carrier will automatically appear in the wideband PSD, the metrics table, and the sweep plots.
+---
+
+## 10. GUI
+
+`gui.py` is a standalone tkinter application. It does not import any `sim/` modules —
+it reads and writes `simulation.toml` directly.
+
+**Tabs:**
+
+| Tab | Contents |
+|---|---|
+| General | Wideband sample rate, noise density, OLA parameters, simulation seed |
+| Amplifier | IBO, AM-AM table (input/output columns), AM-PM table (input/phase_deg columns) |
+| Sweep & Output | IBO sweep list, noise sweep list, output directory and filenames |
+| Carriers | One expandable frame per carrier; all per-carrier parameters including `sweep_demod` checkbox and per-carrier channel impairment config |
+
+**Launching the simulation:**
+
+The "Run Simulation" button saves the current config to the loaded TOML path and
+launches `main.py` with that path as a command-line argument, so the simulation
+always uses the values shown in the GUI.
+
+---
+
+## 11. Test suite
+
+Run all tests:
+
+```powershell
+python -m pytest
+```
+
+Run with coverage:
+
+```powershell
+python -m pytest --cov=sim --cov-report=term-missing
+```
+
+### `tests/test_awgn_performance.py`
+
+The primary validation suite for the modulation and receiver chain. All tests operate
+in an isolated AWGN channel (no nonlinear amplifier) to verify the baseband and
+receiver modules independently.
+
+| Test | What it checks | Why it matters |
+|---|---|---|
+| `test_ber_monotone[MOD]` | BER strictly decreases as Eb/N0 increases over 5 points | Catches sign errors, inverted noise, or sampling timing bugs |
+| `test_ber_matches_theory[MOD]` | Measured BER is within 2× of theory at one mid-range SNR point | Confirms the noise model and symbol count are calibrated |
+| `test_ber_theory_table` | Interpolation-based Eb/N0 vs BER comparison across 5 target BER levels for 6 modulations; writes `tests/plots/performance/theory_comparison.md` | Quantifies implementation loss across the full BER range; catches systematic offsets |
+| `test_generate_performance_plots` | Generates BER-vs-Eb/N0 and EVM-vs-Eb/N0 plots with 1/2/3σ uncertainty bands; writes PNGs to `tests/plots/performance/` | Visual regression reference; sigma bands show where statistical confidence is meaningful |
+
+**Theory formulas used:**
+
+| Modulation | BER formula | Notes |
+|---|---|---|
+| BPSK, QPSK, OQPSK | `0.5 · erfc(√(Eb/N0))` | Same formula; curves are identical |
+| DBPSK | `2p(1−p)`, `p = 0.5·erfc(√(Eb/N0))` | Coherent detection + differential decoding; NOT the differentially-coherent `0.5·exp(−Eb/N0)` |
+| 8PSK | `(1/3)·erfc(√(3·Eb/N0)·sin(π/8))` | Approximate for Gray-coded 8PSK |
+| 16QAM | `(3/8)·erfc(√(2·Eb/N0/5))` | Standard rectangular 16QAM |
+| 16APSK, 32APSK | No closed form | Only monotonicity tested |
+
+**Symbol count and confidence:**
+
+Both `test_ber_theory_table` and `test_generate_performance_plots` use the same
+`_N_BITS_PLOT` constant with `n_sym = _N_BITS_PLOT // bps` per modulation, ensuring
+equal statistical confidence across all modulations. Current default: `10_000` bits
+(≈4 s total). For a rigorous run set `_N_BITS_PLOT = 1_000_000`; this gives ±0.001
+BER accuracy at 95% confidence (worst-case p=0.5 derivation:
+N = (1.96/0.001)² × 0.25 = 960,400 → rounded to 1,000,000).
+
+### `tests/test_filters.py`
+
+Verifies RRC filter properties (Nyquist criterion: zero ISI at symbol samples),
+OLA convolution accuracy (result matches `np.convolve`), and channel impairment
+transfer functions.
+
+### `tests/test_nonlinear_amplifier.py`
+
+Verifies AM-AM and AM-PM table lookup, interpolation at breakpoints, saturation
+behaviour, and that a linear AM-AM table produces no phase distortion.
+
+### `tests/test_main.py`
+
+End-to-end smoke test: mocks `load_config` with a minimal two-carrier config, runs
+`main()`, and asserts the expected output PNGs are written. Catches import errors,
+config-loading regressions, and broken output paths.
+
+### `tests/test_wideband.py`
+
+Integration tests on the full `wideband_bpsk_simulation` function: checks that CNR
+varies correctly with noise density, CIR varies with IBO, and that disabling
+`demod_carriers` returns NaN placeholders without affecting the wideband signal.

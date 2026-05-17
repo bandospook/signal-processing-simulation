@@ -5,6 +5,13 @@ metadata:
   type: project
 ---
 
+## Immediate resume point (2026-05-16)
+
+Local commit `f33b53b` ("Add session memory") is ready but NOT yet pushed. Push failed with GitHub auth error. User is installing `gh` CLI to fix auth. Once done:
+1. Run `gh auth login` (or confirm auth is working)
+2. Run `git push origin master`
+3. Then proceed to `tests/test_awgn_performance.py` (see "Immediately next task" below)
+
 ## What was just completed (committed and pushed to master)
 
 Commit `e0d771f`: Multi-modulation support — DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK

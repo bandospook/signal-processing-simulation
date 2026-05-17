@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 
 
 def psd_db(sig: np.ndarray, fs: float,
@@ -163,7 +162,7 @@ def plot_sweep_results(sweep_results: list[dict],
     n_carriers = len(carrier_names)
     n_noise       = len(noise_vals)
 
-    colours = cm.viridis(np.linspace(0.15, 0.85, n_noise))
+    colours = plt.colormaps["viridis"](np.linspace(0.15, 0.85, n_noise))
 
     fig, axes = plt.subplots(n_carriers, 3,
                              figsize=(15, 4.5 * n_carriers),

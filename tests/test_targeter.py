@@ -1,9 +1,11 @@
 """Tests for sim/targeter.py: BER seeker and implementation-loss reporting."""
 
-import math
 import pytest
 
-from sim.targeter import _n_bits_for_ci, seek_ber_noise_level
+from sim.targeter import (
+    _n_bits_for_ci, _erfinv, _simulate_ber_at_noise,
+    seek_ber_noise_level, seek_all_carriers,
+)
 
 # ----------------------------------------------------------------------------
 # Shared fixtures
@@ -209,3 +211,137 @@ def test_invalid_bracket_hi_too_quiet():
             n_final_seeds=1,
             seed=0,
         )
+
+
+# ----------------------------------------------------------------------------
+# Unit tests: _erfinv edge cases
+# ----------------------------------------------------------------------------
+
+def test_erfinv_zero():
+    assert _erfinv(0.0) == 0.0
+
+
+def test_erfinv_negative_symmetric():
+    import math
+    pos = _erfinv(0.5)
+    neg = _erfinv(-0.5)
+    assert abs(neg + pos) < 1e-9
+    assert abs(math.erf(pos) - 0.5) < 1e-9
+
+
+# ----------------------------------------------------------------------------
+# Error paths: unknown carrier name
+# ----------------------------------------------------------------------------
+
+def test_simulate_ber_at_noise_bad_carrier():
+    with pytest.raises(ValueError, match="not found"):
+        _simulate_ber_at_noise(
+            noise_dbfs=-70.0,
+            carrier_name="missing",
+            carriers=[_CARRIER],
+            sample_rate=_SAMPLE_RATE,
+            am_am_cfg=_LINEAR_AM_AM,
+            am_pm_cfg=_LINEAR_AM_PM,
+            input_backoff_db=0.0,
+            ola_filter_span=_OLA_SPAN,
+            ola_block_size=_OLA_BLOCK,
+            n_bits=100,
+            seeds=[0],
+        )
+
+
+def test_seek_ber_bad_carrier():
+    with pytest.raises(ValueError, match="not found"):
+        seek_ber_noise_level(
+            target_ber=_TARGET_BER,
+            confidence=_CONFIDENCE,
+            ber_accuracy=_ACCURACY,
+            carrier_name="missing",
+            carriers=[_CARRIER],
+            sample_rate=_SAMPLE_RATE,
+            am_am_cfg=_LINEAR_AM_AM,
+            am_pm_cfg=_LINEAR_AM_PM,
+            noise_lo_dbfs=_NOISE_LO,
+            noise_hi_dbfs=_NOISE_HI,
+            ola_filter_span=_OLA_SPAN,
+            ola_block_size=_OLA_BLOCK,
+            max_iter=4,
+            n_final_seeds=1,
+            seed=0,
+        )
+
+
+# ----------------------------------------------------------------------------
+# Progress callback is invoked
+# ----------------------------------------------------------------------------
+
+def test_seek_ber_progress_callback():
+    calls: list[float] = []
+    seek_ber_noise_level(
+        target_ber=_TARGET_BER,
+        confidence=_CONFIDENCE,
+        ber_accuracy=_ACCURACY,
+        carrier_name="tgt",
+        carriers=[_CARRIER],
+        sample_rate=_SAMPLE_RATE,
+        am_am_cfg=_LINEAR_AM_AM,
+        am_pm_cfg=_LINEAR_AM_PM,
+        noise_lo_dbfs=_NOISE_LO,
+        noise_hi_dbfs=_NOISE_HI,
+        ola_filter_span=_OLA_SPAN,
+        ola_block_size=_OLA_BLOCK,
+        max_iter=_MAX_ITER,
+        n_final_seeds=_N_SEEDS,
+        seed=2,
+        progress_callback=lambda frac, _msg: calls.append(frac),
+    )
+    assert len(calls) > 0
+    assert all(0.0 <= f <= 1.0 for f in calls)
+
+
+# ----------------------------------------------------------------------------
+# seek_all_carriers: filtering and result shape
+# ----------------------------------------------------------------------------
+
+_SEEK_CARRIER = dict(_CARRIER, use_seeker=True)
+
+_SEEK_KWARGS = dict(
+    sample_rate=_SAMPLE_RATE,
+    am_am_cfg=_LINEAR_AM_AM,
+    am_pm_cfg=_LINEAR_AM_PM,
+    ola_filter_span=_OLA_SPAN,
+    ola_block_size=_OLA_BLOCK,
+    noise_lo_dbfs=_NOISE_LO,
+    noise_hi_dbfs=_NOISE_HI,
+    max_iter=_MAX_ITER,
+    n_final_seeds=_N_SEEDS,
+    seed=3,
+    target_ber=_TARGET_BER,
+    confidence=_CONFIDENCE,
+    ber_accuracy=_ACCURACY,
+)
+
+
+def test_seek_all_carriers_empty_list():
+    assert seek_all_carriers(carriers=[], **_SEEK_KWARGS) == {}
+
+
+def test_seek_all_carriers_skips_non_seekable():
+    non_seekable = [
+        dict(_CARRIER, name="c1", sweep_demod=False, use_seeker=True),
+        dict(_CARRIER, name="c2", sweep_demod=True,  use_seeker=False),
+        dict(_CARRIER, name="c3", enabled=False,     sweep_demod=True, use_seeker=True),
+    ]
+    assert seek_all_carriers(carriers=non_seekable, **_SEEK_KWARGS) == {}
+
+
+def test_seek_all_carriers_single_seekable():
+    cb_calls: list[float] = []
+    result = seek_all_carriers(
+        carriers=[_SEEK_CARRIER],
+        progress_callback=lambda f, _m: cb_calls.append(f),
+        **_SEEK_KWARGS,
+    )
+    assert set(result.keys()) == {"tgt"}
+    assert "ber" in result["tgt"]
+    assert len(cb_calls) > 0

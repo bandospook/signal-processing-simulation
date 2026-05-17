@@ -1,64 +1,97 @@
+# Technical Notes
+
+Key implementation decisions -- the non-obvious stuff that isn't in the code comments.
+
 ---
-name: technical-notes
-description: Non-obvious implementation decisions, bug fixes, and key formulas
-metadata:
-  type: project
+
+## AWGN placement: noise AFTER the amplifier
+
+sim/simulation.py adds AWGN after the nonlinear amplifier. This models a single-hop
+satellite downlink where thermal noise is primarily at the receiver.
+
+Why it matters: If noise is placed before the amp, C/I shifts with noise level,
+breaking the "C/I constant" assumption the BER seeker depends on. Noise after amp means
+C/I is determined solely by IBO and signal statistics.
+
 ---
 
-## RMS normalisation before nearest-neighbour decision
+## DBPSK theory formula -- coherent + differential, NOT differentially-coherent
 
-`receive()` in `sim/receiver.py` normalises received symbol samples to unit RMS before calling `decide()`. This is **required** for multi-amplitude constellations (16QAM, 16APSK, 32APSK). The baseband generator normalises the full signal's RMS (not individual symbol amplitudes), so after the matched filter the samples are scaled by a factor k ≠ 1 relative to the unit-power constellation. Without normalisation, decision boundaries are misplaced and BER is catastrophic.
+    BER = 2 * p * (1 - p),   p = 0.5 * erfc(sqrt(Eb/N0))
 
-PSK constellations (BPSK, QPSK, 8PSK) are immune because all symbols are equidistant from the origin — scale doesn't shift which quadrant a symbol lands in.
+NOT 0.5 * exp(-Eb/N0) (the differentially-coherent formula).
 
-## APSK 12-point rings must use natural angular order
+Why: The simulation uses a coherent RRC matched filter followed by differential
+decoding of hard symbol decisions. A single symbol error flips two decoded bits -> BER ~= 2p.
+The exp(-Eb/N0) formula applies to a receiver that makes decisions purely from phase
+differences (no matched filter) -- about 3 dB worse. Wrong formula = 3 dB offset in IL.
 
-`_gray_decode(k)` for k in 0..11 produces values in 0..14, not 0..11. Values ≥ 12 wrap (e.g., gray_decode(8)=12 → 12×π/6=2π=0°, a duplicate). This creates only 8 unique outer ring points instead of 12, causing 4 bit patterns to be unreachable from nearest-neighbour decisions → catastrophic BER.
+---
 
-Fix: use `np.arange(12) * np.pi / 6` (natural angular order) for all 12-point rings (16APSK outer, 32APSK mid). Gray coding only applies to power-of-2 ring sizes.
+## CNIR -> Eb/N0 conversion (includes sps factor -- easy to get wrong)
 
-## Circular convolution in apply_channel_impairment
+CNIR in simulation.py is measured at the native sample rate (sps samples/symbol),
+before matched filtering. Converting to Eb/N0 per bit:
 
-The DFT multiplication in `apply_channel_impairment` (sim/filters.py) implements circular convolution. A cosine ripple in frequency = a delay tap in time; without zero-padding, that tap wraps around. Fixed by zero-padding to length `ceil(ripple_cycles * sample_rate / signal_bw) + 8` before the DFT.
+    effective_ebn0_db = cnir_db + 10 * log10(sps / bps)
 
-## RRC filter normalisation and the Es/N0 noise formula
+Why sps matters: noise power at native rate = `noise_density * sps * symbol_rate`.
+Theory `Eb/N0 = signal_power / (bps * symbol_rate * noise_density)`.
+Ratio = `CNIR * sps / bps`. For BPSK sps=4: +6 dB correction.
+Forgetting this produces a systematic -6 dB implementation loss on a linear amplifier.
 
-The RRC filter from `rrc_coeffs` has unit energy: `sum(h**2) = 1`.
+---
 
-For baseband normalised to unit RMS power, with symbol_rate = 1, sample_rate = sps:
-- Es = signal_power / symbol_rate = 1
-- N0 = 2*sigma_c^2 / sample_rate = 2*sigma_c^2 / sps
-- Es/N0 = sps / (2*sigma_c^2)
+## Implementation loss definition
 
-To add AWGN at a desired Es/N0:
-```python
-sigma_c = np.sqrt(sps / (2.0 * EsN0_linear))
-noise = sigma_c * rng.standard_normal(N) + 1j * sigma_c * rng.standard_normal(N)
-```
+    IL_dB = effective_Eb/N0_dB - theory_Eb/N0_dB(at_measured_BER)
 
-After the matched filter pair (RRC ⊗ RRC = raised cosine), symbol amplitude at decision = sqrt(sps). BER_BPSK = Q(sqrt(sps)/sigma_c) = Q(sqrt(2*EsN0)) = Q(sqrt(2*EbN0)) ✓.
+Uses C/(N+I) not C/N so that with no nonlinearity (I=0) the loss is zero.
 
-The receiver's RMS normalisation doesn't affect SNR (it scales both signal and noise equally).
+---
 
-## Phase ambiguity resolution
+## BER seeker algorithm (sim/targeter.py)
 
-`_ber_with_ambiguity` (sim/receiver.py) tries all N rotationally equivalent orientations of received samples and returns the minimum BER. This handles systematic AM-PM phase shift without carrier recovery.
+Bisects noise_density_dbfs to achieve a target BER for a named carrier.
+Higher noise_dbfs -> higher BER. Raises ValueError if bracket is invalid.
 
-`rotational_symmetry` values: BPSK=2, DBPSK=1, QPSK=4, OQPSK=4, 8PSK=8, 16QAM=4, 16APSK=4, 32APSK=4.
+Steps:
+  1. Bracket check -- 1 seed, n_bits_initial = max(500, n_bits_final // 32)
+  2. Bisection -- n_bits doubles every 2 steps; stop when hi - lo < 0.05 dB
+  3. Final measurement -- pool n_final_seeds at converged noise; normal-approx CI
 
-DBPSK=1 because differential decoding already removes the 180° flip.
+N_bits formula: N = ceil((z / accuracy)^2 * p * (1-p))
+  where z = sqrt(2) * erfinv(confidence).
 
-## OQPSK baseband and reception
+Note: math.erfinv not in stdlib (even Python 3.14); _erfinv() bisects math.erf.
 
-TX: I and Q rails are pulse-shaped separately; Q is delayed by sps//2 samples before combining.
-RX: Sample I at `mf.real[0::sps]` and Q at `mf.imag[sps//2::sps]`, then combine into complex.
+seek_all_carriers filters: enabled=True AND sweep_demod=True AND use_seeker=True.
+Non-seekable carriers still contribute to wideband IM.
 
-## scipy is NOT a dependency
+---
 
-Use `math.erfc` or `numpy`-only Q-function: `Q = lambda x: 0.5 * erfc(x / sqrt(2))`.
-```python
-from math import erfc
-import numpy as np
-def _q(x): return 0.5 * erfc(float(x) / np.sqrt(2))
-```
-For array inputs, use a vectorized version.
+## BPSK / QPSK / OQPSK share the same theory BER curve
+
+All three: BER = 0.5 * erfc(sqrt(Eb/N0)). The BER plot draws the dashed theory line
+once via the _BPSK_EQUIV set to avoid duplicate legend entries.
+
+---
+
+## Filter span convention
+
+filter_span in carrier config = RRC filter half-span in symbols.
+Total filter length = filter_span * sps + 1 taps.
+
+---
+
+## matplotlib colormaps
+
+Use plt.colormaps["viridis"](...) not cm.viridis(...). Newer matplotlib type stubs
+don't expose colormaps as direct attributes of matplotlib.cm.
+
+---
+
+## np.real() / np.imag() -- use function form
+
+Use np.real(x) not x.real. Pylance's numpy stubs have broken overloads for the
+property form on ndarray[Any, dtype[Any]].

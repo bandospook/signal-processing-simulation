@@ -1,6 +1,5 @@
 """Tests for OLA convolution, upsampling, downsampling, and channel impairment."""
 import numpy as np
-import pytest
 from sim.filters import (ola_convolve, fft_ola_upsample, fft_ola_downsample,
                           apply_channel_impairment)
 

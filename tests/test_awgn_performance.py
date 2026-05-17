@@ -294,7 +294,7 @@ def _plot_ber(sweep: dict) -> None:
 def _plot_evm(sweep: dict) -> None:
     fig, ax = plt.subplots(figsize=(9, 6))
     for i, (mod, d) in enumerate(sweep.items()):
-        ax.plot(d["ebn0"], d["evms"], f"-o", color=f"C{i}", markersize=3, label=mod)
+        ax.plot(d["ebn0"], d["evms"], "-o", color=f"C{i}", markersize=3, label=mod)
     ax.set_xlabel("Eb/N0 (dB)")
     ax.set_ylabel("EVM RMS (%)")
     ax.set_title("EVM vs Eb/N0")

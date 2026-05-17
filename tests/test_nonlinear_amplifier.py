@@ -1,6 +1,5 @@
 """Tests for sim.nonlinear_amplifier: AM-AM, AM-PM, and IMD vs drive level."""
 import numpy as np
-import pytest
 from sim.nonlinear_amplifier import nonlinear_amplifier
 
 # Production curves from simulation.toml

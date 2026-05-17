@@ -15,17 +15,20 @@ _AM_PM = {
 }
 
 
-def _make_cfg(tmp_path):
+def _make_cfg(tmp_path, extra_carriers=None):
+    carriers = [
+        dict(name="c1", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
+             num_symbols=100, power_db=0.0, freq=-3e6,
+             channel=dict(enabled=True, ripple_db=0.5, ripple_cycles=2.0,
+                          max_phase_dev_deg=5.0, phase_poly_order=2,
+                          plot="channel_c1.png")),
+        dict(name="c2", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
+             num_symbols=100, power_db=0.0, freq=+3e6),
+    ]
+    if extra_carriers:
+        carriers.extend(extra_carriers)
     return {
-        "carrier": [
-            dict(name="c1", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-                 num_symbols=100, power_db=0.0, freq=-3e6,
-                 channel=dict(enabled=True, ripple_db=0.5, ripple_cycles=2.0,
-                              max_phase_dev_deg=5.0, phase_poly_order=2,
-                              plot="channel_c1.png")),
-            dict(name="c2", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-                 num_symbols=100, power_db=0.0, freq=+3e6),
-        ],
+        "carrier": carriers,
         "wideband": {"sample_rate": 16e6, "noise_density_dbfs": -160.0},
         "amplifier": {"input_backoff_db": 3.0, "am_am": _AM_AM, "am_pm": _AM_PM},
         "ola": {"filter_span": 8, "block_size": 1024},
@@ -53,6 +56,38 @@ def test_main_runs(tmp_path):
     assert (tmp_path / "nl.png").exists()
     assert (tmp_path / "sweep.png").exists()
     assert (tmp_path / "channel_c1.png").exists()
+
+
+def test_main_progress_callback(tmp_path):
+    """progress_callback receives (frac, msg) calls throughout main()."""
+    calls: list[tuple] = []
+    with patch("main.load_config", return_value=_make_cfg(tmp_path)), \
+         patch("matplotlib.pyplot.show"):
+        main_module.main(progress_callback=lambda f, m: calls.append((f, m)))
+
+    assert len(calls) > 0
+    fracs = [f for f, _ in calls]
+    assert fracs[0] == 0.0
+    assert fracs[-1] == 1.0
+    assert all(0.0 <= f <= 1.0 for f in fracs)
+
+
+def test_main_fixed_demod_writes_detector_results(tmp_path):
+    """A carrier with sweep_demod=True, use_seeker=False triggers the fixed-demod
+    path and writes detector_results.md."""
+    fixed_carrier = dict(
+        name="fd", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
+        num_symbols=200, power_db=0.0, freq=0.0,
+        modulation="BPSK", sweep_demod=True, use_seeker=False,
+    )
+    cfg = _make_cfg(tmp_path, extra_carriers=[fixed_carrier])
+    cfg["output"]["detector_results"] = "detector_results.md"
+
+    with patch("main.load_config", return_value=cfg), \
+         patch("matplotlib.pyplot.show"):
+        main_module.main()
+
+    assert (tmp_path / "detector_results.md").exists()
 
 
 _MINIMAL_TOML = """\

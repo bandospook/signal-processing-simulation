@@ -10,7 +10,7 @@ import pytest
 
 from sim.modulation import (
     SUPPORTED, bits_per_symbol, constellation, map_bits, decide,
-    differential_encode, differential_decode, rotational_symmetry,
+    differential_encode, differential_decode,
 )
 from sim.baseband import rrc_baseband
 from sim.receiver import receive

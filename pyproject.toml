@@ -14,3 +14,13 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
 ]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E701",   # multiple statements on one line (colon)  — intentional in gui.py layout
+    "E702",   # multiple statements on one line (semicolon) — intentional in gui.py layout
+]

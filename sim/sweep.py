@@ -1,4 +1,11 @@
+from collections.abc import Callable
+
 from .simulation import wideband_bpsk_simulation
+
+_PrintCB = Callable[[str], None] | None
+
+
+_PointCB = Callable[[int, int], None] | None
 
 
 def parameter_sweep(carriers: list[dict],
@@ -9,7 +16,9 @@ def parameter_sweep(carriers: list[dict],
                     noise_density_dbfs_values: list[float],
                     ola_filter_span: int = 16,
                     ola_block_size: int = 4096,
-                    seed: int | None = None) -> list[dict]:
+                    seed: int | None = None,
+                    chunk_print: _PrintCB = None,
+                    point_cb: _PointCB = None) -> list[dict]:
     """
     Run the simulation on a 2-D grid of IBO × noise density values.
 
@@ -39,6 +48,7 @@ def parameter_sweep(carriers: list[dict],
                 ola_block_size=ola_block_size,
                 seed=seed,
                 demod_carriers=demod_carriers,
+                chunk_print=chunk_print,
             )
             results.append(dict(
                 ibo_db=ibo,
@@ -56,6 +66,8 @@ def parameter_sweep(carriers: list[dict],
                 ],
             ))
             n_done += 1
+            if point_cb is not None:
+                point_cb(n_done, n_total)
             print(f"  [{n_done:>{len(str(n_total))}}/{n_total}] "
                   f"IBO={ibo:.1f} dB  noise={noise:.1f} dBFS/Hz  done")
 

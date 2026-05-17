@@ -8,17 +8,44 @@ too small to avoid signal degradation.
 
 ## Signal chain and filter positions
 
-```
-[native rate]                             [wideband rate]            [native rate]
- BPSK symbols
-    → RRC TX filter
-    → channel impairment (freq domain)
-    → Kaiser sinc upsample  ─────────────── composite signal
-                                           → NL amplifier
-                                           → AWGN
-                                           → Kaiser sinc downsample
-                                               → RRC matched filter
-                                               → symbol sample / BER / EVM
+```mermaid
+flowchart LR
+    subgraph NATTX["Native rate — TX"]
+        direction TB
+        SYM["Symbols<br/>BPSK and other modulations"]
+        RRC_TX["RRC TX filter"]
+        CHIM["Channel impairment<br/>freq domain"]
+        SYM --> RRC_TX --> CHIM
+    end
+
+    subgraph WBRATE["Wideband rate"]
+        direction TB
+        UPSMP["Kaiser sinc upsample"]
+        COMP["Composite signal<br/>all carriers summed"]
+        NLA["NL amplifier"]
+        AWGN["AWGN"]
+        DNSMP["Kaiser sinc downsample"]
+        UPSMP --> COMP --> NLA --> AWGN --> DNSMP
+    end
+
+    subgraph NATRX["Native rate — RX"]
+        direction TB
+        RCMF["RRC matched filter"]
+        SSAMP["Symbol sample"]
+        BERX["BER / EVM"]
+        RCMF --> SSAMP --> BERX
+    end
+
+    CHIM --> UPSMP
+    DNSMP --> RCMF
+
+    classDef tx fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+    classDef wb fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef rx fill:#dcfce7,stroke:#22c55e,color:#14532d
+
+    class SYM,RRC_TX,CHIM tx
+    class UPSMP,COMP,NLA,AWGN,DNSMP wb
+    class RCMF,SSAMP,BERX rx
 ```
 
 Three distinct filter designs appear in the chain, each with a different purpose and

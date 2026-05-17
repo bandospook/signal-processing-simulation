@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
@@ -311,13 +312,45 @@ def _fmt(v) -> str:
     if isinstance(v, float): return str(int(v)) if v == int(v) else f"{v:g}"
     return str(v) if v is not None else ""
 
+class _Tip:
+    """Lightweight hover tooltip attached to any widget."""
+    def __init__(self, widget: tk.Widget, text: str):
+        self._w   = widget
+        self._txt = text
+        self._win: tk.Toplevel | None = None
+        widget.bind("<Enter>",   self._show, add="+")
+        widget.bind("<Leave>",   self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _show(self, _=None):
+        if self._win or not self._txt:
+            return
+        x = self._w.winfo_rootx() + self._w.winfo_width() + 6
+        y = self._w.winfo_rooty() + 2
+        self._win = tw = tk.Toplevel(self._w)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tk.Label(tw, text=self._txt, justify="left",
+                 background="#ffffc0", foreground="#1a1a1a",
+                 relief="solid", borderwidth=1,
+                 wraplength=280, font=("", 8),
+                 padx=5, pady=3).pack()
+
+    def _hide(self, _=None):
+        if self._win:
+            self._win.destroy()
+            self._win = None
+
+
 def _lf(parent, text, row, col, **kw):
     ttk.Label(parent, text=text).grid(row=row, column=col, sticky="w",
                                       padx=(0, 4), pady=2, **kw)
 
-def _ent(parent, var, row, col, width=18, **kw):
+def _ent(parent, var, row, col, width=18, tip="", **kw):
     e = ttk.Entry(parent, textvariable=var, width=width)
     e.grid(row=row, column=col, sticky="w", pady=2, **kw)
+    if tip:
+        _Tip(e, tip)
     return e
 
 def _scrollable(parent) -> ttk.Frame:
@@ -341,29 +374,48 @@ def _scrollable(parent) -> ttk.Frame:
 
 class CarrierFrame(ttk.LabelFrame):
     _MAIN = [
-        ("name",        "Name",             "str",   "carrier"),
-        ("modulation",  "Modulation",       "str",   "BPSK"),
-        ("symbol_rate", "Symbol Rate (Hz)", "float", "1e6"),
-        ("sps",         "SPS",              "int",   "4"),
-        ("rolloff",     "Roll-off",         "float", "0.35"),
-        ("filter_span", "Filter Span",      "int",   "8"),
-        ("num_symbols", "Num Symbols",      "int",   "1000"),
-        ("power_db",    "Power (dB)",       "float", "0.0"),
-        ("freq",        "Freq (Hz)",        "float", "0.0"),
+        ("name",        "Name",             "str",   "carrier",
+         "Unique identifier for this carrier. Used in output reports and seeker results."),
+        ("modulation",  "Modulation",       "str",   "BPSK",
+         "Modulation scheme: BPSK, DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK"),
+        ("symbol_rate", "Symbol Rate (Hz)", "float", "1e6",
+         "Symbol rate in symbols/second (baud). Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
+        ("sps",         "SPS",              "int",   "4",
+         "Samples per symbol at the wideband composite sample rate. Integer ≥ 2; typical value: 4."),
+        ("rolloff",     "Roll-off",         "float", "0.35",
+         "RRC filter roll-off factor α (0 – 1). Higher = wider occupied bandwidth, lower peak ISI."),
+        ("filter_span", "Filter Span",      "int",   "8",
+         "RRC filter half-span in symbols. Total taps = filter_span × sps + 1."),
+        ("num_symbols", "Num Symbols",      "int",   "1000",
+         "Symbols simulated per run. Higher count improves BER statistical accuracy."),
+        ("power_db",    "Power (dB)",       "float", "0.0",
+         "Carrier power in dBFS relative to the wideband composite full-scale."),
+        ("freq",        "Freq (Hz)",        "float", "0.0",
+         "Carrier centre frequency offset from DC (Hz). Negative = below centre frequency."),
     ]
     _SEEKER = [
-        ("target_ber",    "Target BER",          "float", "0.001"),
-        ("confidence",    "Confidence",           "float", "0.95"),
-        ("ber_accuracy",  "BER Accuracy",         "float", "0.0005"),
-        ("noise_lo_dbfs", "Noise Lo (dBFS/Hz)",   "float", "-160.0"),
-        ("noise_hi_dbfs", "Noise Hi (dBFS/Hz)",   "float", "-80.0"),
+        ("target_ber",    "Target BER",          "float", "0.001",
+         "Target bit-error ratio the seeker converges to (e.g. 0.001 = 10⁻³)."),
+        ("confidence",    "Confidence",           "float", "0.95",
+         "Statistical confidence level for the final BER estimate (e.g. 0.95 = 95%)."),
+        ("ber_accuracy",  "BER Accuracy",         "float", "0.0005",
+         "Acceptable half-width of the BER confidence interval at the converged noise level."),
+        ("noise_lo_dbfs", "Noise Lo (dBFS/Hz)",   "float", "-160.0",
+         "Lower bound of the bisection search. Must produce a BER below the target (dBFS/Hz)."),
+        ("noise_hi_dbfs", "Noise Hi (dBFS/Hz)",   "float", "-80.0",
+         "Upper bound of the bisection search. Must produce a BER above the target (dBFS/Hz)."),
     ]
     _CH = [
-        ("ripple_db",         "Ripple (dB)",      "float", "0.5"),
-        ("ripple_cycles",     "Ripple Cycles",    "float", "2.0"),
-        ("max_phase_dev_deg", "Max Phase (°)",    "float", "5.0"),
-        ("phase_poly_order",  "Phase Poly Order", "int",   "2"),
-        ("plot",              "Plot Filename",    "str",   ""),
+        ("ripple_db",         "Ripple (dB)",      "float", "0.5",
+         "Peak-to-peak amplitude ripple across the carrier bandwidth (dB)."),
+        ("ripple_cycles",     "Ripple Cycles",    "float", "2.0",
+         "Number of full ripple cycles across the carrier bandwidth."),
+        ("max_phase_dev_deg", "Max Phase (°)",    "float", "5.0",
+         "Maximum deviation from linear phase across the carrier bandwidth (degrees)."),
+        ("phase_poly_order",  "Phase Poly Order", "int",   "2",
+         "Order of the polynomial used to model the phase-vs-frequency distortion."),
+        ("plot",              "Plot Filename",    "str",   "",
+         "Filename for the channel response plot. Leave blank to skip."),
     ]
 
     def __init__(self, parent, on_remove, data: dict, **kw):
@@ -385,13 +437,13 @@ class CarrierFrame(ttk.LabelFrame):
                    width=8).grid(row=0, column=3, sticky="ne", padx=2)
 
         # Main parameter fields (2-column grid)
-        for i, (key, label, typ, dflt) in enumerate(self._MAIN):
+        for i, (key, label, typ, dflt, tip) in enumerate(self._MAIN):
             raw = d.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._vars[key] = var
             r, c = (i // 2) + 1, (i % 2) * 2
             _lf(self, label + ":", r, c)
-            _ent(self, var, r, c + 1, width=14)
+            _ent(self, var, r, c + 1, width=14, tip=tip)
             if key == "name":
                 var.trace_add("write",
                               lambda *_, v=var: self.configure(text=v.get() or "carrier"))
@@ -429,13 +481,13 @@ class CarrierFrame(ttk.LabelFrame):
         self._seeker_frame.grid(row=sk_row, column=0, columnspan=4, sticky="ew",
                                  padx=(14, 0), pady=(2, 0))
         sk = d.get("seeker", {})
-        for i, (key, label, typ, dflt) in enumerate(self._SEEKER):
+        for i, (key, label, typ, dflt, tip) in enumerate(self._SEEKER):
             raw = sk.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._sk_vars[key] = var
             r, c = i // 2, (i % 2) * 2
             _lf(self._seeker_frame, label + ":", r, c)
-            _ent(self._seeker_frame, var, r, c + 1, width=12)
+            _ent(self._seeker_frame, var, r, c + 1, width=12, tip=tip)
 
         # ── Channel impairments ──────────────────────────────────────────────
         ttk.Checkbutton(self, text="Channel impairments", variable=self._has_ch,
@@ -470,17 +522,17 @@ class CarrierFrame(ttk.LabelFrame):
     def _populate_ch(self, ch: dict):
         for w in self._ch_frame.winfo_children(): w.destroy()
         self._ch_vars.clear()
-        for i, (key, label, typ, dflt) in enumerate(self._CH):
+        for i, (key, label, typ, dflt, tip) in enumerate(self._CH):
             raw = ch.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._ch_vars[key] = var
             r, c = (i // 2) + 1, (i % 2) * 2
             _lf(self._ch_frame, label + ":", r, c)
-            _ent(self._ch_frame, var, r, c + 1, width=14)
+            _ent(self._ch_frame, var, r, c + 1, width=14, tip=tip)
 
     def to_dict(self) -> dict:
         d = {}
-        for key, _, typ, _ in self._MAIN:
+        for key, _, typ, _, _ in self._MAIN:
             raw = self._vars[key].get().strip()
             d[key] = (int(float(raw)) if typ == "int"
                       else float(raw) if typ == "float" else raw)
@@ -490,7 +542,7 @@ class CarrierFrame(ttk.LabelFrame):
 
         if d["enabled"] and d["sweep_demod"] and d["use_seeker"]:
             sk: dict = {}
-            for key, _, _, _ in self._SEEKER:
+            for key, _, _, _, _ in self._SEEKER:
                 raw = self._sk_vars[key].get().strip()
                 try:
                     sk[key] = float(raw)
@@ -501,7 +553,7 @@ class CarrierFrame(ttk.LabelFrame):
 
         if self._has_ch.get() and self._ch_vars:
             ch: dict = {}
-            for key, _, typ, _ in self._CH:
+            for key, _, typ, _, _ in self._CH:
                 if key not in self._ch_vars: continue
                 raw = self._ch_vars[key].get().strip()
                 ch[key] = (int(float(raw)) if typ == "int"
@@ -567,6 +619,8 @@ class App:
         ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=10, pady=2)
         self._run_btn = ttk.Button(tb, text="▶  Launch Simulation", command=self._launch)
         self._run_btn.pack(side="left", padx=2)
+        self._stop_btn = ttk.Button(tb, text="■  Stop", command=self._stop, state="disabled")
+        self._stop_btn.pack(side="left", padx=2)
 
         ttk.Separator(self.root, orient="horizontal").pack(fill="x")
 
@@ -629,19 +683,31 @@ class App:
         tab = ttk.Frame(nb);  nb.add(tab, text="General")
         f = _scrollable(tab)
         r = self._section(f, "Simulation", 0)
-        _lf(f, "Seed:", r, 0);  _ent(f, self._sv("sim.seed"), r, 1);  r += 1
+        _lf(f, "Seed:", r, 0)
+        _ent(f, self._sv("sim.seed"), r, 1,
+             tip="Random seed for reproducible simulations (integer)."); r += 1
 
         r = self._section(f, "Wideband", r)
         _lf(f, "Sample Rate (Hz):", r, 0)
-        _ent(f, self._sv("wb.sample_rate"), r, 1, width=20);  r += 1
+        _ent(f, self._sv("wb.sample_rate"), r, 1, width=20,
+             tip="Composite wideband sample rate in samples/second.\n"
+                 "Must be at least 2× the highest carrier edge frequency."); r += 1
         _lf(f, "Noise Density (dBFS/Hz):", r, 0)
-        _ent(f, self._sv("wb.noise"), r, 1);  r += 1
+        _ent(f, self._sv("wb.noise"), r, 1,
+             tip="AWGN noise power spectral density added after the amplifier (dBFS/Hz).\n"
+                 "Leave blank to disable noise entirely."); r += 1
         ttk.Label(f, text="Leave blank to disable AWGN noise.",
                   foreground="gray").grid(row=r, column=1, sticky="w");  r += 1
 
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
-        _lf(f, "Filter Span:", r, 0);  _ent(f, self._sv("ola.filter_span"), r, 1);  r += 1
-        _lf(f, "Block Size:", r, 0);   _ent(f, self._sv("ola.block_size"), r, 1);   r += 1
+        _lf(f, "Filter Span:", r, 0)
+        _ent(f, self._sv("ola.filter_span"), r, 1,
+             tip="Half-span of the OLA resampling filter in symbols.\n"
+                 "Longer span = better stopband rejection, higher latency."); r += 1
+        _lf(f, "Block Size:", r, 0)
+        _ent(f, self._sv("ola.block_size"), r, 1,
+             tip="FFT block size for the overlap-add resampler (samples).\n"
+                 "Must be a power of two; larger = more efficient for long filters."); r += 1
         f.columnconfigure(1, weight=1)
 
     def _build_amplifier_tab(self, nb):
@@ -649,7 +715,10 @@ class App:
         f = _scrollable(tab)
         r = 0
         _lf(f, "Input Backoff (dB):", r, 0)
-        _ent(f, self._sv("amp.ibo"), r, 1);  r += 2
+        _ent(f, self._sv("amp.ibo"), r, 1,
+             tip="Input back-off relative to amplifier saturation (dB).\n"
+                 "Higher IBO = more linear operation, lower output power.\n"
+                 "0 dB = driven to saturation."); r += 2
 
         for title, ik, ok, olabel in (
             ("AM-AM Table", "amp.am_am.in", "amp.am_am.out", "Output"),
@@ -672,9 +741,13 @@ class App:
         ttk.Label(f, text="Leave both fields blank to skip the sweep.",
                   foreground="gray").grid(row=r, column=0, columnspan=3, sticky="w");  r += 1
         _lf(f, "IBO values (dB):", r, 0)
-        _ent(f, self._sv("sweep.ibo"), r, 1, width=44);  r += 1
+        _ent(f, self._sv("sweep.ibo"), r, 1, width=44,
+             tip="Comma-separated IBO values to sweep (dB).\n"
+                 "Example: 0.0, 1.5, 3.0, 4.5, 6.0"); r += 1
         _lf(f, "Noise values (dBFS/Hz):", r, 0)
-        _ent(f, self._sv("sweep.noise"), r, 1, width=44);  r += 1
+        _ent(f, self._sv("sweep.noise"), r, 1, width=44,
+             tip="Comma-separated noise density values to sweep (dBFS/Hz).\n"
+                 "Example: -140.0, -130.0, -120.0"); r += 1
         ttk.Label(f, text="Example: 0.0, 1.5, 3.0, 4.5, 6.0",
                   foreground="gray").grid(row=r, column=1, sticky="w");  r += 1
 
@@ -685,15 +758,20 @@ class App:
         _ent(row_frame, self._sv("out.dir"), 0, 0, width=28)
         ttk.Button(row_frame, text="Browse…", command=self._browse_out_dir,
                    width=8).grid(row=0, column=1, padx=4)
-        for label, key in (
-            ("Wideband plot:",         "out.wideband"),
-            ("NL tables plot:",        "out.nl_tables"),
-            ("Sweep plot:",            "out.sweep"),
-            ("Sweep table:",           "out.sweep_table"),
-            ("Detector results:",      "out.detector_results"),
+        for label, key, tip in (
+            ("Wideband plot:",    "out.wideband",
+             "PNG filename for the wideband composite PSD plot."),
+            ("NL tables plot:",  "out.nl_tables",
+             "PNG filename for the AM-AM / AM-PM nonlinearity table plots."),
+            ("Sweep plot:",      "out.sweep",
+             "PNG filename for the 2D IBO × noise BER sweep heatmap."),
+            ("Sweep table:",     "out.sweep_table",
+             "Markdown filename for the numeric sweep results table."),
+            ("Detector results:", "out.detector_results",
+             "Markdown filename for per-carrier BER / EVM / IL report."),
         ):
             _lf(f, label, r, 0)
-            _ent(f, self._sv(key), r, 1);  r += 1
+            _ent(f, self._sv(key), r, 1, tip=tip);  r += 1
         f.columnconfigure(1, weight=1)
 
     def _build_carriers_tab(self, nb):
@@ -876,6 +954,7 @@ class App:
     def _set_running(self, running: bool):
         self._running = running
         self._run_btn.configure(state="disabled" if running else "normal")
+        self._stop_btn.configure(state="normal" if running else "disabled")
 
     def _log_clear(self):
         self._log_text.configure(state="normal")
@@ -888,6 +967,13 @@ class App:
         self._log_text.see("end")
         self._log_text.configure(state="disabled")
 
+    def _stop(self):
+        if self._proc and self._running:
+            self._proc.terminate()
+            self._log_append("[GUI] Simulation stopped by user.")
+            self._status.set("Stopped.")
+            self._set_running(False)
+
     def _launch(self):
         if self._running:
             return
@@ -899,6 +985,9 @@ class App:
 
         self._log_clear()
         self._progress["value"] = 0
+        self._last_progress_time = time.monotonic()
+        self._last_progress_line = ""
+        self._slow_warned = False
         self._set_running(True)
         self._status.set("Running simulation...")
 
@@ -939,8 +1028,20 @@ class App:
                 m = _PCT_RE.match(line)
                 if m:
                     self._progress["value"] = int(m.group(1))
+                    self._last_progress_time = time.monotonic()
+                    self._last_progress_line = line
+                    self._slow_warned = False
         except queue.Empty:
             pass
+        if self._running and not self._slow_warned:
+            elapsed = time.monotonic() - self._last_progress_time
+            if elapsed >= 30.0:
+                label = self._last_progress_line or "(simulation start)"
+                self._log_append(
+                    f"[GUI] Still working — no progress update for {int(elapsed)}s "
+                    f"(last step: {label})"
+                )
+                self._slow_warned = True
         self.root.after(100, self._poll_proc)
 
     def _on_run_complete(self):

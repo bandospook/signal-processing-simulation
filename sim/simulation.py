@@ -1,8 +1,19 @@
+from collections.abc import Callable
+
 import numpy as np
 from .baseband import rrc_baseband
 from .filters import fft_ola_upsample, fft_ola_downsample, apply_channel_impairment
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive
+
+_PrintCB = Callable[[str], None] | None
+
+
+def _make_chunk_cb(label: str,
+                   print_fn: Callable[[str], None]) -> Callable[[int, int], None]:
+    def _cb(done: int, total: int) -> None:
+        print_fn(f"{label}: {done}/{total} blocks")
+    return _cb
 
 
 def wideband_bpsk_simulation(carriers: list[dict],
@@ -14,7 +25,8 @@ def wideband_bpsk_simulation(carriers: list[dict],
                               ola_filter_span: int = 16,
                               ola_block_size: int = 4096,
                               seed: int | None = None,
-                              demod_carriers: set[str] | None = None) -> dict:
+                              demod_carriers: set[str] | None = None,
+                              chunk_print: _PrintCB = None) -> dict:
     """
     Wideband N-carrier BPSK simulation with a single shared nonlinear amplifier.
 
@@ -82,7 +94,10 @@ def wideband_bpsk_simulation(carriers: list[dict],
         bb_ch = (apply_channel_impairment(bb, native_rate, signal_bw, channel_cfg)
                  if channel_cfg is not None else bb)
 
-        bb_up = fft_ola_upsample(bb_ch, L, ola_filter_span, ola_block_size)
+        _up_cb = (_make_chunk_cb(f"upsample [{carr['name']}]", chunk_print)
+                  if chunk_print is not None else None)
+        bb_up = fft_ola_upsample(bb_ch, L, ola_filter_span, ola_block_size,
+                                  chunk_cb=_up_cb)
 
         amplitude_scale = 10 ** (power_db / 20)
         upsampled_signals.append((bb_up, freq, amplitude_scale))
@@ -126,12 +141,18 @@ def wideband_bpsk_simulation(carriers: list[dict],
             continue
         shift = np.exp(-1j * 2 * np.pi * cr["freq"] * t_wb)
 
+        def _dcb(n: int) -> Callable[[int, int], None] | None:
+            return (_make_chunk_cb(f"downsample {n}/3 [{cr['name']}]", chunk_print)
+                    if chunk_print is not None else None)
         bb_rx   = fft_ola_downsample(wideband_normed * shift,
-                                     cr["L"], ola_filter_span, ola_block_size)
+                                     cr["L"], ola_filter_span, ola_block_size,
+                                     chunk_cb=_dcb(1))
         nl_pure = fft_ola_downsample(wideband_nl * shift,
-                                     cr["L"], ola_filter_span, ola_block_size)
+                                     cr["L"], ola_filter_span, ola_block_size,
+                                     chunk_cb=_dcb(2))
         nl_down = fft_ola_downsample(wideband_noisy * shift,
-                                     cr["L"], ola_filter_span, ola_block_size)
+                                     cr["L"], ola_filter_span, ola_block_size,
+                                     chunk_cb=_dcb(3))
 
         # Project nl_pure onto bb_rx to separate AM-AM/AM-PM from true IM distortion.
         # alpha captures the deterministic gain+phase change; residual is in-band IMD.

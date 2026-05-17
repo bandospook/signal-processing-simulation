@@ -14,8 +14,9 @@
 10. [Adding or modifying carriers](#10-adding-or-modifying-carriers)
 11. [GUI](#11-gui)
 12. [Test suite](#12-test-suite)
-13. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
-14. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
+13. [Simulation overview](simulation_overview.md) — full execution flow, all three optional paths, and output files produced by each
+14. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
+15. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
 
 ---
 
@@ -44,50 +45,48 @@ operating points.
 
 ## 2. Signal chain
 
-```
- Per carrier (native rate = sps × symbol_rate)
- ─────────────────────────────────────────────
-  Random symbols — modulation set per carrier
-  (BPSK / DBPSK / QPSK / OQPSK / 8PSK / 16QAM / 16APSK / 32APSK)
-        │
-        ▼  RRC transmit filter  (baseband.py)
-        │
-        ▼  Channel impairment — optional  (filters.py)
-        │    amplitude ripple: cosine across passband
-        │    phase nonlinearity: polynomial vs frequency
-        │
-        ▼  OLA upsample → wideband sample rate  (filters.py)
-        │
-        ▼  Frequency shift to carrier centre freq
-        │
-        ▼  Scale by carrier power_db
+```mermaid
+flowchart LR
+    subgraph TX["Per carrier  —  native rate = sps × symbol_rate"]
+        direction TB
+        S["Random symbols<br/>BPSK · DBPSK · QPSK · OQPSK<br/>8PSK · 16QAM · 16APSK · 32APSK"]
+        RRC_TX["RRC transmit filter<br/>baseband.py"]
+        CHIMP["Channel impairment — optional<br/>filters.py<br/>amplitude ripple · phase nonlinearity"]
+        UPSMPL["OLA upsample to wideband rate<br/>filters.py"]
+        FSHIFT["Frequency-shift to carrier centre freq<br/>Scale by carrier power_db"]
+        S --> RRC_TX --> CHIMP --> UPSMPL --> FSHIFT
+    end
 
- Composite wideband signal (wideband sample rate)
- ─────────────────────────────────────────────────
-        Σ  Sum all carriers  (enabled = true only)
-        │
-        ▼  Normalise to unit peak, apply input backoff
-        │
-        ▼  Nonlinear amplifier — AM-AM + AM-PM  (nonlinear_amplifier.py)
-        │
-        ▼  Add wideband AWGN — models receiver thermal noise
-        │  (AWGN is added AFTER the amp: satellite downlink model where
-        │   uplink noise is a separate link-budget item)
+    subgraph WB["Composite  —  wideband sample rate"]
+        direction TB
+        SUM["Σ  Sum all enabled carriers"]
+        NORM["Normalise to unit peak<br/>apply input backoff"]
+        NLA["Nonlinear amplifier<br/>AM-AM + AM-PM<br/>nonlinear_amplifier.py"]
+        AWGN["Add wideband AWGN<br/>after amp · satellite downlink model"]
+        SUM --> NORM --> NLA --> AWGN
+    end
 
- Per carrier — extraction and receive  (if sweep_demod = true)
- ─────────────────────────────────────
-        ▼  Downconvert (multiply by exp(−j 2π f_c t))
-        │
-        ▼  OLA downsample → native rate  (filters.py)
-        │     (anti-alias Kaiser sinc: ≈80 dB stopband)
-        │
-        ▼  RRC matched filter  (receiver.py)
-        │
-        ▼  Symbol sampling (1 sample / symbol)
-        │
-        ▼  Hard decisions + phase-ambiguity resolution  →  BER
-        │
-        ▼  Metrics: EVM, CNR, CIR, CNIR  (simulation.py / receiver.py)
+    subgraph RX["Per carrier  —  extraction and receive  (if sweep_demod = true)"]
+        direction TB
+        DCNV["Downconvert<br/>exp(-j 2π f_c t)"]
+        DNSMPL["OLA downsample to native rate<br/>filters.py · Kaiser sinc ≈80 dB"]
+        MF["RRC matched filter<br/>receiver.py"]
+        SSAMP["Symbol sampling<br/>1 sample per symbol"]
+        HDEC["Hard decisions<br/>phase-ambiguity resolution → BER"]
+        MTRX["Metrics: EVM · CNR · CIR · CNIR<br/>simulation.py / receiver.py"]
+        DCNV --> DNSMPL --> MF --> SSAMP --> HDEC --> MTRX
+    end
+
+    FSHIFT --> SUM
+    AWGN --> DCNV
+
+    classDef tx fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+    classDef wb fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef rx fill:#dcfce7,stroke:#22c55e,color:#14532d
+
+    class S,RRC_TX,CHIMP,UPSMPL,FSHIFT tx
+    class SUM,NORM,NLA,AWGN wb
+    class DCNV,DNSMPL,MF,SSAMP,HDEC,MTRX rx
 ```
 
 ### AWGN placement
@@ -201,8 +200,9 @@ signal-processing-simulation/
 │   └── test_targeter.py          ← BER seeker: unit, convergence, implementation loss
 ├── docs/
 │   ├── GUIDE.md              ← this file
-│   ├── memory_scaling.md
-│   └── filter_analysis.md
+│   ├── simulation_overview.md← execution paths and output files (§13)
+│   ├── memory_scaling.md     ← OLA memory analysis (§14)
+│   └── filter_analysis.md    ← filter size justification (§15)
 ├── output/                   ← generated files (git-ignored)
 ├── gui.py                    ← standalone TOML editor + launcher with live progress
 ├── main.py                   ← CLI entry point
@@ -739,3 +739,103 @@ End-to-end smoke test: mocks `load_config` with a minimal two-carrier config, ru
 Integration tests on the full `wideband_bpsk_simulation` function: checks that CNR
 varies correctly with noise density, CIR varies with IBO, and that disabling
 `demod_carriers` returns NaN placeholders without affecting the wideband signal.
+
+---
+
+## 13. Simulation overview
+
+**→ [simulation_overview.md](simulation_overview.md)**
+
+A top-down reference for understanding what the simulator does on every run, which
+code paths activate under which conditions, and exactly what output files each path
+produces.
+
+The document opens with an ASCII architecture diagram showing the always-on core and
+the three independent optional paths branching from it. It then walks through the
+wideband signal chain step by step — bit generation, modulation, pulse shaping,
+optional channel impairment, OLA upsampling, frequency shifting, composite formation,
+nonlinear amplification, noise injection, and per-carrier extraction — before
+explaining how the C/N/I decomposition separates distortion from noise.
+
+The three execution paths are each documented in their own section:
+
+- **Path A — fixed-noise demodulation** (`sweep_demod = true`, `use_seeker = false`):
+  demodulates the target carrier at the globally configured noise level from the main
+  wideband run, then computes effective Eb/N0 and implementation loss. Activates with
+  no extra configuration beyond enabling demodulation on a carrier.
+
+- **Path B — parameter sweep** (`[sweep]` section present with both `ibo_db` and
+  `noise_density_dbfs` arrays): re-runs the full wideband simulation at every point on
+  the IBO × noise grid and collects per-carrier BER, EVM, CNR, CIR, and CNIR.
+  Completely independent of the seeker path.
+
+- **Path C — BER seeker** (`sweep_demod = true`, `use_seeker = true`): bisects over
+  noise density to find the operating point that achieves a user-specified target BER,
+  then reports a confidence-interval-bounded BER estimate and implementation loss.
+  Completely independent of the sweep path.
+
+The document closes with a concise output-file table cross-referencing each file to
+the path that generates it, and worked example TOML snippets covering five common
+scenarios from a minimal wideband-PSD-only run through a combined sweep + seeker
+configuration.
+
+---
+
+## 14. Memory scaling
+
+**→ [memory_scaling.md](memory_scaling.md)**
+
+Analyses where memory goes in the simulation and how it scales with the two
+configuration dimensions that matter most: the upsample factor L (ratio of wideband
+sample rate to carrier native rate) and the simulation duration T (governed by the
+longest carrier's `num_symbols / symbol_rate`).
+
+The key result is that OLA chunk processing decouples FFT working memory from signal
+length. The per-block FFT buffer — the dominant working allocation — is sized by the
+filter length, which scales with L but is reused for every block regardless of how
+many symbols are simulated. By contrast, the persistent wideband arrays (`wideband`,
+`wideband_nl`, `wideband_noisy`, and intermediate OLA outputs) all scale with
+`T × sample_rate` and are the true memory cost of a long simulation.
+
+The document includes a worked example for the default configuration (~11 MB peak),
+a scaling table across seven orders of magnitude of carrier symbol rate, and a
+concrete demonstration of what happens to OLA efficiency as L grows (from 50% at
+L = 10 to 0.05% at L = 200,000). For very narrowband carriers the document shows
+that raising `block_size` is more effective than any other tuning lever — it recovers
+OLA efficiency without changing the filter or the output.
+
+---
+
+## 15. Filter analysis
+
+**→ [filter_analysis.md](filter_analysis.md)**
+
+Justifies every filter size in the signal chain and verifies that none is undersized
+for the default carrier geometry.
+
+Three filters are examined:
+
+- **RRC pulse-shaping filter** (`filter_span × sps + 1` taps, applied at native rate
+  at both TX and RX): at `filter_span = 10`, `sps = 10` this gives ±5 symbol periods,
+  comfortably above the ±4T practical minimum for `rolloff = 0.35`. The document also
+  confirms that the Kaiser sinc passband is 7.4× wider than the RRC signal bandwidth,
+  so upsampling leaves the pulse shape intact.
+
+- **Channel impairment filter** (full-block frequency-domain multiplication at native
+  rate): no conventional tap count — the response is defined analytically. The
+  document identifies and documents the fix for a circular-convolution wrap-around
+  bug: the amplitude ripple cosine has delay taps at `±ripple_cycles / signal_bw`
+  seconds; without zero-padding those taps corrupt ~1.5 symbols at each signal edge.
+  The fix zero-pads by the delay extent plus 8 samples of sidelobe margin, making the
+  DFT multiplication exactly equivalent to linear convolution.
+
+- **Kaiser-windowed sinc upsampling/downsampling filter** (`2 × ola_filter_span × L + 1`
+  taps, applied at wideband rate inside the OLA engine): the document derives the
+  minimum tap count for 80 dB stopband attenuation (~10L taps) and shows the default
+  `ola_filter_span = 16` gives 32L + 1 taps — 3.2× the minimum, yielding 120–140 dB
+  realised stopband. It also confirms that the nearest IMD products after downconversion
+  are 30 × f_s into the stopband, far beyond where even the minimum filter would matter.
+
+The document concludes with guidance on when filter sizes would need to increase:
+lower RRC rolloff (below ~0.25), very close carrier spacing (sidebands within one
+`f_s/2` of each other), or extreme ripple-cycle counts in the channel impairment model.

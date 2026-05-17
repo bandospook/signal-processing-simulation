@@ -53,6 +53,28 @@ def main(config_path: str = "simulation.toml",
     # Others contribute to the composite NL environment but skip the costly demod step.
     demod_names = {c["name"] for c in active_carriers if c.get("sweep_demod", False)}
 
+    # ── Progress fractions ────────────────────────────────────────────────────
+    # Assumption: each sweep point costs ~1 wideband simulation.
+    # Budget from SIM_START to the seeker boundary (or near-end if no seeker).
+    sweep_cfg   = cfg.get("sweep", {})
+    ibo_sweep   = sweep_cfg.get("ibo_db", [])
+    noise_sweep = sweep_cfg.get("noise_density_dbfs", [])
+    n_sweep     = len(ibo_sweep) * len(noise_sweep) if (ibo_sweep and noise_sweep) else 0
+
+    has_seeker  = any(c.get("enabled", True) and c.get("sweep_demod", False)
+                      and c.get("use_seeker", False) for c in active_carriers)
+
+    _SIM_START    = 0.05
+    _PLOT_FRAC    = 0.03   # fixed budget for saving plots
+    _SEEKER_START = 0.25   # seeker section always begins here when present
+    _budget_end   = _SEEKER_START if has_seeker else 0.94
+    _unit         = (_budget_end - _SIM_START - _PLOT_FRAC) / (1 + n_sweep)
+    _P_sim_done   = _SIM_START + _unit
+    _P_plots_done = _P_sim_done + _PLOT_FRAC
+
+    def _chunk_print(msg: str) -> None:
+        print(f"        {msg}", flush=True)
+
     _prog(0.05, f"Running wideband simulation ({len(active_carriers)} carriers, "
           f"{len(demod_names)} demodulated)...")
     results = wideband_bpsk_simulation(
@@ -66,12 +88,13 @@ def main(config_path: str = "simulation.toml",
         ola_block_size     = ola["block_size"],
         seed               = sim["seed"],
         demod_carriers     = demod_names if demod_names else None,
+        chunk_print        = _chunk_print,
     )
 
-    _prog(0.15, "Wideband simulation complete.")
+    _prog(_P_sim_done, "Wideband simulation complete.")
     print_metrics_table(results["carriers"])
 
-    _prog(0.17, "Saving wideband PSD plot...")
+    _prog(_P_sim_done + _PLOT_FRAC * 0.4, "Saving wideband PSD plot...")
     plot_wideband_results(results, sample_rate=wb["sample_rate"],
                           save_path=out_path(out.get("wideband")))
 
@@ -90,15 +113,17 @@ def main(config_path: str = "simulation.toml",
                 save_path=out_path(ch_cfg.get("plot")),
             )
 
-    _prog(0.20, "Plots saved.")
+    _prog(_P_plots_done, "Plots saved.")
 
-    sweep_cfg   = cfg.get("sweep", {})
-    ibo_sweep   = sweep_cfg.get("ibo_db", [])
-    noise_sweep = sweep_cfg.get("noise_density_dbfs", [])
     if ibo_sweep and noise_sweep:
         n_pts = len(ibo_sweep) * len(noise_sweep)
-        _prog(0.20, f"Running parameter sweep: {len(ibo_sweep)} IBO × {len(noise_sweep)} "
-              f"noise = {n_pts} points...")
+        _prog(_P_plots_done, f"Running parameter sweep: {len(ibo_sweep)} IBO × "
+              f"{len(noise_sweep)} noise = {n_pts} points...")
+
+        def _sweep_pt_cb(done: int, total: int) -> None:
+            _prog(_P_plots_done + _unit * done,
+                  f"Sweep: {done}/{total} points complete")
+
         sweep_results = parameter_sweep(
             carriers                  = active_carriers,
             sample_rate               = wb["sample_rate"],
@@ -109,11 +134,13 @@ def main(config_path: str = "simulation.toml",
             ola_filter_span           = ola["filter_span"],
             ola_block_size            = ola["block_size"],
             seed                      = sim["seed"],
+            chunk_print               = _chunk_print,
+            point_cb                  = _sweep_pt_cb,
         )
         plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
         write_sweep_report(sweep_results, cfg=cfg,
                            save_path=out_path(out.get("sweep_table")))
-        _prog(0.25, "Sweep complete.")
+        _prog(_P_plots_done + _unit * n_sweep, "Sweep complete.")
 
     # ── Fixed-noise demod carriers ──────────────────────────────────────────
     # Carriers with sweep_demod=True and use_seeker=False were already
@@ -159,10 +186,10 @@ def main(config_path: str = "simulation.toml",
                 and c.get("use_seeker", False)]
     seeker_results: dict[str, dict] = {}
     if seekable:
-        _prog(0.25, f"Starting BER seeker for {len(seekable)} carrier(s)...")
+        _prog(_SEEKER_START, f"Starting BER seeker for {len(seekable)} carrier(s)...")
 
         def _seeker_cb(frac: float, msg: str) -> None:
-            _prog(0.25 + frac * 0.74, msg)
+            _prog(_SEEKER_START + frac * (0.99 - _SEEKER_START), msg)
 
         raw = seek_all_carriers(
             carriers          = active_carriers,
@@ -174,6 +201,7 @@ def main(config_path: str = "simulation.toml",
             ola_block_size    = ola["block_size"],
             seed              = sim["seed"],
             progress_callback = _seeker_cb,
+            chunk_print       = _chunk_print,
         )
         for name, r in raw.items():
             seeker_results[name] = dict(r, mode="seeker")

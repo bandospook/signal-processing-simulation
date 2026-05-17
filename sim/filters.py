@@ -1,4 +1,9 @@
+from collections.abc import Callable
+
 import numpy as np
+
+_ChunkCB = Callable[[int, int], None] | None
+_CHUNK_REPORT = 64
 
 
 def rrc_coeffs(filter_span: int, rolloff: float, sps: int) -> np.ndarray:
@@ -24,29 +29,36 @@ def rrc_coeffs(filter_span: int, rolloff: float, sps: int) -> np.ndarray:
     return h / np.sqrt(np.sum(h ** 2))
 
 
-def ola_convolve(x: np.ndarray, h: np.ndarray, block_size: int = 4096) -> np.ndarray:
+def ola_convolve(x: np.ndarray, h: np.ndarray, block_size: int = 4096,
+                 chunk_cb: _ChunkCB = None) -> np.ndarray:
     """
     Linear convolution of x with h using FFT overlap-and-add.
     Output length: len(x) + len(h) - 1.
+    chunk_cb(done, total) is called every _CHUNK_REPORT blocks if provided.
     """
     M = len(h)
     N = len(x)
     N_fft = 2 ** int(np.ceil(np.log2(block_size + M - 1)))
     H = np.fft.fft(h.astype(complex), N_fft)
+    n_blocks = int(np.ceil(N / block_size))
 
     y = np.zeros(N + M - 1, dtype=complex)
-    for i in range(int(np.ceil(N / block_size))):
+    for i in range(n_blocks):
         start = i * block_size
         block = x[start : start + block_size]
         block_out_len = len(block) + M - 1
         y_block = np.fft.ifft(np.fft.fft(block, N_fft) * H)
         y[start : start + block_out_len] += y_block[:block_out_len]
+        if chunk_cb is not None and (i % _CHUNK_REPORT == _CHUNK_REPORT - 1
+                                     or i == n_blocks - 1):
+            chunk_cb(i + 1, n_blocks)
 
     return y
 
 
 def fft_ola_upsample(x: np.ndarray, L: int,
-                     filter_span: int = 16, block_size: int = 4096) -> np.ndarray:
+                     filter_span: int = 16, block_size: int = 4096,
+                     chunk_cb: _ChunkCB = None) -> np.ndarray:
     """
     Upsample x by integer L via zero-insertion and Kaiser-windowed sinc filter
     applied with OLA convolution.
@@ -64,12 +76,13 @@ def fft_ola_upsample(x: np.ndarray, L: int,
     x_up = np.zeros(len(x) * L, dtype=complex)
     x_up[::L] = x
 
-    y_full = ola_convolve(x_up, h, block_size)
+    y_full = ola_convolve(x_up, h, block_size, chunk_cb=chunk_cb)
     return y_full[n_half : n_half + len(x) * L]
 
 
 def fft_ola_downsample(x: np.ndarray, L: int,
-                       filter_span: int = 16, block_size: int = 4096) -> np.ndarray:
+                       filter_span: int = 16, block_size: int = 4096,
+                       chunk_cb: _ChunkCB = None) -> np.ndarray:
     """
     Downsample x by integer L via anti-alias Kaiser-windowed sinc LPF
     (cutoff at the new Nyquist) applied with OLA, then decimate.
@@ -84,7 +97,7 @@ def fft_ola_downsample(x: np.ndarray, L: int,
     n = np.arange(-n_half, n_half + 1)
     h = np.sinc(n / L) * np.kaiser(2 * n_half + 1, beta=8.0) / L
 
-    y_full = ola_convolve(x, h, block_size)
+    y_full = ola_convolve(x, h, block_size, chunk_cb=chunk_cb)
     y = y_full[n_half : n_half + len(x)]
     return y[::L]
 

@@ -17,6 +17,7 @@ from .simulation import wideband_bpsk_simulation
 from .theory import ebn0_for_ber
 
 _ProgressCB = Callable[[float, str], None] | None
+_PrintCB = Callable[[str], None] | None
 
 
 def _erfinv(p: float) -> float:
@@ -65,6 +66,7 @@ def _simulate_ber_at_noise(
     ola_block_size: int,
     n_bits: int,
     seeds: list[int],
+    chunk_print: _PrintCB = None,
 ) -> tuple[float, float, float, float]:
     """
     Run the wideband simulation at noise_dbfs and return
@@ -101,6 +103,7 @@ def _simulate_ber_at_noise(
             ola_block_size=ola_block_size,
             seed=s,
             demod_carriers={carrier_name},
+            chunk_print=chunk_print,
         )
 
         for cr in result["carriers"]:
@@ -137,6 +140,7 @@ def seek_ber_noise_level(
     n_final_seeds: int = 5,
     seed: int = 42,
     progress_callback: _ProgressCB = None,
+    chunk_print: _PrintCB = None,
 ) -> dict:
     """
     Adaptive bisection to find the noise_density_dbfs that achieves target_ber
@@ -190,13 +194,15 @@ def seek_ber_noise_level(
     ber_at_lo, *_ = _simulate_ber_at_noise(
         noise_lo_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
-        ola_filter_span, ola_block_size, n_bits_initial, bisect_seed)
+        ola_filter_span, ola_block_size, n_bits_initial, bisect_seed,
+        chunk_print=chunk_print)
 
     _cb(0.08, f"[seeker] '{carrier_name}' — bracket check (hi: {noise_hi_dbfs:.1f} dBFS)...")
     ber_at_hi, *_ = _simulate_ber_at_noise(
         noise_hi_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
-        ola_filter_span, ola_block_size, n_bits_initial, bisect_seed)
+        ola_filter_span, ola_block_size, n_bits_initial, bisect_seed,
+        chunk_print=chunk_print)
 
     if ber_at_lo > target_ber:
         raise ValueError(
@@ -220,7 +226,8 @@ def seek_ber_noise_level(
         ber_mid, *_ = _simulate_ber_at_noise(
             mid, carrier_name, carriers, sample_rate,
             am_am_cfg, am_pm_cfg, input_backoff_db,
-            ola_filter_span, ola_block_size, n_bits_step, bisect_seed)
+            ola_filter_span, ola_block_size, n_bits_step, bisect_seed,
+            chunk_print=chunk_print)
         n_iter += 1
 
         step_frac = 0.10 + 0.75 * (k / max_iter)
@@ -246,7 +253,8 @@ def seek_ber_noise_level(
     ber_final, cnr_db, cir_db, cnir_db = _simulate_ber_at_noise(
         converged_noise, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
-        ola_filter_span, ola_block_size, n_bits_final, final_seeds)
+        ola_filter_span, ola_block_size, n_bits_final, final_seeds,
+        chunk_print=chunk_print)
 
     n_sym_final = max(1, n_bits_final // (bps * n_final_seeds))
     n_bits_total = n_sym_final * bps * n_final_seeds
@@ -304,6 +312,7 @@ def seek_all_carriers(
     n_final_seeds: int = 5,
     seed: int = 42,
     progress_callback: _ProgressCB = None,
+    chunk_print: _PrintCB = None,
 ) -> dict[str, dict]:
     """
     Run seek_ber_noise_level for every carrier with enabled=True,
@@ -365,6 +374,7 @@ def seek_all_carriers(
             n_final_seeds=n_final_seeds,
             seed=carr_seed,
             progress_callback=_carrier_cb,
+            chunk_print=chunk_print,
         )
 
     return results

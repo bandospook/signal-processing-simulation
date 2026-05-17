@@ -9,11 +9,14 @@ should produce implementation_loss_db ≈ 0 because CNIR = CNR in that case.
 """
 
 import math
+from typing import Callable
 import numpy as np
 
 from .modulation import bits_per_symbol
 from .simulation import wideband_bpsk_simulation
 from .theory import ebn0_for_ber
+
+_ProgressCB = Callable[[float, str], None] | None
 
 
 def _erfinv(p: float) -> float:
@@ -133,6 +136,7 @@ def seek_ber_noise_level(
     max_iter: int = 20,
     n_final_seeds: int = 5,
     seed: int = 42,
+    progress_callback: _ProgressCB = None,
 ) -> dict:
     """
     Adaptive bisection to find the noise_density_dbfs that achieves target_ber
@@ -147,6 +151,9 @@ def seek_ber_noise_level(
     final measurement pools n_final_seeds independent seeds for that full
     bit budget.
 
+    progress_callback(frac, msg): optional callable called at key steps.
+    frac is in [0, 1]; msg is a human-readable status string.
+
     Returns a dict:
         noise_density_dbfs    — converged noise level (dBFS/Hz)
         ber                   — measured BER at convergence
@@ -158,6 +165,10 @@ def seek_ber_noise_level(
         n_bits_total          — total bits used in final measurement
         n_iter                — bisection steps taken
     """
+    def _cb(frac: float, msg: str) -> None:
+        if progress_callback is not None:
+            progress_callback(frac, msg)
+
     rng = np.random.default_rng(seed)
 
     n_bits_final = _n_bits_for_ci(target_ber, confidence, ber_accuracy)
@@ -175,11 +186,13 @@ def seek_ber_noise_level(
 
     bisect_seed = [int(rng.integers(0, 2 ** 31))]
 
-    # Verify bracket: noise_lo should give BER < target; noise_hi should give BER > target
+    _cb(0.03, f"[seeker] '{carrier_name}' — bracket check (lo: {noise_lo_dbfs:.1f} dBFS)...")
     ber_at_lo, *_ = _simulate_ber_at_noise(
         noise_lo_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
         ola_filter_span, ola_block_size, n_bits_initial, bisect_seed)
+
+    _cb(0.08, f"[seeker] '{carrier_name}' — bracket check (hi: {noise_hi_dbfs:.1f} dBFS)...")
     ber_at_hi, *_ = _simulate_ber_at_noise(
         noise_hi_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
@@ -210,6 +223,12 @@ def seek_ber_noise_level(
             ola_filter_span, ola_block_size, n_bits_step, bisect_seed)
         n_iter += 1
 
+        step_frac = 0.10 + 0.75 * (k / max_iter)
+        _cb(step_frac,
+            f"[seeker] '{carrier_name}' — step {k + 1}/{max_iter}  "
+            f"BER {ber_mid:.2e} → target {target_ber:.2e}  "
+            f"noise {mid:.2f} dBFS")
+
         # Higher noise → higher BER.  If mid is too noisy (BER > target), pull hi down.
         if ber_mid > target_ber:
             hi = mid
@@ -221,6 +240,7 @@ def seek_ber_noise_level(
 
     converged_noise = (lo + hi) / 2.0
 
+    _cb(0.88, f"[seeker] '{carrier_name}' — final measurement ({n_final_seeds} seeds)...")
     # Final pooled measurement at full bit budget
     final_seeds = [int(x) for x in rng.integers(0, 2 ** 31, n_final_seeds)]
     ber_final, cnr_db, cir_db, cnir_db = _simulate_ber_at_noise(
@@ -246,6 +266,11 @@ def seek_ber_noise_level(
         if theory_ebn0_db is not None else None
     )
 
+    _cb(1.0, f"[seeker] '{carrier_name}' — done.  "
+        f"BER={ber_final:.3e}  IL={implementation_loss_db:.2f} dB"
+        if implementation_loss_db is not None else
+        f"[seeker] '{carrier_name}' — done.  BER={ber_final:.3e}")
+
     return dict(
         noise_density_dbfs=converged_noise,
         ber=ber_final,
@@ -263,13 +288,13 @@ def seek_ber_noise_level(
 
 
 def seek_all_carriers(
-    target_ber: float,
-    confidence: float,
-    ber_accuracy: float,
     carriers: list[dict],
     sample_rate: float,
     am_am_cfg: dict,
     am_pm_cfg: dict,
+    target_ber: float = 0.01,
+    confidence: float = 0.95,
+    ber_accuracy: float = 0.005,
     input_backoff_db: float = 0.0,
     ola_filter_span: int = 16,
     ola_block_size: int = 4096,
@@ -278,28 +303,68 @@ def seek_all_carriers(
     max_iter: int = 20,
     n_final_seeds: int = 5,
     seed: int = 42,
+    progress_callback: _ProgressCB = None,
 ) -> dict[str, dict]:
     """
-    Run seek_ber_noise_level for every carrier with sweep_demod=True.
+    Run seek_ber_noise_level for every carrier with enabled=True,
+    sweep_demod=True, and use_seeker=True.
+
+    Per-carrier seeker parameters are read from carr["seeker"] sub-dict:
+        target_ber, confidence, ber_accuracy, noise_lo_dbfs, noise_hi_dbfs
+
+    Falls back to the global parameters for any key not present in the
+    per-carrier sub-dict.
+
+    progress_callback(frac, msg) receives overall progress across all seekable
+    carriers, with each carrier allocated an equal fraction of [0, 1].
+
     Returns a dict keyed by carrier name.
     """
+    def _cb(frac: float, msg: str) -> None:
+        if progress_callback is not None:
+            progress_callback(frac, msg)
+
     rng = np.random.default_rng(seed)
+
+    seekable = [
+        c for c in carriers
+        if c.get("enabled", True)
+        and c.get("sweep_demod", False)
+        and c.get("use_seeker", False)
+    ]
+
     results: dict[str, dict] = {}
-    for carr in carriers:
-        if not carr.get("sweep_demod", False):
-            continue
+    n = len(seekable)
+
+    for i, carr in enumerate(seekable):
+        lo_frac = i / n if n > 0 else 0.0
+        hi_frac = (i + 1) / n if n > 0 else 1.0
+
+        def _carrier_cb(frac: float, msg: str,
+                        lo: float = lo_frac, hi: float = hi_frac) -> None:
+            _cb(lo + frac * (hi - lo), msg)
+
+        sk = carr.get("seeker", {})
         carr_seed = int(rng.integers(0, 2 ** 31))
+
         results[carr["name"]] = seek_ber_noise_level(
-            target_ber, confidence, ber_accuracy,
-            carr["name"], carriers, sample_rate,
-            am_am_cfg, am_pm_cfg,
+            target_ber=sk.get("target_ber", target_ber),
+            confidence=sk.get("confidence", confidence),
+            ber_accuracy=sk.get("ber_accuracy", ber_accuracy),
+            carrier_name=carr["name"],
+            carriers=carriers,
+            sample_rate=sample_rate,
+            am_am_cfg=am_am_cfg,
+            am_pm_cfg=am_pm_cfg,
             input_backoff_db=input_backoff_db,
             ola_filter_span=ola_filter_span,
             ola_block_size=ola_block_size,
-            noise_lo_dbfs=noise_lo_dbfs,
-            noise_hi_dbfs=noise_hi_dbfs,
+            noise_lo_dbfs=sk.get("noise_lo_dbfs", noise_lo_dbfs),
+            noise_hi_dbfs=sk.get("noise_hi_dbfs", noise_hi_dbfs),
             max_iter=max_iter,
             n_final_seeds=n_final_seeds,
             seed=carr_seed,
+            progress_callback=_carrier_cb,
         )
+
     return results

@@ -236,52 +236,33 @@ def plot_wideband_results(results: dict,
                            sample_rate: float,
                            save_path: str | None = None) -> None:
     """
-    Two-row figure:
-      top    — wideband PSD: pre-NL, post-NL, and (if present) post-noise
-      bottom — one panel per carrier: baseband PSD pre-NL vs post-NL
+    Composite wideband PSD: pre-NL, post-NL, and (if noise present) post-noise.
+    Per-carrier downsampled views are omitted — only the composite spectrum is shown.
     """
-    from matplotlib.gridspec import GridSpec
-
     carriers = results["carriers"]
-    n_carriers = len(carriers)
-    fig_w = max(13, 5 * n_carriers)
-    fig = plt.figure(figsize=(fig_w, 7))
-
     carrier_labels = "  |  ".join(
         f"{cr['name']}: {cr['symbol_rate']/1e6:.3g} MHz sym/s" for cr in carriers)
+
+    fig, ax = plt.subplots(figsize=(12, 4))
     fig.suptitle(
         f"Wideband NL Simulation — {sample_rate/1e9:.3g} GHz\n{carrier_labels}")
 
-    gs = GridSpec(2, n_carriers, figure=fig, hspace=0.45, wspace=0.35)
-
-    ax_wb = fig.add_subplot(gs[0, :])
     f, p = psd_db(results["wideband"], sample_rate)
-    ax_wb.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
+    ax.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
     f, p = psd_db(results["wideband_nl"], sample_rate)
-    ax_wb.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
+    ax.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
     if results.get("wideband_noisy") is not results["wideband_nl"]:
         f, p = psd_db(results["wideband_noisy"], sample_rate)
-        ax_wb.plot(f, p, lw=0.6, color="tab:green", alpha=0.7, label="Post-NL + noise")
-    ax_wb.set_title("Wideband PSD")
-    ax_wb.set_xlabel("Frequency (Hz)")
-    ax_wb.set_ylabel("dB")
-    ax_wb.set_ylim(bottom=-100)
-    ax_wb.legend()
-    ax_wb.grid(True)
+        ax.plot(f, p, lw=0.6, color="tab:green", alpha=0.7, label="Post-NL + noise")
 
-    for col, cr in enumerate(carriers):
-        ax = fig.add_subplot(gs[1, col])
-        f, p = psd_db(cr["bb"], cr["native_rate"])
-        ax.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
-        f, p = psd_db(cr["nl"], cr["native_rate"])
-        ax.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
-        ax.set_title(f"{cr['name']}  ({cr['symbol_rate']/1e6:.3g} MHz sym/s)")
-        ax.set_xlabel("Frequency (Hz)")
-        ax.set_ylabel("dB")
-        ax.set_ylim(bottom=-100)
-        ax.legend(fontsize=8)
-        ax.grid(True)
+    ax.set_title("Wideband PSD")
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("dB")
+    ax.set_ylim(bottom=-100)
+    ax.legend()
+    ax.grid(True)
 
+    plt.tight_layout()
     if save_path is not None:
         fig.savefig(save_path)
 
@@ -425,3 +406,89 @@ def write_sweep_report(sweep_results: list[dict], cfg: dict,
         ln()
 
     Path(save_path).write_text("\n".join(L), encoding="utf-8")
+
+
+def write_detector_results(
+    results: dict[str, dict],
+    save_path: str,
+    append: bool = False,
+) -> None:
+    """
+    Write a Markdown table of detector-model results to save_path.
+
+    Each entry in results is keyed by carrier name and contains:
+        mode              — "seeker" or "fixed"
+        noise_density_dbfs — noise level used (dBFS/Hz)
+        ber               — measured BER
+        ber_ci_lo/hi      — 95% CI bounds (None for fixed-noise runs)
+        effective_ebn0_db — C/(N+I)*sps/bps in dB (None if not computed)
+        theory_ebn0_db    — theory Eb/N0 at measured BER (None if no formula)
+        implementation_loss_db — effective − theory (None if not available)
+        cnr_db, cir_db, cnir_db
+        evm_rms           — EVM % (None if not computed)
+        n_bits_total      — bits used in final measurement (None for fixed)
+        n_iter            — bisection iterations (None for fixed)
+
+    append=True opens the file for appending rather than overwriting.
+    """
+    if not results or save_path is None:
+        return
+
+    from pathlib import Path
+
+    def _f(v, fmt=".2f") -> str:
+        if v is None:
+            return "—"
+        if isinstance(v, float) and (np.isnan(v) or not np.isfinite(v)):
+            return "∞" if v > 0 else "—"
+        return format(v, fmt)
+
+    L = []
+    def ln(s=""): L.append(s)
+
+    ln("## Detector Results")
+    ln()
+    ln("| Carrier | Mode | Noise (dBFS/Hz) | BER | BER CI | Eff Eb/N0 (dB) "
+       "| Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) "
+       "| EVM (%) | Bits |")
+    ln("|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+
+    for name, r in results.items():
+        ber = r.get("ber")
+        ber_str = "0" if ber == 0 else (_f(ber, ".2e") if ber is not None else "—")
+
+        ci_lo = r.get("ber_ci_lo")
+        ci_hi = r.get("ber_ci_hi")
+        if ci_lo is not None and ci_hi is not None:
+            ci_str = f"[{_f(ci_lo, '.2e')}, {_f(ci_hi, '.2e')}]"
+        else:
+            ci_str = "—"
+
+        n_bits = r.get("n_bits_total")
+        bits_str = f"{n_bits:,}" if n_bits is not None else "—"
+
+        ln(
+            f"| {name}"
+            f" | {r.get('mode', '—')}"
+            f" | {_f(r.get('noise_density_dbfs'), '.1f')}"
+            f" | {ber_str}"
+            f" | {ci_str}"
+            f" | {_f(r.get('effective_ebn0_db'), '.2f')}"
+            f" | {_f(r.get('theory_ebn0_db'), '.2f')}"
+            f" | {_f(r.get('implementation_loss_db'), '.2f')}"
+            f" | {_f(r.get('cnr_db'), '.1f')}"
+            f" | {_f(r.get('cir_db'), '.1f')}"
+            f" | {_f(r.get('cnir_db'), '.1f')}"
+            f" | {_f(r.get('evm_rms'), '.2f')}"
+            f" | {bits_str} |"
+        )
+
+    ln()
+
+    text = "\n".join(L)
+    p = Path(save_path)
+    if append and p.exists():
+        with p.open("a", encoding="utf-8") as f:
+            f.write("\n" + text)
+    else:
+        p.write_text(text, encoding="utf-8")

@@ -1,92 +1,70 @@
-# Signal Processing Simulation Configuration
-
 [simulation]
 seed = 42
 
 [wideband]
-sample_rate        = 2_000_000_000    # Hz  wideband sample rate (2 GHz)
-noise_density_dbfs = -160.0           # dBFS/Hz AWGN floor; remove key to disable noise
-
-# ── Nonlinear amplifier (applied to combined wideband signal) ────────────────
-# input_backoff_db : peak signal drive level relative to the saturation knee.
-#   0 dB = peak hits input = 1.0 on the AM-AM curve.
-#   3 dB = peak reaches 0.71 on the curve (typical backed-off operation).
-# AM-AM uses the Rapp model (p = 2), normalised so output = 1 at input = 1.
-# AM-PM is quadratic, typical of a solid-state PA (~5° at saturation).
+sample_rate        = 2_000_000_000
+noise_density_dbfs = -160
 
 [amplifier]
-input_backoff_db = 3.0
+input_backoff_db = 3
 
 [amplifier.am_am]
-input  = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-output = [0.000, 0.119, 0.238, 0.356, 0.473, 0.586, 0.692, 0.788, 0.873, 0.944, 1.000]
+input  = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+output = [0, 0.119, 0.238, 0.356, 0.473, 0.586, 0.692, 0.788, 0.873, 0.944, 1]
 
 [amplifier.am_pm]
-input     = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-phase_deg = [0.000, 0.050, 0.200, 0.450, 0.800, 1.250, 1.800, 2.450, 3.200, 4.050, 5.000]
+input     = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+phase_deg = [0, 0.05, 0.2, 0.45, 0.8, 1.25, 1.8, 2.45, 3.2, 4.05, 5]
 
 [ola]
-filter_span = 16                # half-span in symbols for interpolation filter
-block_size  = 4096              # FFT block size per OLA segment
+filter_span  = 16
+block_size   = 4_096
 
 [output]
 output_dir = "output"
-wideband   = "wideband_bpsk.png"
-nl_tables  = "amplifier_nl.png"
-sweep      = "sweep_results.png"
-
-# ── Parameter sweep ──────────────────────────────────────────────────────────
-# Remove or leave empty to skip the sweep.
-# ibo_db             : input backoff values (dB) to sweep
-# noise_density_dbfs : noise density values (dBFS/Hz) to sweep
-# Both are swept as a full 2-D grid (ibo × noise).
+wideband     = "wideband.png"
+nl_tables    = "amplifier_nl.png"
+sweep        = "sweep_results.png"
+sweep_table  = "sweep_table.md"
 
 [sweep]
-ibo_db             = [0.0, 1.5, 3.0, 4.5, 6.0]
-noise_density_dbfs = [-180.0, -165.0, -150.0, -140.0]
-
-# ── Carriers ─────────────────────────────────────────────────────────────────
-# Add more [[carrier]] blocks to include additional signals in the composite.
-# power_db  : carrier power relative to the 0 dB reference (affects
-#             carrier-to-carrier ratio; composite is renormalised before the amp).
-# freq      : centre frequency in the wideband spectrum (Hz).
-# channel   : optional per-signal passband impairments applied at native rate.
-#   ripple_cycles     : complete amplitude ripple cycles across signal bandwidth
-#   max_phase_dev_deg : peak phase deviation from linear at the band edge (°)
-#   phase_poly_order  : polynomial order of the phase shape (2 = quadratic)
+ibo_db             = [0, 1.5, 3, 4.5, 6]
+noise_density_dbfs = [-100, -95, -90, -85]
 
 [[carrier]]
-name        = "slow"
-symbol_rate = 1_000_000         # Hz
-sps         = 10
-rolloff     = 0.35
-filter_span = 10
-num_symbols = 500
-power_db    = 0.0               # dB  reference carrier
-freq        = -200_000_000      # Hz
+name         = "slow"
+symbol_rate  = 100_000
+sps          = 10
+rolloff      = 0.35
+filter_span  = 10
+num_symbols  = 100_000
+power_db     = 0
+freq         = -200_000_000
+sweep_demod  = false
 
 [carrier.channel]
-enabled           = true
-ripple_db         = 0.5
-ripple_cycles     = 2.0
-max_phase_dev_deg = 5.0
-phase_poly_order  = 2
-plot              = "channel_slow.png"
+enabled                = true
+ripple_db              = 0.5
+ripple_cycles          = 2
+max_phase_dev_deg      = 5
+phase_poly_order       = 2
+plot                   = "channel_slow.png"
 
 [[carrier]]
-name        = "fast"
-symbol_rate = 20_000_000        # Hz
-sps         = 10
-rolloff     = 0.35
-filter_span = 10
-num_symbols = 10000
-power_db    = 0.0
-freq        = 100_000_000       # Hz
+name         = "fast"
+symbol_rate  = 2_000_000
+sps          = 10
+rolloff      = 0.35
+filter_span  = 10
+num_symbols  = 10000
+power_db     = 0
+freq         = 100_000_000
+sweep_demod  = false
 
 [carrier.channel]
-enabled           = true
-ripple_db         = 0.3
-ripple_cycles     = 1.5
-max_phase_dev_deg = 3.0
-phase_poly_order  = 2
-plot              = "channel_fast.png"
+enabled                = true
+ripple_db              = 0.3
+ripple_cycles          = 1.5
+max_phase_dev_deg      = 3
+phase_poly_order       = 2
+plot                   = "channel_fast.png"

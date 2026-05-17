@@ -3,11 +3,19 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 
-def psd_db(sig: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
-    """Hann-windowed FFT magnitude spectrum in dB."""
-    w = np.hanning(len(sig))
-    S = np.fft.fftshift(np.fft.fft(sig * w))
-    f = np.fft.fftshift(np.fft.fftfreq(len(sig), 1.0 / fs))
+def psd_db(sig: np.ndarray, fs: float,
+           nfft: int = 16384) -> tuple[np.ndarray, np.ndarray]:
+    """Hann-windowed FFT magnitude spectrum in dB.
+
+    Caps at nfft points (centre segment) so large wideband signals don't
+    produce multi-megapixel figures that are slow to save.
+    """
+    n = min(len(sig), nfft)
+    start = (len(sig) - n) // 2          # centre segment avoids transients
+    s = sig[start : start + n]
+    w = np.hanning(n)
+    S = np.fft.fftshift(np.fft.fft(s * w))
+    f = np.fft.fftshift(np.fft.fftfreq(n, 1.0 / fs))
     return f, 20 * np.log10(np.abs(S) / np.sum(w) + 1e-12)
 
 
@@ -126,6 +134,18 @@ def print_metrics_table(carriers: list[dict]) -> None:
     print(sep)
 
 
+def _enabled_carrier_names(sweep_results: list[dict]) -> list[str]:
+    """Carriers that have at least one finite metric value across the sweep grid."""
+    all_names = [cr["name"] for cr in sweep_results[0]["carriers"]]
+    def has_data(name):
+        for r in sweep_results:
+            for cr in r["carriers"]:
+                if cr["name"] == name and np.isfinite(cr.get("cnir_db", float("nan"))):
+                    return True
+        return False
+    return [n for n in all_names if has_data(n)]
+
+
 def plot_sweep_results(sweep_results: list[dict],
                        save_path: str | None = None) -> None:
     """
@@ -135,10 +155,12 @@ def plot_sweep_results(sweep_results: list[dict],
     Noise density is used as a colour parameter; line style distinguishes
     CNR (solid), CIR (dashed), and CNIR (dotted) on the third panel.
     """
-    ibo_vals   = sorted(set(r["ibo_db"] for r in sweep_results))
-    noise_vals = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
-    carrier_names = [cr["name"] for cr in sweep_results[0]["carriers"]]
-    n_carriers    = len(carrier_names)
+    ibo_vals      = sorted(set(r["ibo_db"] for r in sweep_results))
+    noise_vals    = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
+    carrier_names = _enabled_carrier_names(sweep_results)
+    if not carrier_names:
+        return
+    n_carriers = len(carrier_names)
     n_noise       = len(noise_vals)
 
     colours = cm.viridis(np.linspace(0.15, 0.85, n_noise))
@@ -188,6 +210,7 @@ def plot_sweep_results(sweep_results: list[dict],
         ax_db.set_ylabel("dB")
         for ax in (ax_ber, ax_evm, ax_db):
             ax.set_xlabel("IBO (dB)")
+            ax.set_xlim(min(ibo_vals), max(ibo_vals))
             ax.grid(True, which="both", alpha=0.4)
             ax.legend(fontsize=7)
 
@@ -261,3 +284,144 @@ def plot_wideband_results(results: dict,
 
     if save_path is not None:
         fig.savefig(save_path)
+
+
+def _fmt_metric(key: str, val) -> str:
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "—"
+    if key == "ber":
+        return "0" if val == 0 else f"{val:.2e}"
+    if key == "evm_rms":
+        return f"{val:.2f}"
+    return "∞" if not np.isfinite(val) else f"{val:.1f}"
+
+
+def write_sweep_report(sweep_results: list[dict], cfg: dict,
+                       save_path: str | None = None) -> None:
+    """
+    Write sweep results as a Markdown report containing a config summary,
+    a per-carrier performance summary, and a full IBO × noise results table.
+    Nothing is written if save_path is None.
+    """
+    if not sweep_results or save_path is None:
+        return
+
+    from pathlib import Path
+
+    ibo_vals      = sorted(set(r["ibo_db"] for r in sweep_results))
+    noise_vals    = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
+    carrier_names = _enabled_carrier_names(sweep_results)
+
+    L = []
+    def ln(s=""): L.append(s)
+
+    # ── Config summary ────────────────────────────────────────────────────────
+    ln("# Simulation Sweep Report")
+    ln()
+    ln("## Configuration")
+    ln()
+
+    wb  = cfg.get("wideband",   {})
+    amp = cfg.get("amplifier",  {})
+    ola = cfg.get("ola",        {})
+    sim = cfg.get("simulation", {})
+
+    ln("| Parameter | Value |")
+    ln("|---|---|")
+    ln(f"| Seed | {sim.get('seed', '—')} |")
+    sr = wb.get("sample_rate", 0)
+    ln(f"| Sample Rate | {sr / 1e9:.4g} GHz |")
+    nd = wb.get("noise_density_dbfs")
+    ln(f"| Noise Density | {nd:.1f} dBFS/Hz |" if nd is not None else "| Noise Density | disabled |")
+    ln(f"| Input Backoff | {amp.get('input_backoff_db', '—')} dB |")
+    ln(f"| OLA Filter Span | {ola.get('filter_span', '—')} |")
+    ln(f"| OLA Block Size | {ola.get('block_size', '—')} |")
+    ln()
+
+    ln("### Carriers")
+    ln()
+    ln("| Name | Symbol Rate | SPS | Num Symbols | Sweep Demod |")
+    ln("|---|---|---|---|---|")
+    for c in cfg.get("carrier", []):
+        sym_rate = c.get("symbol_rate", 0)
+        sym_str  = f"{sym_rate / 1e6:.4g} MHz"
+        demod    = "Yes" if c.get("sweep_demod", True) else "No"
+        ln(f"| {c['name']} | {sym_str} | {c.get('sps', '—')} | {c.get('num_symbols', '—')} | {demod} |")
+    ln()
+
+    ln("### Sweep Grid")
+    ln()
+    ln(f"- **IBO values (dB):** {', '.join(f'{x:g}' for x in ibo_vals)}")
+    ln(f"- **Noise values (dBFS/Hz):** {', '.join(f'{x:g}' for x in noise_vals)}")
+    ln(f"- **Total points:** {len(ibo_vals) * len(noise_vals)}")
+    ln()
+
+    # ── Performance summary ───────────────────────────────────────────────────
+    if carrier_names:
+        ln("## Performance Summary")
+        ln()
+        SUMMARY_METRICS = [
+            ("cnr_db",  "CNR",  "dB"),
+            ("cir_db",  "CIR",  "dB"),
+            ("cnir_db", "CNIR", "dB"),
+            ("evm_rms", "EVM",  "%"),
+            ("ber",     "BER",  ""),
+        ]
+        for cname in carrier_names:
+            ln(f"### {cname}")
+            ln()
+            for key, label, unit in SUMMARY_METRICS:
+                vals = []
+                for r in sweep_results:
+                    cr = next((c for c in r["carriers"] if c["name"] == cname), None)
+                    if cr is None:
+                        continue
+                    v = cr.get(key)
+                    if v is not None and isinstance(v, (int, float)):
+                        if key == "ber" and v == 0:
+                            vals.append(0.0)
+                        elif np.isfinite(float(v)):
+                            vals.append(float(v))
+                if not vals:
+                    ln(f"- **{label}:** no data")
+                elif key == "ber":
+                    lo = "0" if min(vals) == 0 else f"{min(vals):.2e}"
+                    hi = "0" if max(vals) == 0 else f"{max(vals):.2e}"
+                    ln(f"- **{label}:** {lo} – {hi}")
+                else:
+                    suffix = f" {unit}" if unit else ""
+                    ln(f"- **{label}:** {min(vals):.2f} – {max(vals):.2f}{suffix}")
+            ln()
+
+    # ── Sweep results tables ──────────────────────────────────────────────────
+    ln("## Sweep Results")
+    ln()
+
+    sorted_results = sorted(sweep_results,
+                            key=lambda r: (r["ibo_db"], r["noise_density_dbfs"]))
+
+    for cname in carrier_names:
+        if len(carrier_names) > 1:
+            ln(f"### {cname}")
+            ln()
+
+        ln("| IBO (dB) | Noise (dBFS/Hz) | BER | EVM (%) | CNR (dB) | CIR (dB) | CNIR (dB) |")
+        ln("|---:|---:|---:|---:|---:|---:|---:|")
+
+        for r in sorted_results:
+            cr = next((c for c in r["carriers"] if c["name"] == cname), None)
+            if cr is None:
+                continue
+            row = (
+                f"| {r['ibo_db']:g}"
+                f" | {r['noise_density_dbfs']:g}"
+                f" | {_fmt_metric('ber',     cr.get('ber'))}"
+                f" | {_fmt_metric('evm_rms', cr.get('evm_rms'))}"
+                f" | {_fmt_metric('cnr_db',  cr.get('cnr_db'))}"
+                f" | {_fmt_metric('cir_db',  cr.get('cir_db'))}"
+                f" | {_fmt_metric('cnir_db', cr.get('cnir_db'))} |"
+            )
+            ln(row)
+        ln()
+
+    Path(save_path).write_text("\n".join(L), encoding="utf-8")

@@ -6,15 +6,15 @@ from pathlib import Path
 from sim.config import load_config
 from sim.simulation import wideband_bpsk_simulation
 from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
-                       print_metrics_table, plot_sweep_results)
+                       print_metrics_table, plot_sweep_results, write_sweep_report)
 from sim.sweep import parameter_sweep
 
 
-def main():
+def main(config_path: str = "simulation.toml"):
     """Load config, run wideband simulation, and plot results."""
     plt.close('all')
 
-    cfg = load_config("simulation.toml")
+    cfg = load_config(config_path)
 
     carriers = cfg["carrier"]       # list from [[carrier]] blocks
     wb  = cfg["wideband"]
@@ -79,9 +79,12 @@ def main():
             seed=sim["seed"],
         )
         plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
+        write_sweep_report(sweep_results, cfg=cfg,
+                           save_path=out_path(out.get("sweep_table")))
 
     plt.show()
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "simulation.toml")

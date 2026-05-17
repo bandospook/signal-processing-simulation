@@ -12,6 +12,12 @@ wheels/
 # Simulation output
 output/
 
+# Generated test plots and reports
+tests/plots/
+
+# Coverage data
+.coverage
+
 # IDE
 .vscode/
 .idea/

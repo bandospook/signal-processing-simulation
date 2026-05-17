@@ -85,8 +85,8 @@ def _oqpsk_baseband(symbols: np.ndarray, sps: int, h: np.ndarray) -> np.ndarray:
 
     I_up = np.zeros(n_sym * sps)
     Q_up = np.zeros(n_sym * sps)
-    I_up[::sps] = symbols.real
-    Q_up[::sps] = symbols.imag
+    I_up[::sps] = np.real(symbols)
+    Q_up[::sps] = np.imag(symbols)
 
     I_filt = np.convolve(I_up, h, mode='same')
     Q_filt = np.convolve(Q_up, h, mode='same')

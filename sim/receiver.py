@@ -77,8 +77,8 @@ def receive(signal: np.ndarray,
 
     if mod == "OQPSK":
         # I rail peaks at [0::sps], Q rail (delayed T/2 at TX) peaks at [sps//2::sps]
-        I_samp = mf.real[0::sps]
-        Q_samp = mf.imag[sps // 2::sps]
+        I_samp = np.real(mf)[0::sps]
+        Q_samp = np.imag(mf)[sps // 2::sps]
         n = min(len(I_samp), len(Q_samp))
         samples = (I_samp[:n] + 1j * Q_samp[:n]).astype(complex)
     else:

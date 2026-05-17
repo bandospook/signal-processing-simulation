@@ -13,7 +13,8 @@ def wideband_bpsk_simulation(carriers: list[dict],
                               noise_density_dbfs: float | None = None,
                               ola_filter_span: int = 16,
                               ola_block_size: int = 4096,
-                              seed: int | None = None) -> dict:
+                              seed: int | None = None,
+                              demod_carriers: set[str] | None = None) -> dict:
     """
     Wideband N-carrier BPSK simulation with a single shared nonlinear amplifier.
 
@@ -116,7 +117,13 @@ def wideband_bpsk_simulation(carriers: list[dict],
 
     # Extract each carrier: downconvert → OLA downsample → matched filter → decide
     # Three extractions per carrier: pre-NL reference, post-NL noiseless, post-NL+noise.
+    # Carriers absent from demod_carriers (when provided) get NaN placeholders — the
+    # wideband signal still includes them; only the per-carrier demod step is skipped.
     for cr in carrier_state:
+        if demod_carriers is not None and cr["name"] not in demod_carriers:
+            cr.update(nl=None, cnr_db=float("nan"), cir_db=float("nan"),
+                      cnir_db=float("nan"), ber=None, evm_rms=float("nan"))
+            continue
         shift = np.exp(-1j * 2 * np.pi * cr["freq"] * t_wb)
 
         bb_rx   = fft_ola_downsample(wideband_normed * shift,

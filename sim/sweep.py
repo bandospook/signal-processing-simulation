@@ -22,6 +22,10 @@ def parameter_sweep(carriers: list[dict],
     n_done  = 0
     results = []
 
+    # Carriers with sweep_demod=False contribute to the wideband composite but
+    # their per-carrier demod (BER/EVM/CNR/CIR/CNIR) is skipped each grid point.
+    demod_carriers = {c["name"] for c in carriers if c.get("sweep_demod", True)}
+
     for ibo in ibo_db_values:
         for noise in noise_density_dbfs_values:
             sim = wideband_bpsk_simulation(
@@ -34,6 +38,7 @@ def parameter_sweep(carriers: list[dict],
                 ola_filter_span=ola_filter_span,
                 ola_block_size=ola_block_size,
                 seed=seed,
+                demod_carriers=demod_carriers,
             )
             results.append(dict(
                 ibo_db=ibo,

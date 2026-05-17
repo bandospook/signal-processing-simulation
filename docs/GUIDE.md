@@ -10,11 +10,12 @@
 6. [Output files](#6-output-files)
 7. [Example results](#7-example-results)
 8. [Sweep mode](#8-sweep-mode)
-9. [Adding or modifying carriers](#9-adding-or-modifying-carriers)
-10. [GUI](#10-gui)
-11. [Test suite](#11-test-suite)
-12. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
-13. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
+9. [BER seeker and implementation loss](#9-ber-seeker-and-implementation-loss)
+10. [Adding or modifying carriers](#10-adding-or-modifying-carriers)
+11. [GUI](#11-gui)
+12. [Test suite](#12-test-suite)
+13. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
+14. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
 
 ---
 
@@ -32,9 +33,11 @@ power amplifier. It lets you answer questions like:
 - How does a passband channel impairment (amplitude ripple, phase nonlinearity)
   interact with the NL distortion?
 - How do EVM and BER track across a 2-D sweep of IBO and noise density?
+- **What noise level achieves a specific target BER for each carrier, and how much
+  implementation loss does the nonlinear environment impose relative to AWGN theory?**
 
 The simulation is fully deterministic (fixed seed), TOML-configured, and produces
-both console tables and PNG plots. No code changes are needed to explore new
+both console tables and PNG/markdown outputs. No code changes are needed to explore new
 operating points.
 
 ---
@@ -61,7 +64,7 @@ operating points.
 
  Composite wideband signal (wideband sample rate)
  ─────────────────────────────────────────────────
-        Σ  Sum all carriers
+        Σ  Sum all carriers  (enabled = true only)
         │
         ▼  Normalise to unit peak, apply input backoff
         │
@@ -151,12 +154,15 @@ python main.py
 ```
 
 This will:
-1. Print a metrics table to the console.
-2. Open interactive matplotlib windows showing the wideband PSD, amplifier curves,
-   and channel responses.
-3. Save PNG files into the `output/` directory.
-4. If `[sweep]` is present, run the full IBO × noise grid and save
+1. Print a per-carrier metrics table to the console, with progress indicators.
+2. Save PNG files into the `output/` directory (wideband PSD, amplifier curves,
+   channel responses).
+3. If `[sweep]` is configured, run the full IBO × noise grid and save
    `sweep_results.png` and `sweep_table.md`.
+4. If any carriers have `sweep_demod = true`, write a `detector_results.md` with
+   BER, Eb/N0, and implementation loss. If `use_seeker = true`, the noise level is
+   found automatically by bisection; otherwise the globally configured noise level is
+   used.
 
 ### Step 4 — Use the GUI
 
@@ -165,7 +171,8 @@ python gui.py
 ```
 
 Load any `.toml` config, edit all parameters in a tabbed interface, save, and launch
-`main.py` with that config directly from the GUI. See [§10 GUI](#10-gui).
+`main.py` with that config directly from the GUI. Progress and log output are shown
+live in the GUI. See [§11 GUI](#11-gui).
 
 ---
 
@@ -179,22 +186,25 @@ signal-processing-simulation/
 │   ├── config.py             ← TOML loader
 │   ├── filters.py            ← RRC, OLA convolution, upsample/downsample, channel impairment
 │   ├── nonlinear_amplifier.py← memoryless AM-AM + AM-PM model
-│   ├── plots.py              ← all visualisation and sweep markdown report
+│   ├── plots.py              ← all visualisation, sweep report, detector results table
 │   ├── receiver.py           ← matched filter, decisions, BER (phase-ambiguity resolved), EVM
 │   ├── simulation.py         ← full wideband signal chain, per-carrier metric extraction
-│   └── sweep.py              ← 2-D IBO × noise sweep
+│   ├── sweep.py              ← 2-D IBO × noise sweep
+│   ├── theory.py             ← closed-form BER curves and numerical Eb/N0 inverse
+│   └── targeter.py           ← adaptive BER seeker (bisection over noise_density_dbfs)
 ├── tests/
-│   ├── test_awgn_performance.py  ← BER vs theory (see §11)
+│   ├── test_awgn_performance.py  ← BER vs theory (see §12)
 │   ├── test_filters.py           ← RRC and OLA correctness
 │   ├── test_nonlinear_amplifier.py
 │   ├── test_main.py              ← end-to-end smoke test
-│   └── test_wideband.py          ← wideband simulation integration
+│   ├── test_simulation.py        ← wideband simulation integration
+│   └── test_targeter.py          ← BER seeker: unit, convergence, implementation loss
 ├── docs/
 │   ├── GUIDE.md              ← this file
 │   ├── memory_scaling.md
 │   └── filter_analysis.md
 ├── output/                   ← generated files (git-ignored)
-├── gui.py                    ← standalone TOML editor + launcher
+├── gui.py                    ← standalone TOML editor + launcher with live progress
 ├── main.py                   ← CLI entry point
 ├── simulation.toml           ← configuration
 └── pyproject.toml
@@ -206,10 +216,12 @@ signal-processing-simulation/
 | `sim/modulation.py` | Constellation definitions, Gray coding, APSK ring ratios, `bits_per_symbol()`. All constellations normalised to unit average power. |
 | `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample (anti-alias Kaiser sinc), per-carrier channel impairments. |
 | `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model; piecewise linear interpolation of user-supplied lookup tables. |
-| `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set. Returns CNR/CIR/CNIR per carrier via projection method. |
+| `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set (carriers not in the set contribute to the IM environment but skip the expensive receiver chain). Returns CNR/CIR/CNIR per carrier via projection method. |
 | `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
 | `sim/sweep.py` | 2-D sweep over IBO × noise; honours `sweep_demod` per carrier. |
-| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, `write_sweep_report` (markdown). |
+| `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
+| `sim/targeter.py` | `seek_ber_noise_level` — adaptive bisection finding `noise_density_dbfs` that achieves a target BER, then computes implementation loss. `seek_all_carriers` — runs the seeker for each carrier that has `enabled=True`, `sweep_demod=True`, `use_seeker=True`. Both accept an optional `progress_callback(frac, msg)`. |
+| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, `write_sweep_report` (markdown), `write_detector_results` (markdown table of BER/Eb/N0/implementation loss per carrier). |
 
 ---
 
@@ -229,7 +241,7 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 | Key | Type | Description |
 |---|---|---|
 | `sample_rate` | int (Hz) | Common sample rate for the composite signal. Must be an integer multiple of every carrier's native rate (`sps × symbol_rate`). |
-| `noise_density_dbfs` | float (dBFS/Hz) | One-sided AWGN PSD added **after** the amplifier. Total noise power = 10^(N₀/10) × sample_rate. Remove to disable noise. |
+| `noise_density_dbfs` | float (dBFS/Hz) | One-sided AWGN PSD added **after** the amplifier. Total noise power = 10^(N₀/10) × sample_rate. Remove to disable noise. Used as the fixed noise level for carriers with `sweep_demod=true` and `use_seeker=false`. |
 
 ### `[amplifier]`
 
@@ -261,6 +273,7 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 | `nl_tables` | Filename for the AM-AM/AM-PM plot. |
 | `sweep` | Filename for the sweep results PNG. |
 | `sweep_table` | Filename for the sweep markdown report. |
+| `detector_results` | Filename for the detector-model results table (BER seeker and/or fixed-noise stats). Defaults to `detector_results.md` if omitted. |
 
 ### `[sweep]`
 
@@ -273,18 +286,33 @@ Remove this section to disable the sweep. Both keys required to trigger a run.
 
 ### `[[carrier]]` (repeated block, one per carrier)
 
-| Key | Type | Description |
-|---|---|---|
-| `name` | string | Label used in plots and console. |
-| `modulation` | string | One of: `BPSK`, `DBPSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. Defaults to `BPSK` if omitted. |
-| `symbol_rate` | int (Hz) | Symbol rate. Native sample rate = `sps × symbol_rate`. |
-| `sps` | int | Samples per symbol at native rate. |
-| `rolloff` | float | RRC rolloff factor (0–1). Occupied BW ≈ `(1+rolloff) × symbol_rate`. |
-| `filter_span` | int | RRC filter half-span in symbols (TX and RX use the same value). Total taps = `filter_span × sps + 1`. |
-| `num_symbols` | int | Symbols to generate. More = better BER statistics, more memory. |
-| `power_db` | float (dB) | Carrier power relative to the 0 dB reference. Controls inter-carrier ratio before the amp; the composite is peak-normalised before the NL. |
-| `freq` | int (Hz) | Centre frequency in the wideband spectrum. Carriers must not overlap. |
-| `sweep_demod` | bool | If `false`, skip demodulation and metrics for this carrier during sweep (default `true`). The carrier still appears in the composite and contributes to IM products. |
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | — | Label used in plots and console output. |
+| `modulation` | string | `"BPSK"` | One of: `BPSK`, `DBPSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. |
+| `symbol_rate` | int (Hz) | — | Symbol rate. Native sample rate = `sps × symbol_rate`. |
+| `sps` | int | — | Samples per symbol at native rate. |
+| `rolloff` | float | — | RRC rolloff factor (0–1). Occupied BW ≈ `(1+rolloff) × symbol_rate`. |
+| `filter_span` | int | — | RRC filter half-span in symbols (TX and RX share the same value). Total taps = `filter_span × sps + 1`. |
+| `num_symbols` | int | — | Symbols to generate. Controls BER statistics and memory. |
+| `power_db` | float (dB) | — | Carrier power relative to 0 dB. Controls inter-carrier ratio before the amp; the composite is peak-normalised before the NL. |
+| `freq` | int (Hz) | — | Centre frequency in the wideband spectrum. Carriers must not overlap. |
+| `enabled` | bool | `true` | If `false`, the carrier is excluded from the wideband composite entirely (no signal, no IM contribution). Useful for quickly disabling a carrier without removing it from the config. |
+| `sweep_demod` | bool | `false` | If `true`, this carrier is downsampled, demodulated, and included in the detector-results table. If `false`, it contributes to the IM environment but its BER/EVM are not computed. |
+| `use_seeker` | bool | `false` | If `true` (and `sweep_demod=true` and `enabled=true`), run the adaptive BER seeker to find the noise level that achieves the target BER. If `false`, use the global `noise_density_dbfs` and report statistics at that operating point. |
+
+### `[carrier.seeker]` (optional, per carrier — only relevant when `use_seeker = true`)
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `target_ber` | float | `0.01` | Target bit-error rate the seeker bisects toward. |
+| `confidence` | float | `0.95` | Confidence level for the normal-approximation CI on the final BER estimate (e.g., 0.95 = 95% CI). |
+| `ber_accuracy` | float | `0.005` | Half-width of the CI in absolute BER. Determines the final bit count: `N ≥ (z/accuracy)² × p(1−p)`. |
+| `noise_lo_dbfs` | float (dBFS/Hz) | `−160.0` | Quietest bracket endpoint. BER at this noise level must be below `target_ber`. |
+| `noise_hi_dbfs` | float (dBFS/Hz) | `−80.0` | Loudest bracket endpoint. BER at this noise level must be above `target_ber`. |
+
+If any `[carrier.seeker]` key is absent, the global default (shown above) is used.
+If the entire `[carrier.seeker]` table is absent, all global defaults apply.
 
 ### `[carrier.channel]` (optional, per carrier)
 
@@ -303,25 +331,38 @@ Remove this section to disable the sweep. Both keys required to trigger a run.
 
 | File | Contents |
 |---|---|
-| `output/wideband.png` | Wideband PSD (pre-NL, post-NL, post-NL+noise) plus per-carrier baseband PSD panels. Spectral regrowth from the NL amplifier is visible as raised floor between carriers. |
+| `output/wideband.png` | Composite wideband PSD (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised floor between carriers. |
 | `output/amplifier_nl.png` | AM-AM and AM-PM curves with peak operating point (red marker). |
 | `output/channel_<name>.png` | Amplitude ripple and phase nonlinearity across each carrier's passband. |
 | `output/sweep_results.png` | Per-carrier rows: BER vs IBO, EVM vs IBO, CNR/CIR/CNIR vs IBO. Multiple noise levels colour-coded. |
 | `output/sweep_table.md` | Markdown report: configuration summary, performance summary (min/max ranges), full IBO × noise grid table. |
+| `output/detector_results.md` | Per-carrier detector-model results: BER, 95% CI, effective Eb/N0, theory Eb/N0, implementation loss, CNR/CIR/CNIR, EVM, mode (seeker or fixed), and total bits used. Written whenever any carrier has `sweep_demod = true`. |
 
 ---
 
 ## 7. Example results
 
-### Console metrics table
+### Console output (with progress indicators)
 
 ```
-Carrier     CNR (dB)  CIR (dB)  CNIR (dB)  EVM (%)  BER
-slow            78.9      48.1       48.1     4.84    0.000
-fast            65.8      40.8       40.8     3.33    0.000
+[  0%] Loading configuration...
+[  5%] Running wideband simulation (2 carriers, 2 demodulated)...
+[ 15%] Wideband simulation complete.
+---------------------------------------------------------------
+Carrier     CNR (dB)  CIR (dB)  CNIR (dB)  EVM (%)          BER
+---------------------------------------------------------------
+slow            78.9      48.1       48.1     4.84            0
+fast            65.8      40.8       40.8     3.33            0
+---------------------------------------------------------------
+[ 17%] Saving wideband PSD plot...
+[ 20%] Plots saved.
+[100%] Done.
 ```
 
-**Interpreting these numbers:**
+Each line beginning with `[NNN%]` marks a significant milestone. The GUI uses these
+percentages to drive the progress bar; a terminal user sees them as plain-text status.
+
+**Interpreting the metrics table:**
 
 - **CNR 79/66 dB** — Noise density of −160 dBFS/Hz is far below the carrier power;
   thermal noise is negligible. Raise `noise_density_dbfs` toward −140 dBFS/Hz to
@@ -329,10 +370,8 @@ fast            65.8      40.8       40.8     3.33    0.000
 - **CIR 48/41 dB** — At 3 dB IBO the amp is moderately backed off; measurable but
   not severe IM distortion. Reduce IBO to 1 dB to drop CIR sharply.
 - **CNIR ≈ CIR** — Distortion-limited regime; noise is not yet a factor.
-- **EVM 4.8/3.3%** — Includes NL distortion and channel impairments. The slow
-  carrier has larger ripple (0.5 dB vs 0.3 dB) hence slightly higher EVM.
-- **BER = 0** — No errors in the simulated symbols. Drive harder (IBO = 0–1 dB)
-  or increase noise to push into error.
+- **EVM 4.8/3.3%** — Includes NL distortion and channel impairments.
+- **BER = 0** — No errors in the simulated symbols. Drive harder or increase noise.
 
 ---
 
@@ -350,7 +389,136 @@ IM environment but their BER/EVM are not computed, saving significant time.
 
 ---
 
-## 9. Adding or modifying carriers
+## 9. BER seeker and implementation loss
+
+The BER seeker answers the question: *at a given IBO and carrier plan, what noise
+level produces a specified target BER for a given carrier?* Once that noise level is
+found, the tool computes implementation loss — the gap between the effective Eb/N0
+measured in the simulation and the theoretical Eb/N0 required for the same BER in a
+pure AWGN channel. Implementation loss captures all system impairments combined:
+nonlinear distortion, inter-carrier IM products, channel ripple, and non-ideal
+receiver filtering.
+
+### How the seeker works
+
+The bisection variable is `noise_density_dbfs`. Higher noise density → higher BER.
+The seeker:
+
+1. **Bracket check** — evaluates BER at `noise_lo_dbfs` (quiet, low BER) and
+   `noise_hi_dbfs` (loud, high BER) to confirm the target BER lies between them.
+   Raises `ValueError` if the bracket is invalid; adjust the bounds accordingly.
+
+2. **Adaptive bisection** — halves the bracket repeatedly. The bit count used per
+   step starts at `max(500, n_bits_final // 32)` and doubles every two iterations,
+   giving coarse-but-fast early steps and fine-but-accurate later steps. Stops when
+   the bracket width is less than 0.05 dB (much finer than any physically meaningful
+   distinction).
+
+3. **Final pooled measurement** — runs `n_final_seeds` independent seeds at the
+   converged noise level, pooling their bit counts to produce a statistically
+   significant BER estimate and a normal-approximation confidence interval.
+   The bit count is:
+   ```
+   N ≥ (z / ber_accuracy)² × target_ber × (1 − target_ber)
+   ```
+   where `z = √2 × erfinv(confidence)`. For `target_ber=0.01`, `confidence=0.95`,
+   `ber_accuracy=0.005` this yields approximately N = 1,500 bits.
+
+### Effective Eb/N0 and implementation loss
+
+CNIR is measured at the native sample rate (sps samples per symbol), *before* the
+matched filter. The matched filter provides sps-fold processing gain, so:
+
+```
+Effective Eb/N0 (dB) = CNIR_dB + 10 · log₁₀(sps / bps)
+```
+
+where `bps` is bits per symbol for the carrier's modulation. For BPSK with `sps=4`
+this adds +6 dB; for 16QAM (bps=4) with `sps=4` it adds 0 dB.
+
+Implementation loss is then:
+
+```
+Implementation loss (dB) = Effective Eb/N0 − Theory Eb/N0(at measured BER)
+```
+
+A linear amplifier with a single carrier and no channel impairments should produce
+implementation loss near 0 dB. A nonlinear operating point or multi-carrier loading
+will produce positive implementation loss — the system needs more signal power than
+theory predicts to achieve the same BER.
+
+Implementation loss is `None` for 16APSK and 32APSK because no closed-form BER
+formula exists for those modulations.
+
+### Configuration example
+
+```toml
+[[carrier]]
+name        = "slow"
+modulation  = "BPSK"
+symbol_rate = 100_000
+sps         = 4
+rolloff     = 0.35
+filter_span = 8
+num_symbols = 5_000
+power_db    = 0.0
+freq        = -500_000
+enabled     = true
+sweep_demod = true
+use_seeker  = true
+
+[carrier.seeker]
+target_ber    = 0.001
+confidence    = 0.95
+ber_accuracy  = 0.0005
+noise_lo_dbfs = -120.0
+noise_hi_dbfs = -80.0
+```
+
+### Progress output during a seeker run
+
+```
+[ 25%] Starting BER seeker for 1 carrier(s)...
+[ 28%] [seeker] 'slow' — bracket check (lo: -120.0 dBFS)...
+[ 30%] [seeker] 'slow' — bracket check (hi: -80.0 dBFS)...
+[ 34%] [seeker] 'slow' — step 1/20  BER 2.14e-01 → target 1.00e-03  noise -100.00 dBFS
+[ 39%] [seeker] 'slow' — step 2/20  BER 4.32e-04 → target 1.00e-03  noise -110.00 dBFS
+...
+[ 88%] [seeker] 'slow' — final measurement (5 seeds)...
+[ 99%] [seeker] 'slow' — done.  BER=9.87e-04  IL=0.12 dB
+[100%] Done.
+```
+
+### Detector results table
+
+Results are written to `output/detector_results.md`:
+
+| Carrier | Mode | Noise (dBFS/Hz) | BER | BER CI | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) | Bits |
+|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| slow | seeker | -104.32 | 9.87e-04 | [8.1e-04, 1.16e-03] | 9.81 | 9.69 | 0.12 | 78.4 | 48.1 | 46.7 | 4.8 | 7,500 |
+| fast | fixed | -160.00 | 0 | — | 62.3 | — | — | 65.8 | 40.8 | 40.8 | 3.3 | — |
+
+- **Mode = seeker** — noise level was found by bisection; CI and bit count are reported.
+- **Mode = fixed** — the global `noise_density_dbfs` was used; statistics come from the
+  main wideband simulation run.
+- **Impl Loss = —** — BER was zero or the modulation has no closed-form theory.
+
+### Noise bracket calibration
+
+The bracket `[noise_lo_dbfs, noise_hi_dbfs]` must straddle the target BER:
+BER at `noise_lo` must be *below* the target; BER at `noise_hi` must be *above* it.
+A bracket check is always run first, and a `ValueError` is raised with a descriptive
+message if either bound is wrong.
+
+To estimate appropriate bounds: the target BER point is typically within 20–40 dB of
+the noise floor where CNR → ∞. Start with `noise_lo = −160` and `noise_hi = −80`; if
+the check fails, read the error message — it tells you which endpoint is wrong and in
+which direction to move it. The GUI exposes both fields per carrier in the seeker
+parameters panel.
+
+---
+
+## 10. Adding or modifying carriers
 
 **Constraints:**
 
@@ -365,7 +533,7 @@ IM environment but their BER/EVM are not computed, saving significant time.
 3. **Within wideband bandwidth** — all carriers must fit within
    `[−sample_rate/2, +sample_rate/2]`.
 
-### Example: adding a 16QAM carrier
+### Example: adding a 16QAM carrier with the BER seeker
 
 ```toml
 [[carrier]]
@@ -378,37 +546,122 @@ filter_span = 10
 num_symbols = 5_000
 power_db    = 0
 freq        = -500_000_000
+enabled     = true
 sweep_demod = true
+use_seeker  = true
+
+[carrier.seeker]
+target_ber    = 0.001
+confidence    = 0.95
+ber_accuracy  = 0.0005
+noise_lo_dbfs = -120.0
+noise_hi_dbfs = -80.0
 
 [carrier.channel]
-enabled           = false
+enabled = false
 ```
 
 ---
 
-## 10. GUI
+## 11. GUI
 
 `gui.py` is a standalone tkinter application. It does not import any `sim/` modules —
-it reads and writes `simulation.toml` directly.
+it reads and writes `.toml` files directly and launches `main.py` as a subprocess.
 
-**Tabs:**
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ File: [path/to/config.toml]  [Open…] [Save] [Save As…]  |  [▶ Launch Simulation] │
+├──────────────────────────────────────────────────────────────┤
+│  [General]  [Amplifier]  [Sweep & Output]  [Carriers]        │ ← Notebook tabs
+│                                                              │
+│  (tab contents scroll independently)                         │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│ ████████████████████░░░░░░░░░░░░░░░░░░░░  (progress bar)    │
+│ [  25%] Starting BER seeker for 2 carrier(s)...             │ ← scrolling log
+│ [  30%] [seeker] 'slow' — bracket check (lo: -120.0 dBFS)  │   (4 lines, dark)
+│ [  35%] [seeker] 'slow' — step 1/20  BER 2.1e-01 → target  │
+├──────────────────────────────────────────────────────────────┤
+│ Running simulation...                         (status bar)  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Tabs
 
 | Tab | Contents |
 |---|---|
-| General | Wideband sample rate, noise density, OLA parameters, simulation seed |
-| Amplifier | IBO, AM-AM table (input/output columns), AM-PM table (input/phase_deg columns) |
-| Sweep & Output | IBO sweep list, noise sweep list, output directory and filenames |
-| Carriers | One expandable frame per carrier; all per-carrier parameters including `sweep_demod` checkbox and per-carrier channel impairment config |
+| **General** | Simulation seed, wideband sample rate and noise density, OLA filter span and block size |
+| **Amplifier** | Input backoff (dB), AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
+| **Sweep & Output** | IBO sweep list, noise sweep list, output directory (with Browse button), filenames for all output files including `detector_results` |
+| **Carriers** | One scrollable labeled frame per carrier (see below); view-filter dropdown at the top |
 
-**Launching the simulation:**
+### Carriers tab controls
 
-The "Run Simulation" button saves the current config to the loaded TOML path and
-launches `main.py` with that path as a command-line argument, so the simulation
-always uses the values shown in the GUI.
+**View dropdown** — selects which carriers are shown. Choose "All" to see every
+carrier at once, or pick a specific carrier name to show only that frame. Use this
+when you have many carriers and want to focus on one without scrolling. The dropdown
+updates automatically when carriers are added or removed.
+
+**Per-carrier frame** — each carrier has:
+
+- **Name, Modulation, Symbol Rate, SPS, Roll-off, Filter Span, Num Symbols, Power (dB),
+  Freq (Hz)** — the basic carrier parameters, arranged in a two-column grid.
+
+- **Include in wideband** checkbox (`enabled`) — when unchecked, the carrier is
+  excluded from the simulation entirely. It does not appear in the composite signal and
+  contributes no IM products.
+
+- **Enable detector model** checkbox (`sweep_demod`) — when checked, the carrier is
+  downsampled, demodulated, and included in the detector-results table after the run.
+  When unchecked, the carrier contributes to the wideband IM environment but its
+  BER/EVM are not computed.
+
+- **Mode radio buttons** — visible only when *both* enables are checked:
+  - **Fixed noise level** — use the global `noise_density_dbfs` from the General tab.
+    The carrier is demodulated in the main wideband run, and all statistics (BER, CNR,
+    CIR, CNIR, effective Eb/N0, implementation loss) are reported at that operating point.
+  - **BER seeker** — the adaptive bisection algorithm finds the noise level that
+    achieves the target BER. Seeker parameter fields appear below the radio buttons.
+
+- **BER Seeker Parameters** panel — visible only in seeker mode:
+  - Target BER, Confidence, BER Accuracy
+  - Noise Lo (dBFS/Hz), Noise Hi (dBFS/Hz)
+
+- **Channel impairments** checkbox — when checked, expands fields for amplitude
+  ripple, ripple cycles, phase nonlinearity, poly order, and an optional plot filename.
+
+- **Remove** button — removes the carrier from the config.
+
+### Progress bar and log
+
+When the simulation is running:
+
+- The **▶ Launch Simulation** button is disabled to prevent concurrent runs.
+- The **progress bar** advances as `main.py` emits `[NNN%]` lines to stdout.
+  The GUI reads these in real time and sets the bar's position accordingly.
+- The **scrolling log** (4-line dark panel) shows the last few output lines from
+  `main.py`, auto-scrolling to the newest entry. All output — metrics tables, seeker
+  step updates, error messages — appears here.
+- When the run finishes, the button re-enables and the status bar shows either
+  "Simulation complete." or the exit code if it failed.
+
+The subprocess is launched with Python's `-u` flag (unbuffered stdout) and
+`stderr=STDOUT` so all output flows through the same pipe. A daemon background
+thread reads lines continuously into a queue; the main thread drains the queue
+every 100 ms via `root.after()`, ensuring the GUI stays responsive.
+
+### Saving and launching
+
+The **Save** button (and **▶ Launch Simulation**) serialize all GUI fields to TOML
+and write them to the currently loaded file path before launching `main.py`. This
+guarantees that what you see in the GUI is exactly what `main.py` receives — no
+separate "apply" step is needed.
 
 ---
 
-## 11. Test suite
+## 12. Test suite
 
 Run all tests:
 
@@ -451,8 +704,19 @@ Both `test_ber_theory_table` and `test_generate_performance_plots` use the same
 `_N_BITS_PLOT` constant with `n_sym = _N_BITS_PLOT // bps` per modulation, ensuring
 equal statistical confidence across all modulations. Current default: `10_000` bits
 (≈4 s total). For a rigorous run set `_N_BITS_PLOT = 1_000_000`; this gives ±0.001
-BER accuracy at 95% confidence (worst-case p=0.5 derivation:
-N = (1.96/0.001)² × 0.25 = 960,400 → rounded to 1,000,000).
+BER accuracy at 95% confidence.
+
+### `tests/test_targeter.py`
+
+Validates the BER seeker in `sim/targeter.py`.
+
+| Test | What it checks |
+|---|---|
+| `test_n_bits_for_ci_sanity` | `_n_bits_for_ci()` formula: correct order for increasing confidence, accuracy, and BER |
+| `test_seek_ber_convergence` | Bisection reaches a noise level where measured BER is within ±0.08 of target; all result keys present; CI is well-ordered |
+| `test_linear_amplifier_zero_implementation_loss` | With a pass-through (linear) amplifier and single carrier, implementation loss is within ±3 dB of zero |
+| `test_invalid_bracket_lo_too_noisy` | Raises `ValueError` mentioning `noise_lo_dbfs` when the quiet endpoint already exceeds target BER |
+| `test_invalid_bracket_hi_too_quiet` | Raises `ValueError` mentioning `noise_hi_dbfs` when even the loud endpoint is below target BER |
 
 ### `tests/test_filters.py`
 
@@ -468,10 +732,9 @@ behaviour, and that a linear AM-AM table produces no phase distortion.
 ### `tests/test_main.py`
 
 End-to-end smoke test: mocks `load_config` with a minimal two-carrier config, runs
-`main()`, and asserts the expected output PNGs are written. Catches import errors,
-config-loading regressions, and broken output paths.
+`main()`, and asserts the expected output PNGs are written.
 
-### `tests/test_wideband.py`
+### `tests/test_simulation.py`
 
 Integration tests on the full `wideband_bpsk_simulation` function: checks that CNR
 varies correctly with noise density, CIR varies with IBO, and that disabling

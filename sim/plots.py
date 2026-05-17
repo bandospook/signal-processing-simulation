@@ -410,7 +410,7 @@ def write_sweep_report(sweep_results: list[dict], cfg: dict,
 
 def write_detector_results(
     results: dict[str, dict],
-    save_path: str,
+    save_path: str | None,
     append: bool = False,
 ) -> None:
     """

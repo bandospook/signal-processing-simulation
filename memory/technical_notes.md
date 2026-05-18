@@ -91,6 +91,39 @@ don't expose colormaps as direct attributes of matplotlib.cm.
 
 ---
 
+## NLA input normalization: RMS-based, not empirical-peak-based
+
+**Decision (2026-05-17):** The wideband composite is normalized to unit RMS before
+driving the nonlinear amplifier, using the *analytical* RMS — not np.max() of a
+single realization.
+
+Analytical RMS:
+    rms = sqrt( sum of 10^(power_db/10) for each carrier )
+    wideband_normed = wideband * drive / rms
+    drive = 10^(-input_backoff_db / 20)
+
+Why not empirical peak (np.max(np.abs(wideband))):
+  - np.max() is a random variable — it shifts ~0.3–0.5 dB between seeds, causing
+    run-to-run variation in effective drive level and thus in CIR/CNIR.
+  - A two-pass approach (one pass to find the peak, one to process) would cost ~25%
+    extra runtime: upsample is 1 of 4 OLA stages per carrier (1 up + 3 down), so
+    doubling the upsample adds 1/4 extra work.
+  - RMS-referenced IBO is the standard physical definition for satellite amplifier
+    characterisation: IBO = (single-carrier saturated input power) / (actual RMS input
+    power). Results are directly comparable to manufacturer specs and link budgets.
+  - The PAPR of the composite (peak/RMS) is the physical quantity that tells you how
+    hard the amp clips on peaks — it doesn't need to be baked into the normalization.
+
+What IBO means under this convention:
+    At IBO = 0 dB the RMS composite drives the amp at its reference (saturation) level.
+    At IBO = 3 dB the RMS is 3 dB below that. Peak excursions above saturation still
+    occur if PAPR > IBO; that is expected and physically correct.
+
+Note: the current code (sim/simulation.py) still uses the old np.max() normalization.
+This note records the agreed design intent for the chunk-pipeline refactor.
+
+---
+
 ## np.real() / np.imag() -- use function form
 
 Use np.real(x) not x.real. Pylance's numpy stubs have broken overloads for the

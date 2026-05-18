@@ -152,7 +152,7 @@ def main(config_path: str = "simulation.toml",
     fixed_results: dict[str, dict] = {}
     for carr in fixed_demod:
         cr = next((r for r in results["carriers"] if r["name"] == carr["name"]), None)
-        if cr is None:
+        if cr is None:  # pragma: no cover  — simulation always returns every active carrier
             continue
         mod = carr.get("modulation", "BPSK").upper()
         bps = bits_per_symbol(mod)
@@ -216,5 +216,5 @@ def main(config_path: str = "simulation.toml",
     _prog(1.00, "Done.")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main(sys.argv[1] if len(sys.argv) > 1 else "simulation.toml")

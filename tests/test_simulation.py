@@ -1,6 +1,7 @@
 """System-level tests for wideband_bpsk_simulation: NL distortion vs drive level."""
 import numpy as np
-from sim.simulation import wideband_bpsk_simulation
+import pytest
+from sim.simulation import wideband_bpsk_simulation, _WelchState, _decimate
 
 # Production AM-AM / AM-PM from simulation.toml
 _AM_AM = {
@@ -55,6 +56,37 @@ def test_noiseless_cnr_is_infinite():
     for cr in result["carriers"]:
         assert not np.isfinite(cr["cnr_db"]), \
             f"Expected infinite CNR with no noise, got {cr['cnr_db']:.1f} dB"
+
+
+def test_welch_state_empty_result():
+    """_WelchState.result() before any data is fed returns a -100 dB floor."""
+    ws = _WelchState(nfft=16)
+    f, psd = ws.result(sample_rate=1.0)
+    assert len(f) == 16
+    assert np.all(psd == -100.0)
+
+
+def test_decimate_offset_ge_len():
+    """_decimate returns empty array and adjusts offset when offset >= len(filtered)."""
+    sig = np.ones(3, dtype=complex)
+    out, new_offset = _decimate(sig, L=2, offset=5)
+    assert len(out) == 0
+    assert new_offset == 5 - 3
+
+
+def test_simulation_raises_sample_rate_below_native():
+    """Carrier with sample_rate < sps * symbol_rate must raise ValueError."""
+    bad_carrier = dict(name="c1", modulation="BPSK", symbol_rate=1e6, sps=8,
+                       rolloff=0.35, filter_span=4, num_symbols=50,
+                       power_db=0.0, freq=0.0)
+    with pytest.raises(ValueError, match="sample_rate / native_rate"):
+        wideband_bpsk_simulation(
+            carriers=[bad_carrier],
+            sample_rate=4e6,            # 4 MHz < 8 MHz native rate
+            am_am_cfg={"input": [0.0, 1.0], "output": [0.0, 1.0]},
+            am_pm_cfg={"input": [0.0, 1.0], "phase_deg": [0.0, 0.0]},
+            input_backoff_db=6.0,
+        )
 
 
 def test_distortion_increases_with_drive():

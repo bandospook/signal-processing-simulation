@@ -13,7 +13,7 @@ from sim.modulation import (
     differential_encode, differential_decode,
 )
 from sim.baseband import rrc_baseband
-from sim.receiver import receive
+from sim.receiver import receive, measure_evm_rms
 
 
 # ── Constellation unit tests ──────────────────────────────────────────────────
@@ -125,3 +125,45 @@ def test_evm_noiseless_low(mod, n_sym, sym_rate, sps):
                      reference_bits=bits)
     evm = result["evm_rms"]
     assert evm < 5.0, f"{mod}: noiseless EVM = {evm:.2f}%, expected < 5%"
+
+
+# ── Error paths ───────────────────────────────────────────────────────────────
+
+def test_bits_per_symbol_unknown():
+    with pytest.raises(ValueError, match="Unknown modulation"):
+        bits_per_symbol("UNKNOWN_MOD")
+
+
+def test_constellation_unknown():
+    with pytest.raises(ValueError, match="Unknown modulation"):
+        constellation("UNKNOWN_MOD")
+
+
+def test_rrc_baseband_non_integer_sps():
+    """sample_rate / symbol_rate must be an integer ≥ 2."""
+    with pytest.raises(ValueError, match="integer"):
+        rrc_baseband("BPSK", num_symbols=10, symbol_rate=3e6, sample_rate=7e6, seed=0)
+
+
+def test_receive_no_reference_bits_bpsk():
+    """receive() with no reference_bits → ber is None for non-DBPSK."""
+    bb, _, _, _ = rrc_baseband("BPSK", num_symbols=200, symbol_rate=1e6,
+                                sample_rate=4e6, seed=0)
+    result = receive(bb, "BPSK", rolloff=0.35, filter_span=8, sps=4)
+    assert result["ber"] is None
+    assert result["evm_rms"] is not None
+
+
+def test_receive_no_reference_bits_dbpsk():
+    """receive() with no reference_bits → ber is None for DBPSK."""
+    bb, _, _, _ = rrc_baseband("DBPSK", num_symbols=200, symbol_rate=1e6,
+                                sample_rate=4e6, seed=0)
+    result = receive(bb, "DBPSK", rolloff=0.35, filter_span=8, sps=4)
+    assert result["ber"] is None
+
+
+def test_measure_evm_zero_signal():
+    """Zero-amplitude input → EVM is NaN (undefined)."""
+    zeros = np.zeros(20, dtype=complex)
+    ideal = np.ones(20, dtype=complex)
+    assert np.isnan(measure_evm_rms(zeros, ideal))

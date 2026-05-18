@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.signal import resample_poly
 from sim.filters import (ola_convolve, fft_ola_upsample, fft_ola_downsample,
-                          apply_channel_impairment)
+                          apply_channel_impairment, rrc_coeffs)
 
 
 # ── ola_convolve ──────────────────────────────────────────────────────────────
@@ -176,6 +176,26 @@ def test_resample_poly_roundtrip_3_2():
     xr = resample_poly(y, 2, 3).astype(complex)[:N]
     m = N // 8
     assert np.allclose(xr[m:-m], x[m:-m], atol=1e-3)
+
+
+def test_rrc_singularity_rolloff_025():
+    """rolloff=0.25 puts the Nyquist singularity at t=1.0; with sps=4 that sample
+    is always present, exercising the special-case branch in rrc_coeffs."""
+    h = rrc_coeffs(filter_span=2, rolloff=0.25, sps=4)
+    assert len(h) > 0
+    assert np.all(np.isfinite(h))
+
+
+def test_ola_convolve_chunk_cb():
+    """chunk_cb is invoked at least once and reports done == total on the last call."""
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(500) + 1j * rng.standard_normal(500)
+    h = rng.standard_normal(17).astype(float)
+    calls: list[tuple[int, int]] = []
+    ola_convolve(x, h, block_size=64,
+                 chunk_cb=lambda done, total: calls.append((done, total)))
+    assert len(calls) > 0
+    assert calls[-1][0] == calls[-1][1]
 
 
 def test_rational_resample_no_fractional_L_error():

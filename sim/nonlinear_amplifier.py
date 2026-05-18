@@ -31,7 +31,7 @@ def nonlinear_amplifier(signal_in: np.ndarray,
     return amplitude_out * np.exp(1j * (phase_in + delta_phase))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     from sim.plots import plot_nl_tables
 
     _am_am = {

@@ -4,7 +4,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .baseband import rrc_baseband
-from .filters import OLAState, x_up_block, apply_channel_impairment
+from .filters import OLAState, x_up_block, apply_channel_impairment, rational_resample
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive
 
@@ -129,11 +129,16 @@ def wideband_bpsk_simulation(carriers: list[dict],
         channel_cfg = carr.get("channel")
 
         native_rate = float(sps) * symbol_rate
-        L = sample_rate / native_rate
-        if abs(L - round(L)) > 1e-9 or L < 1:
+        L_float = sample_rate / native_rate
+        if L_float < 1:
             raise ValueError(
-                f"Carrier '{carr['name']}': upsample factor {L:.4f} is not an integer >= 1")
-        L = int(round(L))
+                f"Carrier '{carr['name']}': sample_rate / native_rate = {L_float:.4f} < 1")
+        # Round to nearest integer upsample factor; rational_resample corrects the remainder.
+        L = max(1, int(math.floor(L_float + 0.5)))
+        sr_num = int(round(sample_rate))
+        sr_den = int(round(L * native_rate))
+        _g = math.gcd(sr_num, sr_den)
+        P_rs, Q_rs = sr_num // _g, sr_den // _g
 
         modulation = carr.get("modulation", "BPSK").upper()
         mod_kwargs = {k: carr[k] for k in ("apsk_gamma", "apsk_gamma1", "apsk_gamma2")
@@ -147,6 +152,12 @@ def wideband_bpsk_simulation(carriers: list[dict],
         bb_ch = (apply_channel_impairment(bb, native_rate, signal_bw, channel_cfg)
                  if channel_cfg is not None else bb)
 
+        # Rational-resample from native_rate to sample_rate/L (effective native rate)
+        # when L_float was non-integer.  P_rs/Q_rs == 1/1 for integer-L carriers.
+        n_bb_orig = len(bb_ch)
+        if P_rs != Q_rs:
+            bb_ch = rational_resample(bb_ch, P_rs, Q_rs, ola_filter_span)
+
         bb_ch_list.append(bb_ch)
         carrier_state.append(dict(
             name=carr["name"], bb=bb, bits=bits, symbols=symbols, t=t,
@@ -154,6 +165,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
             symbol_rate=symbol_rate, native_rate=native_rate, freq=freq, L=L,
             rolloff=rolloff, filter_span=filter_span, sps=sps,
             amp_scale=10 ** (power_db / 20),
+            P_rs=P_rs, Q_rs=Q_rs, n_bb_orig=n_bb_orig,
         ))
 
     # ── Wideband extent (trim to shortest carrier, as in the non-chunk path) ─
@@ -267,11 +279,19 @@ def wideband_bpsk_simulation(carriers: list[dict],
         # Strip the filter transient: each OLA stage (upsample + downsample) introduces
         # a group delay of ola_filter_span native-rate samples (n_half/L = filter_span).
         # Trimming 2*ola_filter_span from the start restores alignment with reference bits.
-        trim     = 2 * ola_filter_span
-        n_native = len(bb_ch_list[i])
-        bb_rx   = raw_ref  [trim : trim + n_native]
-        nl_pure = raw_nl   [trim : trim + n_native]
-        nl_down = raw_noisy[trim : trim + n_native]
+        trim        = 2 * ola_filter_span
+        n_native_rs = len(bb_ch_list[i])   # length at effective native rate
+        bb_rx   = raw_ref  [trim : trim + n_native_rs]
+        nl_pure = raw_nl   [trim : trim + n_native_rs]
+        nl_down = raw_noisy[trim : trim + n_native_rs]
+
+        # Reverse the rational resample to restore original native rate and integer sps.
+        # P_rs/Q_rs == 1/1 for integer-L carriers; the branch is a no-op in that case.
+        p_rs_i = cr["P_rs"]; q_rs_i = cr["Q_rs"]; n_orig = cr["n_bb_orig"]
+        if p_rs_i != q_rs_i:
+            bb_rx   = rational_resample(bb_rx,   q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
+            nl_pure = rational_resample(nl_pure, q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
+            nl_down = rational_resample(nl_down, q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
 
         # Project nl_pure onto bb_rx to separate linear gain from true IM distortion.
         alpha      = np.vdot(bb_rx, nl_pure) / (np.vdot(bb_rx, bb_rx) + 1e-30)

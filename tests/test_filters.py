@@ -1,7 +1,7 @@
 """Tests for OLA convolution, upsampling, downsampling, and channel impairment."""
 import numpy as np
 from sim.filters import (ola_convolve, fft_ola_upsample, fft_ola_downsample,
-                          apply_channel_impairment)
+                          apply_channel_impairment, rational_resample)
 
 
 # ── ola_convolve ──────────────────────────────────────────────────────────────
@@ -142,3 +142,79 @@ def test_pure_phase_does_not_change_out_of_band():
     out = apply_channel_impairment(x, fs, bw, cfg)
     # Amplitude should be 1 everywhere (H=1 out of band)
     assert np.allclose(np.abs(out[N//4:-N//4]), 1.0, atol=0.01)
+
+
+# ── rational_resample ─────────────────────────────────────────────────────────
+
+def test_rational_resample_identity():
+    """P == Q (after gcd) must return the input unchanged."""
+    x = np.array([1+0j, 2+1j, 3-1j, 4+0j])
+    assert np.allclose(rational_resample(x, 4, 4), x)
+    assert np.allclose(rational_resample(x, 6, 6), x)
+
+
+def test_rational_resample_output_length():
+    """Output length must be ceil(N*P/Q)."""
+    import math
+    N = 1000
+    for P, Q in [(125, 124), (125, 126), (3, 2), (2, 3)]:
+        out = rational_resample(np.ones(N, dtype=complex), P, Q)
+        assert len(out) == math.ceil(N * P / Q), f"P={P} Q={Q}"
+
+
+def test_rational_resample_upsample_2_samples():
+    """After upsampling by 2, even-indexed output samples must match the original."""
+    N = 256
+    f = 0.10   # normalised frequency, well below anti-alias cutoff
+    x = np.exp(1j * 2*np.pi*f * np.arange(N)).astype(complex)
+    y = rational_resample(x, 2, 1, filter_span=8)
+    # Skip the first ~filter_span samples (filter transient ≈ filter_span original samples)
+    m = 16
+    assert np.allclose(y[2*m : 2*(m + 100) : 2], x[m : m + 100], atol=1e-3)
+
+
+def test_rational_resample_roundtrip_3_2():
+    """
+    Roundtrip by 3/2 then 2/3 must recover a band-limited signal.
+
+    Uses a simple small P/Q to keep the test fast.
+    """
+    rng = np.random.default_rng(42)
+    N = 512
+    # Band-limit to < 1/3 of Nyquist (filter cutoff is at 1/max(3,2)=1/3)
+    X = np.zeros(N, dtype=complex)
+    n_keep = N // 8
+    X[:n_keep] = rng.standard_normal(n_keep) + 1j * rng.standard_normal(n_keep)
+    x = np.fft.ifft(X)
+    y  = rational_resample(x, 3, 2, filter_span=8)
+    xr = rational_resample(y, 2, 3, filter_span=8)[:N]
+    m = N // 8
+    assert np.allclose(xr[m:-m], x[m:-m], atol=1e-3)
+
+
+def test_rational_resample_no_fractional_L_error():
+    """
+    A wideband_bpsk_simulation with L_float=62.5 must not raise ValueError.
+
+    sample_rate=500e6, symbol_rate=2e6, sps=4 → L_float=62.5.
+    """
+    from sim.simulation import wideband_bpsk_simulation
+    _am_am = {"input":  [0.0, 0.5, 1.0], "output": [0.0, 0.45, 0.85]}
+    _am_pm = {"input":  [0.0, 0.5, 1.0], "phase_deg": [0.0, 1.0, 3.0]}
+    carrier = dict(
+        name="fast", symbol_rate=2e6, sps=4, rolloff=0.35,
+        filter_span=8, num_symbols=300, power_db=0.0, freq=0.0,
+        modulation="BPSK",
+    )
+    result = wideband_bpsk_simulation(
+        carriers=[carrier],
+        sample_rate=500e6,
+        am_am_cfg=_am_am,
+        am_pm_cfg=_am_pm,
+        input_backoff_db=6.0,
+        ola_filter_span=8,
+        seed=0,
+    )
+    cr = result["carriers"][0]
+    assert cr["ber"] is not None
+    assert 0.0 <= cr["ber"] <= 1.0

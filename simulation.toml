@@ -2,7 +2,7 @@
 seed = 42
 
 [wideband]
-sample_rate        = 800_000_000
+sample_rate        = 500_000_000
 noise_density_dbfs = -80
 
 [amplifier]
@@ -43,7 +43,7 @@ num_symbols  = 2_000
 power_db     = 0
 freq         = -200_000_000
 enabled      = true
-sweep_demod  = false
+sweep_demod  = true
 use_seeker   = false
 
 [carrier.channel]
@@ -64,8 +64,15 @@ num_symbols  = 10_000
 power_db     = 0
 freq         = 100_000_000
 enabled      = true
-sweep_demod  = false
-use_seeker   = false
+sweep_demod  = true
+use_seeker   = true
+
+[carrier.seeker]
+target_ber     = 0.001
+confidence     = 0.95
+ber_accuracy   = 0.0005
+noise_lo_dbfs  = -160
+noise_hi_dbfs  = -50
 
 [carrier.channel]
 ripple_db              = 0.3

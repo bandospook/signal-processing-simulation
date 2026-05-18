@@ -28,23 +28,71 @@ rate (BER) as functions of amplifier drive level and noise floor.
 - **GUI** — standalone `gui.py` (tkinter): load/edit/save `simulation.toml` and
   launch `main.py` from inside the editor.
 
-## Quick start
+## Setup
+
+The project uses [uv](https://docs.astral.sh/uv/) to manage the Python version
+and virtual environment.  First-time setup takes about a minute.
+
+**1. Install uv** (if you don't have it already)
 
 ```powershell
-# 1. Activate the virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# 2. Run the simulation
-python main.py
-
-# 3. Or open the GUI
-python gui.py
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**2. Clone and sync**
+
+```bash
+git clone https://github.com/bandospook/signal-processing-simulation.git
+cd signal-processing-simulation
+uv sync          # creates .venv/, downloads Python 3.14, installs all dependencies
+```
+
+`uv sync` reads `pyproject.toml` and installs numpy, matplotlib, pillow, scipy,
+pytest, and pytest-cov into an isolated `.venv/` directory.  Nothing is installed
+globally.
+
+**3. Activate the virtual environment**
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+```
+```bash
+# macOS / Linux
+source .venv/bin/activate
+```
+
+Your shell prompt will change to show `(signal-processing-simulation)`.
+
+**4. Run**
+
+```bash
+python main.py        # headless simulation; results written to output/
+python gui.py         # GUI — load, edit, and run simulation.toml interactively
+```
+
+**5. Verify (optional)**
+
+```bash
+python -m pytest tests/ -v     # 117 tests, all should pass
+python -m pyright sim/ main.py # 0 type errors expected (pre-existing unrelated)
+python -m ruff check sim/ main.py gui.py   # 0 lint errors
+```
+
+> **IDE note (VS Code / PyCharm):** point your editor's Python interpreter at
+> `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (macOS/Linux) so
+> that imports resolve correctly and the integrated test runner uses the right
+> environment.
 
 See [docs/GUIDE.md](docs/GUIDE.md) for a full walkthrough, configuration reference,
 output descriptions, and test-suite documentation.
 
 ## Requirements
 
-- Python ≥ 3.11 (managed by [uv](https://github.com/astral-sh/uv))
-- numpy, matplotlib (installed automatically via `uv sync`)
+- Python 3.14 (downloaded automatically by uv; no manual install needed)
+- numpy, matplotlib, pillow, scipy — all installed automatically by `uv sync`

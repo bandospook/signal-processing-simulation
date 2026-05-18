@@ -135,8 +135,7 @@ What IBO means under this convention:
     At IBO = 3 dB the RMS is 3 dB below that. Peak excursions above saturation still
     occur if PAPR > IBO; that is expected and physically correct.
 
-Note: the current code (sim/simulation.py) still uses the old np.max() normalization.
-This note records the agreed design intent for the chunk-pipeline refactor.
+This is implemented in sim/simulation.py (commit e33778e).
 
 ---
 

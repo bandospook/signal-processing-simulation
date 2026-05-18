@@ -40,8 +40,10 @@ def _run_no_noise(ibo_db: float) -> dict:
 def test_simulation_returns_expected_keys():
     """Smoke test: result dict has the expected top-level and per-carrier keys."""
     result = _run_no_noise(ibo_db=6.0)
-    for key in ("wideband", "wideband_nl", "wideband_noisy", "t_wb", "carriers"):
+    for key in ("psd_pre_nl", "psd_post_nl", "psd_noisy", "has_noise", "carriers"):
         assert key in result, f"Missing key: {key}"
+    f, p = result["psd_pre_nl"]
+    assert len(f) == len(p) and len(f) > 0
     for cr in result["carriers"]:
         for key in ("name", "ber", "evm_rms", "cir_db", "cnr_db", "cnir_db"):
             assert key in cr, f"Missing per-carrier key: {key}"

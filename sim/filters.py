@@ -1,9 +1,72 @@
+import math
 from collections.abc import Callable
 
 import numpy as np
 
 _ChunkCB = Callable[[int, int], None] | None
 _CHUNK_REPORT = 64
+
+
+class OLAState:
+    """
+    Stateful overlap-add convolution processor.
+
+    Each call to process() feeds one block of input samples and returns
+    block_size output samples, maintaining the overlap tail between calls.
+    Correct for any filter length M relative to block_size (including M > B).
+    """
+
+    def __init__(self, h: np.ndarray, block_size: int) -> None:
+        M = len(h)
+        self._N_fft = 2 ** int(np.ceil(np.log2(block_size + M - 1)))
+        self._H    = np.fft.fft(h.astype(complex), self._N_fft)
+        self._M    = M
+        self._B    = block_size
+        self._tail = np.zeros(M - 1, dtype=complex)
+
+    def process(self, block: np.ndarray) -> np.ndarray:
+        """Return block_size filtered samples; pads the last (partial) block with zeros."""
+        B, M = self._B, self._M
+        block_pad = np.zeros(B, dtype=complex)
+        block_pad[:len(block)] = block
+        y = np.fft.ifft(np.fft.fft(block_pad, self._N_fft) * self._H)
+        combined = y[:B + M - 1].copy()
+        combined[:M - 1] += self._tail
+        self._tail = combined[B:].copy()
+        return combined[:B]
+
+    @staticmethod
+    def for_upsample(L: int, filter_span: int, block_size: int) -> "OLAState":
+        """Kaiser-sinc upsample filter for the given integer ratio L."""
+        n_half = filter_span * L
+        n = np.arange(-n_half, n_half + 1)
+        h = np.sinc(n / L) * np.kaiser(2 * n_half + 1, beta=8.0)
+        return OLAState(h, block_size)
+
+    @staticmethod
+    def for_downsample(L: int, filter_span: int, block_size: int) -> "OLAState":
+        """Kaiser-sinc downsample anti-alias filter (gain=1/L) for integer ratio L."""
+        n_half = filter_span * L
+        n = np.arange(-n_half, n_half + 1)
+        h = np.sinc(n / L) * np.kaiser(2 * n_half + 1, beta=8.0) / L
+        return OLAState(h, block_size)
+
+
+def x_up_block(bb: np.ndarray, L: int, block_start: int, block_size: int) -> np.ndarray:
+    """
+    One block of the zero-inserted upsampled signal without allocating the full array.
+
+    Equivalent to x_up[block_start : block_start + block_size] where
+    x_up = zeros(len(bb) * L) with x_up[::L] = bb, but only the block is built.
+    """
+    out = np.zeros(block_size, dtype=complex)
+    n_lo = math.ceil(block_start / L)
+    n_hi = math.ceil((block_start + block_size) / L)
+    ns   = np.arange(n_lo, min(n_hi, len(bb)))
+    if len(ns):
+        pos = ns * L - block_start
+        out[pos] = bb[ns]
+    return out
 
 
 def rrc_coeffs(filter_span: int, rolloff: float, sps: int) -> np.ndarray:

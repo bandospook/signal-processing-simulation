@@ -236,7 +236,8 @@ def plot_wideband_results(results: dict,
                            save_path: str | None = None) -> None:
     """
     Composite wideband PSD: pre-NL, post-NL, and (if noise present) post-noise.
-    Per-carrier downsampled views are omitted — only the composite spectrum is shown.
+    Accepts the chunk-pipeline return format: results["psd_pre_nl"] etc. are
+    (f_array, psd_db_array) tuples from the Welch accumulator.
     """
     carriers = results["carriers"]
     carrier_labels = "  |  ".join(
@@ -246,15 +247,15 @@ def plot_wideband_results(results: dict,
     fig.suptitle(
         f"Wideband NL Simulation — {sample_rate/1e9:.3g} GHz\n{carrier_labels}")
 
-    f, p = psd_db(results["wideband"], sample_rate)
+    f, p = results["psd_pre_nl"]
     ax.plot(f, p, lw=0.8, color="tab:blue", label="Pre-NL")
-    f, p = psd_db(results["wideband_nl"], sample_rate)
+    f, p = results["psd_post_nl"]
     ax.plot(f, p, lw=0.8, color="tab:orange", alpha=0.85, label="Post-NL")
-    if results.get("wideband_noisy") is not results["wideband_nl"]:
-        f, p = psd_db(results["wideband_noisy"], sample_rate)
+    if results.get("has_noise", False):
+        f, p = results["psd_noisy"]
         ax.plot(f, p, lw=0.6, color="tab:green", alpha=0.7, label="Post-NL + noise")
 
-    ax.set_title("Wideband PSD")
+    ax.set_title("Wideband PSD (Welch average)")
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("dB")
     ax.set_ylim(bottom=-100)

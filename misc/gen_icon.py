@@ -1,21 +1,17 @@
 """
-gen_icon.py — regenerate the SO-WAT application icon.
+gen_icon.py — SO-WAT application icon builder.
 
-Produces a 128x128 PNG of a sine wave dissolving into binary digits,
-then writes the base64-encoded constant into ../gui.py, replacing the
-existing _ICON_B64 block in-place.
+Produces a 128x128 PNG of a sine wave dissolving into binary digits.
+gui.py calls build_icon() at runtime; this script is only needed to preview
+the icon or to inspect the raw PNG.
 
 Usage:
-    python misc/gen_icon.py           # update gui.py
-    python misc/gen_icon.py --preview # save icon_preview.png and exit
+    python misc/gen_icon.py --preview   # save icon_preview.png next to this script
 """
 
 import argparse
-import base64
 import io
 import math
-import sys
-import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -80,51 +76,21 @@ def build_icon(size: int = 128) -> bytes:
     return buf.getvalue()
 
 
-def embed_in_gui(png_bytes: bytes, gui_path: Path) -> None:
-    raw_b64 = base64.b64encode(png_bytes).decode()
-    lines   = textwrap.wrap(raw_b64, 76)
-    new_const = "_ICON_B64 = (\n"
-    for line in lines:
-        new_const += f'    "{line}"\n'
-    new_const += ")"
-
-    text = gui_path.read_text(encoding="utf-8")
-    src_lines = text.splitlines(keepends=True)
-
-    start = next(
-        i for i, l in enumerate(src_lines) if l.startswith("_ICON_B64 = (")
-    )
-    end = next(
-        i for i in range(start, len(src_lines)) if src_lines[i].strip() == ")"
-    )
-
-    new_lines = src_lines[:start] + [new_const + "\n"] + src_lines[end + 1:]
-    gui_path.write_text("".join(new_lines), encoding="utf-8")
-    print(f"Updated {gui_path}  ({len(lines)} base64 lines)")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--preview", action="store_true",
-        help="Save icon_preview.png next to this script and exit without touching gui.py",
+        help="Save icon_preview.png next to this script",
     )
     args = parser.parse_args()
 
-    png_bytes = build_icon()
-
-    if args.preview:
-        out = Path(__file__).parent / "icon_preview.png"
-        out.write_bytes(png_bytes)
-        print(f"Saved preview -> {out}")
+    if not args.preview:
+        parser.print_help()
         return
 
-    gui_path = Path(__file__).parent.parent / "gui.py"
-    if not gui_path.exists():
-        print(f"ERROR: {gui_path} not found", file=sys.stderr)
-        sys.exit(1)
-
-    embed_in_gui(png_bytes, gui_path)
+    out = Path(__file__).parent / "icon_preview.png"
+    out.write_bytes(build_icon())
+    print(f"Saved preview -> {out}")
 
 
 if __name__ == "__main__":

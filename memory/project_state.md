@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-17, commit 5bfd607
+Last updated: 2026-05-17, commit e33778e
 
 ---
 
@@ -29,32 +29,29 @@ Last updated: 2026-05-17, commit 5bfd607
 
 ---
 
-## Active design decision — chunk pipeline refactor (NOT yet implemented)
+## Recent major change: chunk pipeline refactor (complete, commit e33778e)
 
-The wideband simulation currently materialises the full composite signal in RAM before
-processing. The plan is a chunk-wise pipeline where the wideband signal is never fully
-held in memory. Two design choices have been agreed:
+wideband_bpsk_simulation now processes the composite signal in OLA blocks of
+ola_block_size wideband samples. No full-length wideband arrays are ever held in RAM.
 
-**NLA input normalization:** use analytical RMS, not empirical peak.
-  See technical_notes.md § "NLA input normalization" for full rationale.
-  Current code in sim/simulation.py still uses np.max() — this is the thing to change.
-
-**PSD estimate:** Welch averaging over all samples (not a single chunk).
-  Build PSD incrementally as chunks arrive; average periodograms across all segments.
-  This was chosen over a single large-chunk estimate for lower variance.
-
-The chunk pipeline itself has not been started. When implementing:
-- Upsample pass produces chunks at wideband rate → accumulate composite → NL → AWGN
-- Per-carrier downsample reads the same wideband chunks
-- Welch PSD accumulates segment FFTs as chunks pass through
-- RMS normalization computed analytically before any chunks are processed
+Key implementation details (sim/simulation.py):
+- OLAState (sim/filters.py) — stateful overlap-add convolution; process() returns
+  block_size filtered samples per call, maintaining the overlap tail between calls
+- x_up_block() — zero-inserted upsample block without allocating the full N_wb array
+- _WelchState — Welch PSD accumulator; feeds chunks until nfft=16384 samples, averages
+- _decimate() — phase-coherent decimation; carries offset across chunk boundaries
+- Analytical RMS normalization: norm = drive / sqrt(sum(10^(power_db/10))) per carrier
+  (replaces seed-dependent np.max() — see technical_notes.md § "NLA input normalization")
+- Three downsampler paths per carrier: pre-NL reference, post-NL noiseless, post-NL+noise
+- Transient trim: 2 * ola_filter_span native samples stripped from collected buffers
+  before BER/EVM computation (restores symbol alignment across the two OLA filter stages)
+- Return dict keys: psd_pre_nl, psd_post_nl, psd_noisy, has_noise, carriers
 
 ---
 
 ## Open work items
 
-1. **Chunk pipeline refactor** — described above; design decided, no code written yet
-2. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers with
+1. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers with
    click-to-select/edit. Deferred, no code started.
 
 ---

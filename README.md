@@ -79,9 +79,9 @@ python gui.py         # GUI — load, edit, and run simulation.toml interactivel
 **5. Verify (optional)**
 
 ```bash
-python -m pytest tests/ -v     # 117 tests, all should pass
-python -m pyright sim/ main.py # 0 type errors expected (pre-existing unrelated)
-python -m ruff check sim/ main.py gui.py   # 0 lint errors
+python -m pytest tests/ -v     # 116 tests, all should pass
+python -m pyright gui.py main.py sim/ tests/  # 0 type errors
+python -m ruff check gui.py main.py sim/ tests/  # 0 lint errors
 ```
 
 > **IDE note (VS Code / PyCharm):** point your editor's Python interpreter at

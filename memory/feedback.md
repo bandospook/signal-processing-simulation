@@ -23,6 +23,18 @@ Never include `Co-Authored-By: Claude` or any Anthropic attribution in git commi
 **Why:** User explicitly rejected it.
 **How to apply:** Omit the Co-Authored-By line from every commit message.
 
+## Toolchain: use PowerShell and explicit venv paths on Windows
+
+Never use the Bash tool for running project commands (python, pytest, pyright, ruff) on this Windows machine.
+**Why:** The Bash tool runs Git Bash. Unqualified `python` hits the Windows Store stub ("Python was not found") and breaks tools. Pyright is Node-based — its internal Python discovery calls unqualified `python`, so even `python.exe -m pyright` fails unless pyright can find the venv independently via pyrightconfig.json.
+**How to apply:**
+- Use the PowerShell tool for all project commands.
+- Run Python as `.venv\Scripts\python.exe -m <module>` (e.g., `-m pytest`).
+- **pyright and ruff are compiled binary tools** — they install as `.exe` files in `.venv\Scripts\`, NOT as Python modules. Use `.venv\Scripts\pyright.exe` and `.venv\Scripts\ruff.exe` directly. Do NOT use `python.exe -m pyright` or `python.exe -m ruff`.
+- Before running any tool, verify its `.exe` is present in `.venv\Scripts\` with: `ls .venv/Scripts/` via Bash. If missing, add it to `[dependency-groups] dev` in `pyproject.toml` and run `uv sync`.
+- `pyrightconfig.json` must exist at repo root with `venvPath`/`venv` set so pyright finds packages when invoked any way.
+- The README's "activate then `python -m pyright`" pattern is correct for a human interactive shell but does NOT work for Claude Code since venv activation doesn't persist between tool calls.
+
 ## Plots alongside tests
 
 User wants BER vs Es/N0 with theory, EVM plots, and eye diagrams as part of the test suite — not just correctness assertions, but visual validation that the physics is right.

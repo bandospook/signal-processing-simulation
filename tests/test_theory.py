@@ -20,7 +20,7 @@ def test_ber_awgn_dbpsk_worse_than_bpsk():
     esn0 = 3.0
     dbpsk = ber_awgn("DBPSK", esn0)
     bpsk  = ber_awgn("BPSK",  esn0)
-    assert dbpsk is not None and 0.0 < dbpsk < 0.5
+    assert dbpsk is not None and bpsk is not None and 0.0 < dbpsk < 0.5
     assert dbpsk > bpsk
 
 
@@ -45,6 +45,7 @@ def test_ber_awgn_apsk_returns_none(mod):
 def test_ber_awgn_monotone_decreasing(mod):
     vals = [ber_awgn(mod, esn0) for esn0 in range(-2, 20, 2)]
     for a, b in zip(vals, vals[1:]):
+        assert a is not None and b is not None, f"{mod}: unexpected None from ber_awgn"
         assert a > b, f"{mod}: BER not decreasing"
 
 
@@ -57,6 +58,7 @@ def test_ebn0_for_ber_inverts_ber_awgn():
     bps    = bits_per_symbol("BPSK")
     esn0   = ebn0_db + 10.0 * math.log10(bps)
     recovered = ber_awgn("BPSK", esn0)
+    assert recovered is not None
     assert abs(recovered - target) / target < 0.01
 
 

@@ -1,5 +1,7 @@
 """Tests for sim/targeter.py: BER seeker and implementation-loss reporting."""
 
+from typing import Any
+
 import pytest
 
 from sim.targeter import (
@@ -305,7 +307,7 @@ def test_seek_ber_progress_callback():
 
 _SEEK_CARRIER = dict(_CARRIER, use_seeker=True)
 
-_SEEK_KWARGS = dict(
+_SEEK_KWARGS: dict[str, Any] = dict(
     sample_rate=_SAMPLE_RATE,
     am_am_cfg=_LINEAR_AM_AM,
     am_pm_cfg=_LINEAR_AM_PM,

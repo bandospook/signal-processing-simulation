@@ -19,13 +19,18 @@ and is the single source of truth across all machines.
 
 ## Toolchain
 
-- Package manager: `uv`; venv at `.venv/`
-- Python (Windows): `.venv/Scripts/python.exe`
+- Package manager: `uv`; venv at `.venv/`; run `uv sync` after editing pyproject.toml
+- Python (Windows): `.venv\Scripts\python.exe`
 - Python (Linux/Mac): `.venv/bin/python`
-- Tests: `python -m pytest tests/ -v`
-- Type check: `python -m pyright gui.py main.py sim/ tests/`
-- Lint: `python -m ruff check gui.py main.py sim/ tests/`
+- Tests: `.venv\Scripts\python.exe -m pytest tests/ -v`
+- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
+- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
 - Line length: 110 chars (configured in pyproject.toml)
+
+**Shell: always use PowerShell (not Bash) for project commands on Windows.**
+Unqualified `python` hits the Windows Store stub on this machine, breaking both pytest and
+pyright's internal venv discovery. Always use full `.venv\Scripts\` paths.
+`pyrightconfig.json` at repo root points pyright at the venv so it finds packages.
 
 ## Code quality gates (run before every commit)
 

@@ -1,7 +1,8 @@
 """Tests for OLA convolution, upsampling, downsampling, and channel impairment."""
 import numpy as np
+from scipy.signal import resample_poly
 from sim.filters import (ola_convolve, fft_ola_upsample, fft_ola_downsample,
-                          apply_channel_impairment, rational_resample)
+                          apply_channel_impairment)
 
 
 # ── ola_convolve ──────────────────────────────────────────────────────────────
@@ -144,50 +145,35 @@ def test_pure_phase_does_not_change_out_of_band():
     assert np.allclose(np.abs(out[N//4:-N//4]), 1.0, atol=0.01)
 
 
-# ── rational_resample ─────────────────────────────────────────────────────────
+# ── resample_poly (scipy) ─────────────────────────────────────────────────────
 
-def test_rational_resample_identity():
-    """P == Q (after gcd) must return the input unchanged."""
+def test_resample_poly_identity():
+    """P == Q must return the input unchanged."""
     x = np.array([1+0j, 2+1j, 3-1j, 4+0j])
-    assert np.allclose(rational_resample(x, 4, 4), x)
-    assert np.allclose(rational_resample(x, 6, 6), x)
+    assert np.allclose(resample_poly(x, 4, 4), x)
 
 
-def test_rational_resample_output_length():
-    """Output length must be ceil(N*P/Q)."""
-    import math
-    N = 1000
-    for P, Q in [(125, 124), (125, 126), (3, 2), (2, 3)]:
-        out = rational_resample(np.ones(N, dtype=complex), P, Q)
-        assert len(out) == math.ceil(N * P / Q), f"P={P} Q={Q}"
-
-
-def test_rational_resample_upsample_2_samples():
+def test_resample_poly_upsample_2_samples():
     """After upsampling by 2, even-indexed output samples must match the original."""
     N = 256
     f = 0.10   # normalised frequency, well below anti-alias cutoff
     x = np.exp(1j * 2*np.pi*f * np.arange(N)).astype(complex)
-    y = rational_resample(x, 2, 1, filter_span=8)
-    # Skip the first ~filter_span samples (filter transient ≈ filter_span original samples)
-    m = 16
+    y = resample_poly(x, 2, 1)
+    m = 16   # skip filter transient
     assert np.allclose(y[2*m : 2*(m + 100) : 2], x[m : m + 100], atol=1e-3)
 
 
-def test_rational_resample_roundtrip_3_2():
+def test_resample_poly_roundtrip_3_2():
     """
     Roundtrip by 3/2 then 2/3 must recover a band-limited signal.
-
-    Uses a simple small P/Q to keep the test fast.
     """
     rng = np.random.default_rng(42)
     N = 512
-    # Band-limit to < 1/3 of Nyquist (filter cutoff is at 1/max(3,2)=1/3)
     X = np.zeros(N, dtype=complex)
-    n_keep = N // 8
-    X[:n_keep] = rng.standard_normal(n_keep) + 1j * rng.standard_normal(n_keep)
+    X[:N // 8] = rng.standard_normal(N // 8) + 1j * rng.standard_normal(N // 8)
     x = np.fft.ifft(X)
-    y  = rational_resample(x, 3, 2, filter_span=8)
-    xr = rational_resample(y, 2, 3, filter_span=8)[:N]
+    y  = resample_poly(x, 3, 2)
+    xr = resample_poly(y, 2, 3).astype(complex)[:N]
     m = N // 8
     assert np.allclose(xr[m:-m], x[m:-m], atol=1e-3)
 

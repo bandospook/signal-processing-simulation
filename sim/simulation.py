@@ -4,7 +4,9 @@ from collections.abc import Callable
 import numpy as np
 
 from .baseband import rrc_baseband
-from .filters import OLAState, x_up_block, apply_channel_impairment, rational_resample
+from scipy.signal import resample_poly
+
+from .filters import OLAState, x_up_block, apply_channel_impairment
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive
 
@@ -133,7 +135,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
         if L_float < 1:
             raise ValueError(
                 f"Carrier '{carr['name']}': sample_rate / native_rate = {L_float:.4f} < 1")
-        # Round to nearest integer upsample factor; rational_resample corrects the remainder.
+        # Round to nearest integer upsample factor; resample_poly corrects the remainder.
         L = max(1, int(math.floor(L_float + 0.5)))
         sr_num = int(round(sample_rate))
         sr_den = int(round(L * native_rate))
@@ -156,7 +158,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
         # when L_float was non-integer.  P_rs/Q_rs == 1/1 for integer-L carriers.
         n_bb_orig = len(bb_ch)
         if P_rs != Q_rs:
-            bb_ch = rational_resample(bb_ch, P_rs, Q_rs, ola_filter_span)
+            bb_ch = resample_poly(bb_ch, P_rs, Q_rs).astype(complex)
 
         bb_ch_list.append(bb_ch)
         carrier_state.append(dict(
@@ -289,9 +291,9 @@ def wideband_bpsk_simulation(carriers: list[dict],
         # P_rs/Q_rs == 1/1 for integer-L carriers; the branch is a no-op in that case.
         p_rs_i = cr["P_rs"]; q_rs_i = cr["Q_rs"]; n_orig = cr["n_bb_orig"]
         if p_rs_i != q_rs_i:
-            bb_rx   = rational_resample(bb_rx,   q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
-            nl_pure = rational_resample(nl_pure, q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
-            nl_down = rational_resample(nl_down, q_rs_i, p_rs_i, ola_filter_span)[:n_orig]
+            bb_rx   = resample_poly(bb_rx,   q_rs_i, p_rs_i).astype(complex)[:n_orig]
+            nl_pure = resample_poly(nl_pure, q_rs_i, p_rs_i).astype(complex)[:n_orig]
+            nl_down = resample_poly(nl_down, q_rs_i, p_rs_i).astype(complex)[:n_orig]
 
         # Project nl_pure onto bb_rx to separate linear gain from true IM distortion.
         alpha      = np.vdot(bb_rx, nl_pure) / (np.vdot(bb_rx, bb_rx) + 1e-30)

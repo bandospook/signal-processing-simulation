@@ -377,6 +377,7 @@ class App:
         self._last_progress_line: str = ""
         self._slow_warned:        bool = False
         self._last_line_was_chunk: bool = False
+        self._log_file_chunk_pos: int | None = None
         root.title("SO-WAT")
         root.minsize(760, 580)
         _icon = tk.PhotoImage(data=_ICON_B64)
@@ -801,8 +802,9 @@ class App:
 
         out_dir = Path(self._vars["out.dir"].get().strip() or ".")
         out_dir.mkdir(parents=True, exist_ok=True)
+        self._log_file_chunk_pos = None
         try:
-            self._log_file = open(out_dir / "simulation.log", "w", encoding="utf-8")
+            self._log_file = open(out_dir / "simulation.log", "wb")
         except OSError:
             self._log_file = None
 
@@ -824,19 +826,32 @@ class App:
         threading.Thread(target=self._read_output, daemon=True).start()
         self.root.after(100, self._poll_proc)
 
+    def _log_file_write(self, line: str):
+        if self._log_file is None:
+            return
+        is_chunk = bool(_CHUNK_RE.match(line))
+        if self._log_file_chunk_pos is not None:
+            self._log_file.seek(self._log_file_chunk_pos)
+            self._log_file.truncate()
+        if is_chunk:
+            self._log_file_chunk_pos = self._log_file.tell()
+        else:
+            self._log_file_chunk_pos = None
+        self._log_file.write((line + "\n").encode("utf-8"))
+        self._log_file.flush()
+
     def _read_output(self):
         if self._proc is None or self._proc.stdout is None:
             return
         for line in self._proc.stdout:
             stripped = line.rstrip()
             self._queue.put(stripped)
-            if self._log_file:
-                self._log_file.write(stripped + "\n")
-                self._log_file.flush()
+            self._log_file_write(stripped)
         self._proc.wait()
         if self._log_file:
             self._log_file.close()
             self._log_file = None
+            self._log_file_chunk_pos = None
         self._queue.put(None)
 
     def _poll_proc(self):

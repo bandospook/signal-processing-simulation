@@ -18,6 +18,7 @@
 14. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
 15. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
 16. [Toolchain](toolchain.md) — correct invocations for pytest/pyright/ruff, Windows Store Python stub, pyrightconfig.json
+17. [Channel impairment model](channel_impairment.md) — transfer function, band-edge behaviour, baseband-equivalent representation, cross-carrier limitation
 
 ---
 
@@ -864,3 +865,33 @@ and harmless elsewhere.
 
 The document also covers how to add or remove dev tools via `pyproject.toml` and
 `uv sync`, and lists the platform-specific binary paths for all three tools.
+
+---
+
+## 17. Channel impairment model
+
+**→ [channel_impairment.md](channel_impairment.md)**
+
+Documents `apply_channel_impairment` in `sim/filters.py`: the transfer function
+H(f) it constructs, why unity gain outside `signal_bw` is the correct choice
+(not a limitation), the baseband-equivalent representation that makes the model
+valid for any LTI passband filter, and the two genuine constraints of the
+current implementation.
+
+The key points:
+
+- H(f) is defined as amplitude ripple × phase nonlinearity inside
+  `|f| ≤ signal_bw / 2`, and unity elsewhere. The in-band region is normalised
+  to `f_norm ∈ [−1, +1]` so that `ripple_cycles` and `phase_poly_order` are
+  independent of the carrier symbol rate.
+
+- Unity outside `signal_bw` is intentional: the RRC transmit filter already
+  suppresses out-of-band power by 40–60 dB, and real transponder filters do not
+  distort outside their allocated slot.
+
+- The hard step at `|f| = signal_bw / 2` creates sinc ringing in the time
+  domain (magnitude ≈ `r ≈ 0.028` for 0.5 dB ripple, or about −31 dBc). This
+  is negligible for any practically configured ripple depth.
+
+- Each carrier's impairment is applied independently at its own baseband rate.
+  A wideband filter that couples multiple carriers is not modelled.

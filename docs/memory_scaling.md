@@ -197,3 +197,63 @@ For the 100 kHz carrier example:
 | 131,072 | 262,144 | 4 MB | 50% |
 
 Raising `block_size` to 65,536 recovers 50% efficiency with no increase in N_fft for this case — a free win.
+
+---
+
+## Post-refactor: Chunk Pipeline Memory Model
+
+The persistent wideband arrays in §3 are the motivation for the chunk pipeline refactor.
+After the refactor, they are eliminated:
+
+**What goes away:**
+
+| Eliminated array | Old size |
+|-----------------|---------|
+| `wideband_normed` | N_wb × 16 B |
+| `wideband_nl` | N_wb × 16 B |
+| `wideband_noisy` | N_wb × 16 B |
+| `x_up` (per carrier, in upsample) | N_wb × 16 B |
+| `y_full` (OLA output, in `ola_convolve`) | N_wb × 16 B |
+
+These are replaced by chunk-local buffers that are allocated once and reused:
+
+**What replaces them:**
+
+| Buffer | Size | Notes |
+|--------|------|-------|
+| Wideband chunk (composite) | `chunk_size × 16 B` | One chunk, reused each iteration |
+| Per-carrier upsample state | `N_fft × 16 B` per carrier | OLA overlap tail, one per carrier |
+| Per-carrier downsample state × 3 | `N_fft × 16 B` per carrier | One per (carrier × 3 passes) |
+| Welch accumulator | `N_fft_welch × 8 B` × 3 | One per wideband signal (pre/post-NL/noisy) |
+| Per-carrier native-rate output | `num_symbols × sps × 16 B` | Still needed for BER/EVM; at native rate |
+
+**Peak memory after refactor** (example: 100 kHz carrier, L=2000, `block_size=65536`):
+
+```
+Chunk buffer:             65,536 × 16 =    1.0 MB   (wideband, reused)
+Upsample OLA state:      131,072 × 16 =    2.0 MB   (per carrier)
+Downsample OLA state × 3: 131,072 × 16 × 3 = 6.0 MB (per carrier)
+Welch accumulators:      131,072 × 8  × 3 =  3.0 MB  (all 3 wideband PSDs)
+Native-rate output:      num_symbols × sps × 16       (scales with symbols)
+```
+
+Total wideband overhead ≈ 12 MB regardless of simulation duration or N_wb.
+The native-rate per-carrier arrays are the only thing that still scales with
+`num_symbols`, and they do so at the native (narrow) rate — at most N_wb / L bytes.
+
+**The critical case** — 100k symbols of a 100 kHz carrier in an 800 MHz wideband system:
+
+| Approach | Wideband memory |
+|----------|----------------|
+| Pre-refactor (full arrays) | 100,000 × 2,000 × 16 × 5 arrays ≈ **16 GB** |
+| Post-refactor (chunk pipeline) | ≈ **12 MB** regardless of num_symbols |
+
+**Return values change:** The simulation no longer returns `wideband`, `wideband_nl`,
+or `wideband_noisy` as arrays. It returns their Welch PSD estimates instead —
+`(f, psd_pre_nl)`, `(f, psd_post_nl)`, `(f, psd_noisy)` — which is all the
+downstream plot code ever needed from them.
+
+**Strided view issue fixed:** The old `fft_ola_downsample` returned `y[::L]`, a strided
+view into the full N_wb allocation, keeping it alive until the view was dropped. The
+stateful chunk-pipeline downsamplers emit decimated output directly, with no full-length
+intermediate array.

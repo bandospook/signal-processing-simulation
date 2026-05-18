@@ -91,6 +91,22 @@ don't expose colormaps as direct attributes of matplotlib.cm.
 
 ---
 
+## Why the chunk pipeline matters: symbol rate ratio explosion
+
+When carriers differ greatly in symbol rate, N_wb = num_symbols × L grows explosively
+for the narrowband carrier. Example: 100,000 symbols of a 100 kHz carrier at
+L = 800MHz / (4 × 100kHz) = 2000 gives 200M wideband samples. At 16 bytes each,
+the five persistent wideband arrays (wideband, wideband_normed, wideband_nl,
+wideband_noisy, x_up) consume ~16 GB.
+
+The chunk pipeline eliminates all five of those arrays. Peak wideband memory becomes
+~12 MB regardless of simulation duration — only the per-carrier native-rate arrays
+(BER/EVM output) scale with num_symbols, and they do so at the narrow native rate.
+
+This is documented in detail in docs/memory_scaling.md § "Post-refactor: Chunk Pipeline".
+
+---
+
 ## NLA input normalization: RMS-based, not empirical-peak-based
 
 **Decision (2026-05-17):** The wideband composite is normalized to unit RMS before

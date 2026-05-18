@@ -1,94 +1,70 @@
+# Project State
+
+Last updated: 2026-05-17, commit 5bfd607
+
 ---
-name: project-state
-description: Current implementation status, what's done, and the exact next task to resume
-metadata:
-  type: project
+
+## Current code quality
+
+- **Tests:** 112 passing, 0 failing
+- **Pyright:** 0 errors
+- **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
+- **Coverage:** 86% overall; sim/ core 95–100%; plots.py 66% (rendering paths, expected low)
+- **Branch:** master, up to date with origin/master
+
 ---
 
-## Immediate resume point (2026-05-16)
+## What is complete (all committed and pushed)
 
-Local commit `f33b53b` ("Add session memory") is ready but NOT yet pushed. Push failed with GitHub auth error. User is installing `gh` CLI to fix auth. Once done:
-1. Run `gh auth login` (or confirm auth is working)
-2. Run `git push origin master`
-3. Then proceed to `tests/test_awgn_performance.py` (see "Immediately next task" below)
+- Multi-modulation baseband: BPSK, DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK
+- AWGN performance test suite: BER monotonicity, theory comparison, BER/EVM/eye-diagram plots
+- N-carrier wideband simulation with shared NLA, per-carrier channel impairments, CNR/CIR/CNIR
+- OLA upsample/downsample with chunk-progress callbacks (for GUI progress reporting)
+- 2D IBO × noise density sweep
+- Adaptive BER seeker (bisects noise_density_dbfs to hit a target BER per carrier)
+- GUI: tkinter TOML editor, SO-WAT branding, per-carrier enable/seeker controls, progress log
+- BER theory module + numerical inverse (ber_awgn, ebn0_for_ber) for all non-APSK modulations
+- Detector results markdown table (write_detector_results in plots.py)
+- Docs: GUIDE.md, simulation_overview.md, memory_scaling.md, filter_analysis.md (all Mermaid diagrams)
 
-## What was just completed (committed and pushed to master)
+---
 
-Commit `e0d771f`: Multi-modulation support — DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK
+## Active design decision — chunk pipeline refactor (NOT yet implemented)
 
-Files added/changed:
-- `sim/modulation.py` — NEW: constellations, map_bits, decide, differential encode/decode, rotational_symmetry
-- `sim/bpsk.py` — `rrc_baseband()` now handles all supported modulations; OQPSK Q-rail delay built in
-- `sim/receiver.py` — `receive()` is now general; RMS normalisation before decision (critical for QAM/APSK); `_ber_with_ambiguity()` tries all rotationally equivalent orientations
-- `sim/simulation.py` — reads `modulation` and APSK gamma keys from carrier config
-- `tests/test_modulations.py` — 42 tests: constellation properties, map/decide roundtrip, DBPSK encoding, noiseless end-to-end BER/EVM for all 8 modulations (all pass)
+The wideband simulation currently materialises the full composite signal in RAM before
+processing. The plan is a chunk-wise pipeline where the wideband signal is never fully
+held in memory. Two design choices have been agreed:
 
-All 42 tests pass. Branch is clean and up to date with origin/master.
+**NLA input normalization:** use analytical RMS, not empirical peak.
+  See technical_notes.md § "NLA input normalization" for full rationale.
+  Current code in sim/simulation.py still uses np.max() — this is the thing to change.
 
-## Immediately next task (NOT started yet)
+**PSD estimate:** Welch averaging over all samples (not a single chunk).
+  Build PSD incrementally as chunks arrive; average periodograms across all segments.
+  This was chosen over a single large-chunk estimate for lower variance.
 
-Write `tests/test_awgn_performance.py` — AWGN noise sweep tests with plots.
+The chunk pipeline itself has not been started. When implementing:
+- Upsample pass produces chunks at wideband rate → accumulate composite → NL → AWGN
+- Per-carrier downsample reads the same wideband chunks
+- Welch PSD accumulates segment FFTs as chunks pass through
+- RMS normalization computed analytically before any chunks are processed
 
-The user explicitly requested:
-> "If you could do that over a noise sweep for a single carrier that would be pretty awesome. It'd be good to capture a few plots too. An EVM plot, maybe an eye diagram, a BER curve Es/No showing theory and actual."
+---
 
-### Planned content for test_awgn_performance.py
+## Open work items
 
-**Helper functions**:
-- `simulate_awgn(mod, EsN0_dB, n_sym, sps, rolloff, filter_span, seed)` → calls `rrc_baseband` + adds noise + calls `receive`
-- `ber_theory(mod, EsN0_dB)` → theoretical BER using erfc (scipy NOT available — must use `math.erfc` or `numpy` erfc approximation); returns None for 16APSK/32APSK
+1. **Chunk pipeline refactor** — described above; design decided, no code written yet
+2. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers with
+   click-to-select/edit. Deferred, no code started.
 
-**Note: scipy is not in dependencies.** Use `math.erfc` or implement Q-function via `numpy`:
-```python
-from math import erfc
-Q = lambda x: 0.5 * erfc(x / np.sqrt(2))
-```
+---
 
-**Noise formula** (derived, verified):
-For baseband normalized to unit RMS, symbol_rate=1, sample_rate=sps:
-```
-sigma_c = sqrt(sps / (2 * EsN0_linear))   # per-component (real or imaginary) noise std
-noise = sigma_c * rng.standard_normal(len(bb)) + 1j * sigma_c * rng.standard_normal(len(bb))
-```
-This gives exactly the correct Es/N0 at the decision point after the matched filter pair. Derivation verified:
-- Signal power = 1 (normalized), symbol amplitude at MF output ≈ sqrt(sps)
-- Noise per component after MF: sigma_c * sqrt(||h_rrc||^2) = sigma_c (unit-energy filter)
-- BER_BPSK = Q(sqrt(sps)/sigma_c) = Q(sqrt(2*EsN0)) = Q(sqrt(2*EbN0)) ✓
+## Toolchain / setup
 
-**Theoretical BER formulas** (all in terms of EbN0 = EsN0_linear / bps):
-- BPSK:   `0.5 * erfc(sqrt(EbN0))`
-- DBPSK:  `0.5 * exp(-EbN0)`
-- QPSK:   `0.5 * erfc(sqrt(EbN0))`   (same as BPSK per bit)
-- OQPSK:  `0.5 * erfc(sqrt(EbN0))`   (same as QPSK per bit)
-- 8PSK:   `(1/3) * erfc(sqrt(3*EbN0) * sin(pi/8))`
-- 16QAM:  `(3/8) * erfc(sqrt(2*EbN0/5))`
-- 16APSK: None
-- 32APSK: None
-
-**Tests**:
-- `test_ber_monotone[mod]` — BER strictly decreases over 5 SNR points; 1000 symbols/point, fast
-- `test_ber_matches_theory[mod]` — at one moderate SNR (~5% BER), measured BER within factor 2 of theory; 5000 symbols; parametrized for BPSK/QPSK/OQPSK/8PSK/16QAM (not DBPSK/16APSK/32APSK — no simple theory)
-
-**Plots** (always saved to `plots/performance/` which is created if missing):
-- `ber_vs_ebn0.png` — BER vs Eb/N0 all mods, theory dashed, measured solid
-- `evm_vs_ebn0.png` — EVM% vs Eb/N0 all mods
-- `eye_diagram_{mod}.png` — BPSK, QPSK, 16QAM at 10 dB Eb/N0
-
-**Eye diagram implementation**:
-```python
-from sim.receiver import matched_filter
-mf_out = matched_filter(bb_noisy, rolloff, filter_span, sps)
-# Overlay 200 traces of 2*sps samples each, triggered at symbol boundaries
-```
-
-## Deferred (agreed with user to do later)
-
-- MSK (Tier 3)
-- OFDM (Tier 3)
-
-## Package manager / toolchain
-
-- uv: `uv add scipy` if scipy needed (currently not in deps — use math.erfc)
-- Python: `.venv/Scripts/python.exe`
-- Tests: `.venv/Scripts/python.exe -m pytest tests/ -v`
+- Package manager: `uv`; venv at `.venv/`
+- Python: `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac)
+- Run tests: `python -m pytest tests/ -v`
+- Run tests with coverage: `python -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing`
+- Type check: `python -m pyright gui.py main.py sim/ tests/`
+- Lint: `python -m ruff check gui.py main.py sim/ tests/`
 - Git remote: https://github.com/bandospook/signal-processing-simulation.git, branch master

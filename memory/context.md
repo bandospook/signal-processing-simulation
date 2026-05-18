@@ -105,10 +105,19 @@ phase_poly_order = 2
 
 ## Open work items
 
-1. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers;
+1. **Chunk pipeline refactor** — highest priority active item. The wideband signal
+   is currently materialized in RAM in full before any processing. Plan agreed:
+   - NLA normalization: analytical RMS (`sqrt(sum of 10^(power_db/10))`), not empirical peak
+   - PSD estimate: Welch averaging over all chunks, not a single snapshot
+   - Current `plots.psd_db()` takes a single centre segment (up to 16384 samples, Hann window);
+     this will be replaced by incremental segment accumulation in the chunk pipeline
+   - Current `sim/simulation.py` line 121 still uses `np.max()` — this is the thing to change
+   - See `memory/technical_notes.md` § "NLA input normalization" for full rationale
+
+2. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers;
    click to select/edit. Deferred, no code started.
 
 ---
 
 *See also: `memory/technical_notes.md` for AWGN placement rationale, DBPSK formula,
-CNIR→Eb/N0 conversion, and seeker algorithm details.*
+CNIR→Eb/N0 conversion, NLA normalization decision, and seeker algorithm details.*

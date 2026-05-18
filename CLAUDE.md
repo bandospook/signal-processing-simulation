@@ -35,3 +35,6 @@ Pyright 0 errors, Ruff 0 errors, all tests passing.
 
 Commit and push after each self-contained chunk of work. The user does not want to
 ask — just do it at natural completion points.
+
+**Never include `Co-Authored-By: Claude` or any Anthropic attribution in commit messages.**
+This applies to every commit in this project, no exceptions.

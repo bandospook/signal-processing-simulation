@@ -34,8 +34,8 @@ pyright's internal venv discovery. Always use full `.venv\Scripts\` paths.
 
 ## Code quality gates (run before every commit)
 
-Pyright 0 errors, Ruff 0 errors, all tests passing, coverage reviewed for regressions.
-Baseline: 86% overall; sim/ core 95–100%; plots.py ~66% (rendering paths, expected lower).
+Pyright 0 errors, Ruff 0 errors, all tests passing, coverage 100% (0 missed statements).
+Any regression below 100% requires a new test or an explicit `# pragma: no cover` with a comment justifying why the line is untestable.
 
 ## Commit style
 

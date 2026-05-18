@@ -170,9 +170,10 @@ investigate any new uncovered lines in `sim/` modules. The established baseline 
 | `main.py` | varies with test scope |
 | Overall | ~86% |
 
-A regression means a previously-covered line is no longer exercised. New code added
-without tests will lower the percentage; that is acceptable only if the code path is
-genuinely untestable (e.g., a GUI event handler). Add tests for all new `sim/` logic.
+The established baseline is **100% coverage (0 missed statements)**. Any drop below
+100% requires either a new test covering the new code, or an explicit
+`# pragma: no cover` comment on the line with a justification for why it is
+genuinely untestable (script `__main__` guards, defensive unreachable branches).
 
 Run the full gate suite with the commands in the table above for your platform.
 CLAUDE.md contains the Windows PowerShell forms as the reference for automated use.

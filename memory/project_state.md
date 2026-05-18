@@ -1,15 +1,15 @@
 # Project State
 
-Last updated: 2026-05-17, commit bc51d40
+Last updated: 2026-05-17, commit ec936f3
 
 ---
 
 ## Current code quality
 
-- **Tests:** 112 passing, 0 failing
+- **Tests:** 150 passing, 0 failing
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
-- **Coverage:** 86% overall; sim/ core 95–100%; plots.py 66% (rendering paths, expected low)
+- **Coverage:** 100% across all modules (1032 statements, 0 missed)
 - **Branch:** master, up to date with origin/master
 
 ---

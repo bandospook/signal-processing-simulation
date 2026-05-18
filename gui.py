@@ -366,6 +366,7 @@ class App:
         self._vars:     dict[str, tk.StringVar] = {}
         self._texts:    dict[str, tk.Text] = {}
         self._proc     = None
+        self._log_file = None
         self._running  = False
         root.title("SO-WAT")
         root.minsize(760, 580)
@@ -782,6 +783,13 @@ class App:
         self._set_running(True)
         self._status.set("Running simulation...")
 
+        out_dir = Path(self._vars["out.dir"].get().strip() or ".")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self._log_file = open(out_dir / "simulation.log", "w", encoding="utf-8")
+        except OSError:
+            self._log_file = None
+
         main_py = Path(__file__).parent / "main.py"
         try:
             self._proc = subprocess.Popen(
@@ -804,8 +812,15 @@ class App:
         if self._proc is None or self._proc.stdout is None:
             return
         for line in self._proc.stdout:
-            self._queue.put(line.rstrip())
+            stripped = line.rstrip()
+            self._queue.put(stripped)
+            if self._log_file:
+                self._log_file.write(stripped + "\n")
+                self._log_file.flush()
         self._proc.wait()
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
         self._queue.put(None)
 
     def _poll_proc(self):

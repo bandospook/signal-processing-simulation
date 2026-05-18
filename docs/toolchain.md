@@ -32,7 +32,7 @@ are available as executables in the venv's binary directory.
 
 | Task | Command |
 |---|---|
-| Tests | `.venv/bin/python -m pytest tests/ -v` |
+| Tests + coverage | `.venv/bin/python -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing` |
 | Type check | `.venv/bin/pyright gui.py main.py sim/ tests/` |
 | Lint | `.venv/bin/ruff check gui.py main.py sim/ tests/` |
 
@@ -40,7 +40,7 @@ are available as executables in the venv's binary directory.
 
 | Task | Command |
 |---|---|
-| Tests | `.venv\Scripts\python.exe -m pytest tests/ -v` |
+| Tests + coverage | `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing` |
 | Type check | `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/` |
 | Lint | `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/` |
 
@@ -152,10 +152,27 @@ removed by the next `uv sync`.
 The quality gates that must pass before every commit are:
 
 ```
-pyright: 0 errors
-ruff:    0 errors
-pytest:  all tests passing
+pyright:   0 errors
+ruff:      0 errors
+pytest:    all tests passing
+coverage:  review term-missing output for regressions
 ```
 
-Run them with the commands in the table above for your platform. CLAUDE.md contains
-the Windows PowerShell form as the reference for automated use.
+Coverage is reported alongside the test run (no separate invocation needed — the
+`--cov` flags are included in the test command above). There is no hard numeric
+threshold enforced at commit time; instead, review the `term-missing` output and
+investigate any new uncovered lines in `sim/` modules. The established baseline is:
+
+| Module group | Coverage |
+|---|---|
+| `sim/` core (baseband, filters, modulation, nonlinear\_amplifier, receiver, simulation, targeter, theory) | 95–100% |
+| `sim/plots.py` | ~66% (rendering and file-write paths; expected lower) |
+| `main.py` | varies with test scope |
+| Overall | ~86% |
+
+A regression means a previously-covered line is no longer exercised. New code added
+without tests will lower the percentage; that is acceptable only if the code path is
+genuinely untestable (e.g., a GUI event handler). Add tests for all new `sim/` logic.
+
+Run the full gate suite with the commands in the table above for your platform.
+CLAUDE.md contains the Windows PowerShell forms as the reference for automated use.

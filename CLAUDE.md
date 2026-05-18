@@ -22,7 +22,7 @@ and is the single source of truth across all machines.
 - Package manager: `uv`; venv at `.venv/`; run `uv sync` after editing pyproject.toml
 - Python (Windows): `.venv\Scripts\python.exe`
 - Python (Linux/Mac): `.venv/bin/python`
-- Tests: `.venv\Scripts\python.exe -m pytest tests/ -v`
+- Tests + coverage: `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing`
 - Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
 - Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
 - Line length: 110 chars (configured in pyproject.toml)
@@ -34,7 +34,8 @@ pyright's internal venv discovery. Always use full `.venv\Scripts\` paths.
 
 ## Code quality gates (run before every commit)
 
-Pyright 0 errors, Ruff 0 errors, all tests passing.
+Pyright 0 errors, Ruff 0 errors, all tests passing, coverage reviewed for regressions.
+Baseline: 86% overall; sim/ core 95–100%; plots.py ~66% (rendering paths, expected lower).
 
 ## Commit style
 

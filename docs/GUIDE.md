@@ -17,6 +17,7 @@
 13. [Simulation overview](simulation_overview.md) — full execution flow, all three optional paths, and output files produced by each
 14. [Memory scaling](memory_scaling.md) — filter cost, FFT buffer sizing, OLA efficiency vs symbol rate ratio
 15. [Filter analysis](filter_analysis.md) — filter size justification, upsampling fidelity, IMD rejection adequacy
+16. [Toolchain](toolchain.md) — correct invocations for pytest/pyright/ruff, Windows Store Python stub, pyrightconfig.json
 
 ---
 
@@ -202,7 +203,8 @@ signal-processing-simulation/
 │   ├── GUIDE.md              ← this file
 │   ├── simulation_overview.md← execution paths and output files (§13)
 │   ├── memory_scaling.md     ← OLA memory analysis (§14)
-│   └── filter_analysis.md    ← filter size justification (§15)
+│   ├── filter_analysis.md    ← filter size justification (§15)
+│   └── toolchain.md          ← toolchain invocations and Windows quirks (§16)
 ├── output/                   ← generated files (git-ignored)
 ├── gui.py                    ← standalone TOML editor + launcher with live progress
 ├── main.py                   ← CLI entry point
@@ -839,3 +841,26 @@ Three filters are examined:
 The document concludes with guidance on when filter sizes would need to increase:
 lower RRC rolloff (below ~0.25), very close carrier spacing (sidebands within one
 `f_s/2` of each other), or extreme ripple-cycle counts in the channel impairment model.
+
+---
+
+## 16. Toolchain
+
+**→ [toolchain.md](toolchain.md)**
+
+Documents the correct way to invoke pytest, pyright, and ruff on each platform, and
+explains the Windows-specific complications discovered during development.
+
+The key points: pyright and ruff are compiled binary executables installed into
+`.venv/Scripts/` (Windows) or `.venv/bin/` (Linux/macOS) by `uv sync`. They cannot
+be invoked as `python -m pyright` or `python -m ruff`. On Windows, the unqualified
+`python` command is intercepted by the Windows Store App Execution Alias when no
+global Python is installed, which breaks any tool that calls `python` internally to
+discover the active environment.
+
+`pyrightconfig.json` at the repo root works around this by pointing pyright directly
+at the `.venv/` directory, making it independent of PATH. It is required on Windows
+and harmless elsewhere.
+
+The document also covers how to add or remove dev tools via `pyproject.toml` and
+`uv sync`, and lists the platform-specific binary paths for all three tools.

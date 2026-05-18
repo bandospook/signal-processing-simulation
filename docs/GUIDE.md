@@ -666,17 +666,16 @@ separate "apply" step is needed.
 
 ## 12. Test suite
 
-Run all tests:
+Run tests with coverage (Windows PowerShell):
 
 ```powershell
-python -m pytest
+.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing
 ```
 
-Run with coverage:
-
-```powershell
-python -m pytest --cov=sim --cov-report=term-missing
-```
+Coverage is reported inline with the test run — no separate invocation is needed.
+Use the explicit `.venv\Scripts\` path; unqualified `python` hits the Windows Store
+stub and breaks the run. See [toolchain.md](toolchain.md) for Linux/macOS paths and
+the full explanation.
 
 ### `tests/test_awgn_performance.py`
 

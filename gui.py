@@ -767,9 +767,9 @@ class App:
         is_chunk = bool(_CHUNK_RE.match(msg))
         self._log_text.configure(state="normal")
         if self._last_line_was_chunk:
-            # Replace the previous chunk line (or final chunk line before a step message)
-            self._log_text.delete("end-1c linestart", "end-1c")
-            self._log_text.insert("end-1c", msg)
+            # end-1c is the phantom newline; end-2c is the \n ending the real last line
+            self._log_text.delete("end-2c linestart", "end-2c")
+            self._log_text.insert("end-2c linestart", msg)
         else:
             self._log_text.insert("end", msg + "\n")
         self._log_text.see("end")

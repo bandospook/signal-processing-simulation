@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-17, commit e33778e
+Last updated: 2026-05-17, commit bc51d40
 
 ---
 
@@ -23,6 +23,8 @@ Last updated: 2026-05-17, commit e33778e
 - 2D IBO × noise density sweep
 - Adaptive BER seeker (bisects noise_density_dbfs to hit a target BER per carrier)
 - GUI: tkinter TOML editor, SO-WAT branding, per-carrier enable/seeker controls, progress log
+- GUI: app icon generated at runtime (misc.gen_icon.build_icon() + Pillow); no base64 blob in gui.py
+- GUI: simulation stdout teed to `simulation.log` in the configured output directory each run
 - BER theory module + numerical inverse (ber_awgn, ebn0_for_ber) for all non-APSK modulations
 - Detector results markdown table (write_detector_results in plots.py)
 - Docs: GUIDE.md, simulation_overview.md, memory_scaling.md, filter_analysis.md (all Mermaid diagrams)

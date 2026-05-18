@@ -3,7 +3,7 @@ seed = 42
 
 [wideband]
 sample_rate        = 800_000_000
-noise_density_dbfs = -160
+noise_density_dbfs = -80
 
 [amplifier]
 input_backoff_db = 3
@@ -26,6 +26,7 @@ wideband           = "wideband.png"
 nl_tables          = "amplifier_nl.png"
 sweep              = "sweep_results.png"
 sweep_table        = "sweep_table.md"
+detector_results   = "detector_table.md"
 
 [sweep]
 ibo_db             = [0, 1.5, 3, 4.5, 6]

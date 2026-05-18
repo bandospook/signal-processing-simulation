@@ -34,7 +34,9 @@ gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI)
 simulation.toml Example / default configuration
 tests/          112 tests, all passing, 86% coverage
 misc/
-  gen_icon.py   Regenerates the app icon PNG and patches gui.py in-place
+  __init__.py   Makes misc a package (importable by gui.py)
+  gen_icon.py   build_icon() generates the app icon PNG; imported by gui.py at startup.
+                --preview saves icon_preview.png for visual inspection.
 memory/
   context.md    This file
   technical_notes.md  Key implementation decisions
@@ -58,8 +60,9 @@ memory/
 ## GUI notes
 
 - **Header band:** dark navy strip at top; "SO-WAT" centred in Consolas bold cyan;
-  icon (sine wave dissolving into binary) pinned top-right; `_ICON_B64` constant
-  in gui.py holds the embedded PNG; regenerate with `python misc/gen_icon.py`
+  icon (sine wave dissolving into binary) pinned top-right; icon is generated at
+  runtime via `misc.gen_icon.build_icon()` — no embedded blob in gui.py. Run
+  `python misc/gen_icon.py --preview` to save icon_preview.png for inspection.
 - **Channel impairments:** single checkbox only — checked = include channel dict in
   config; unchecked = omit entirely. There is NO inner "Enabled" checkbox anymore
   (removed as redundant; sim treats absent channel key same as enabled=false)

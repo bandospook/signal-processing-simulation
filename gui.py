@@ -359,7 +359,8 @@ class CarrierFrame(ttk.LabelFrame):
 
 # ── Main application ──────────────────────────────────────────────────────────
 
-_PCT_RE = re.compile(r'^\[\s*(\d+)%\]')
+_PCT_RE   = re.compile(r'^\[\s*(\d+)%\]')
+_CHUNK_RE = re.compile(r'^\s+chunk \d+/\d+')
 
 
 class App:
@@ -375,6 +376,7 @@ class App:
         self._last_progress_time: float = 0.0
         self._last_progress_line: str = ""
         self._slow_warned:        bool = False
+        self._last_line_was_chunk: bool = False
         root.title("SO-WAT")
         root.minsize(760, 580)
         _icon = tk.PhotoImage(data=_ICON_B64)
@@ -758,12 +760,20 @@ class App:
         self._log_text.configure(state="normal")
         self._log_text.delete("1.0", "end")
         self._log_text.configure(state="disabled")
+        self._last_line_was_chunk = False
 
     def _log_append(self, msg: str):
+        is_chunk = bool(_CHUNK_RE.match(msg))
         self._log_text.configure(state="normal")
-        self._log_text.insert("end", msg + "\n")
+        if self._last_line_was_chunk:
+            # Replace the previous chunk line (or final chunk line before a step message)
+            self._log_text.delete("end-1c linestart", "end-1c")
+            self._log_text.insert("end-1c", msg)
+        else:
+            self._log_text.insert("end", msg + "\n")
         self._log_text.see("end")
         self._log_text.configure(state="disabled")
+        self._last_line_was_chunk = is_chunk
 
     def _stop(self):
         if self._proc and self._running:

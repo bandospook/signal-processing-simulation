@@ -223,12 +223,16 @@ class CarrierFrame(ttk.LabelFrame):
         self._has_ch = tk.BooleanVar(value=bool(ch) and ch.get("enabled", True))
         self._build(data)
 
+    @property
+    def carrier_name(self) -> str:
+        return self._vars.get("name", tk.StringVar()).get() or "carrier"
+
     def _build(self, d: dict):
         ttk.Button(self, text="Remove", command=self._on_remove,
                    width=8).grid(row=0, column=3, sticky="ne", padx=2)
 
         # Main parameter fields (2-column grid)
-        for i, (key, label, typ, dflt, tip) in enumerate(self._MAIN):
+        for i, (key, label, _, dflt, tip) in enumerate(self._MAIN):
             raw = d.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._vars[key] = var
@@ -272,7 +276,7 @@ class CarrierFrame(ttk.LabelFrame):
         self._seeker_frame.grid(row=sk_row, column=0, columnspan=4, sticky="ew",
                                  padx=(14, 0), pady=(2, 0))
         sk = d.get("seeker", {})
-        for i, (key, label, typ, dflt, tip) in enumerate(self._SEEKER):
+        for i, (key, label, _, dflt, tip) in enumerate(self._SEEKER):
             raw = sk.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._sk_vars[key] = var
@@ -313,7 +317,7 @@ class CarrierFrame(ttk.LabelFrame):
     def _populate_ch(self, ch: dict):
         for w in self._ch_frame.winfo_children(): w.destroy()
         self._ch_vars.clear()
-        for i, (key, label, typ, dflt, tip) in enumerate(self._CH):
+        for i, (key, label, _, dflt, tip) in enumerate(self._CH):
             raw = ch.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._ch_vars[key] = var
@@ -368,6 +372,9 @@ class App:
         self._proc     = None
         self._log_file = None
         self._running  = False
+        self._last_progress_time: float = 0.0
+        self._last_progress_line: str = ""
+        self._slow_warned:        bool = False
         root.title("SO-WAT")
         root.minsize(760, 580)
         _icon = tk.PhotoImage(data=_ICON_B64)
@@ -600,7 +607,7 @@ class App:
         self._refresh_focus_options()
 
     def _refresh_focus_options(self):
-        names = ["All"] + [cf._vars["name"].get() or "carrier" for cf in self._carriers]
+        names = ["All"] + [cf.carrier_name for cf in self._carriers]
         self._focus_combo["values"] = names
         if self._focus_var.get() not in names:
             self._focus_var.set("All")
@@ -609,8 +616,7 @@ class App:
     def _apply_focus(self, *_):
         sel = self._focus_var.get()
         for cf in self._carriers:
-            cf_name = cf._vars.get("name", tk.StringVar()).get()
-            if sel == "All" or cf_name == sel:
+            if sel == "All" or cf.carrier_name == sel:
                 cf.pack(fill="x", pady=4, padx=2)
             else:
                 cf.pack_forget()
@@ -624,7 +630,7 @@ class App:
         try:
             with open(path, "rb") as f:
                 cfg = tomllib.load(f)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             messagebox.showerror("Load error", str(e));  return
         self.path = path
         self._path_var.set(str(path))
@@ -719,7 +725,7 @@ class App:
             cfg = self._collect()
             self.path.write_text(build_toml(cfg), encoding="utf-8")
             self._status.set(f"Saved: {self.path}")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             messagebox.showerror("Save error", str(e))
 
     def _save_as(self):
@@ -771,7 +777,7 @@ class App:
             return
         try:
             self._save()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             messagebox.showerror("Save error", str(e))
             return
 
@@ -799,12 +805,12 @@ class App:
                 text=True,
                 cwd=str(Path(__file__).parent),
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             messagebox.showerror("Launch error", str(e))
             self._set_running(False)
             return
 
-        self._queue: queue.Queue = queue.Queue()
+        self._queue = queue.Queue()
         threading.Thread(target=self._read_output, daemon=True).start()
         self.root.after(100, self._poll_proc)
 
@@ -864,10 +870,10 @@ class App:
 
 if __name__ == "__main__":
     toml_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("simulation.toml")
-    root = tk.Tk()
+    tk_root = tk.Tk()
     try:
-        root.tk.call("tk", "scaling", 1.25)
-    except Exception:
+        tk_root.tk.call("tk", "scaling", 1.25)
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
-    App(root, toml_path)
-    root.mainloop()
+    App(tk_root, toml_path)
+    tk_root.mainloop()

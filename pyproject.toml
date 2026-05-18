@@ -25,3 +25,15 @@ ignore = [
     "E701",   # multiple statements on one line (colon)  — intentional in gui.py layout
     "E702",   # multiple statements on one line (semicolon) — intentional in gui.py layout
 ]
+
+[tool.pylint.format]
+max-line-length = 110
+
+[tool.pylint."messages control"]
+disable = [
+    "C0103",  # invalid-name — short names like L are intentional
+    "C0115",  # missing-class-docstring — project doesn't use docstrings
+    "C0116",  # missing-function-docstring — project doesn't use docstrings
+    "C0321",  # multiple-statements — compact semicolon style is intentional
+    "W0201",  # attribute-defined-outside-init — tkinter apps build UI in helper methods
+]

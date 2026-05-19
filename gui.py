@@ -475,7 +475,7 @@ class App:
         self._vars[key] = v
         return v
 
-    def _text_widget(self, parent, key, row, height=2) -> tk.Text:
+    def _text_widget(self, parent, key, row, height=1) -> tk.Text:
         t = tk.Text(parent, height=height, width=64, wrap="word",
                     font=("Consolas", 9))
         t.grid(row=row, column=0, columnspan=4, sticky="ew", pady=2)

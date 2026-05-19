@@ -117,7 +117,7 @@ def main(config_path: str = "simulation.toml",
 
     if ibo_sweep and noise_sweep:
         n_pts = len(ibo_sweep) * len(noise_sweep)
-        _prog(_P_plots_done, f"Running parameter sweep: {len(ibo_sweep)} IBO × "
+        _prog(_P_plots_done, f"Running parameter sweep: {len(ibo_sweep)} IBO x "
               f"{len(noise_sweep)} noise = {n_pts} points...")
 
         def _sweep_pt_cb(done: int, total: int) -> None:

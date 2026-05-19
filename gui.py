@@ -444,7 +444,7 @@ class App:
         log_outer.pack(fill="x")
         log_vsb = ttk.Scrollbar(log_outer, orient="vertical")
         self._log_text = tk.Text(
-            log_outer, height=4, wrap="word", font=("Consolas", 8),
+            log_outer, height=12, wrap="word", font=("Consolas", 8),
             state="disabled", background="#1e1e1e", foreground="#d4d4d4",
             yscrollcommand=log_vsb.set,
         )

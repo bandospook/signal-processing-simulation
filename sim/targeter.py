@@ -187,6 +187,8 @@ def seek_ber_noise_level(
     modulation = carriers[target_idx].get("modulation", "BPSK").upper()
     bps = bits_per_symbol(modulation)
     sps = int(carriers[target_idx].get("sps", 4))
+    power_db = float(carriers[target_idx].get("power_db", 0.0))
+    symbol_rate = float(carriers[target_idx]["symbol_rate"])
 
     bisect_seed = [int(rng.integers(0, 2 ** 31))]
 
@@ -205,15 +207,19 @@ def seek_ber_noise_level(
         chunk_print=chunk_print)
 
     if ber_at_lo > target_ber:
-        # If noise_lo is already well below -120 dBFS, thermal noise is negligible
-        # and the residual BER is a distortion floor set by the NLA, not by noise.
-        # Suggesting "lower noise_lo_dbfs further" would be useless in that case.
-        if noise_lo_dbfs <= -120.0:
+        # Compute CNR at noise_lo to decide whether thermal noise is negligible.
+        # noise power at native rate = noise_density * symbol_rate * sps, so:
+        #   CNR_dB = power_db - noise_lo_dbfs - 10*log10(symbol_rate * sps)
+        # If CNR >> 30 dB, BER from thermal noise alone is essentially zero; any
+        # residual BER is a distortion floor from the NLA — lowering noise_lo_dbfs
+        # further will not help.
+        cnr_at_lo_db = power_db - noise_lo_dbfs - 10.0 * math.log10(symbol_rate * sps)
+        if cnr_at_lo_db > 30.0:
             raise ValueError(
                 f"BER at noise_lo_dbfs={noise_lo_dbfs:.1f} dBFS is {ber_at_lo:.4f} "
                 f"> target {target_ber:.4f}. "
-                f"At {noise_lo_dbfs:.0f} dBFS noise is negligible — this BER floor "
-                f"is from nonlinear distortion, not thermal noise. "
+                f"CNR at noise_lo is {cnr_at_lo_db:.0f} dB — thermal noise is "
+                f"negligible; this BER floor is from nonlinear distortion. "
                 f"Raise target_ber above {ber_at_lo:.4f} or increase input_backoff_db."
             )
         raise ValueError(

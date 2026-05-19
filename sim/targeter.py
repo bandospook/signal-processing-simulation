@@ -205,6 +205,17 @@ def seek_ber_noise_level(
         chunk_print=chunk_print)
 
     if ber_at_lo > target_ber:
+        # If noise_lo is already well below -120 dBFS, thermal noise is negligible
+        # and the residual BER is a distortion floor set by the NLA, not by noise.
+        # Suggesting "lower noise_lo_dbfs further" would be useless in that case.
+        if noise_lo_dbfs <= -120.0:
+            raise ValueError(
+                f"BER at noise_lo_dbfs={noise_lo_dbfs:.1f} dBFS is {ber_at_lo:.4f} "
+                f"> target {target_ber:.4f}. "
+                f"At {noise_lo_dbfs:.0f} dBFS noise is negligible — this BER floor "
+                f"is from nonlinear distortion, not thermal noise. "
+                f"Raise target_ber above {ber_at_lo:.4f} or increase input_backoff_db."
+            )
         raise ValueError(
             f"BER at noise_lo_dbfs={noise_lo_dbfs:.1f} dBFS is {ber_at_lo:.4f} "
             f"> target {target_ber:.4f}; lower noise_lo_dbfs (more negative) "

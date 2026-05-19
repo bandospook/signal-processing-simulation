@@ -35,7 +35,7 @@ noise_density_dbfs = [-100, -95, -90, -85]
 [[carrier]]
 name         = "slow"
 modulation   = "BPSK"
-symbol_rate  = 100_000
+symbol_rate  = 1_000_000
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
@@ -68,9 +68,9 @@ sweep_demod  = true
 use_seeker   = true
 
 [carrier.seeker]
-target_ber     = 0.001
+target_ber     = 0.005
 confidence     = 0.95
-ber_accuracy   = 0.0005
+ber_accuracy   = 0.001
 noise_lo_dbfs  = -160
 noise_hi_dbfs  = -50
 

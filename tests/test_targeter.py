@@ -190,6 +190,39 @@ def test_invalid_bracket_lo_too_noisy():
         )
 
 
+def test_invalid_bracket_lo_distortion_floor(monkeypatch):
+    """
+    When noise_lo_dbfs <= -120 and BER > target, the error should explain that
+    the BER floor is from nonlinear distortion, not from insufficient noise range.
+    Patch _simulate_ber_at_noise to return a constant high BER regardless of noise.
+    """
+    from sim import targeter
+
+    def _fake_simulate(noise_dbfs, *args, **kwargs):
+        return (0.05, 10.0, 20.0, 9.0)  # BER=0.05 floor from NLA distortion
+
+    monkeypatch.setattr(targeter, "_simulate_ber_at_noise", _fake_simulate)
+
+    with pytest.raises(ValueError, match="nonlinear distortion"):
+        seek_ber_noise_level(
+            target_ber=0.001,
+            confidence=0.90,
+            ber_accuracy=0.001,
+            carrier_name="tgt",
+            carriers=[_CARRIER],
+            sample_rate=_SAMPLE_RATE,
+            am_am_cfg=_LINEAR_AM_AM,
+            am_pm_cfg=_LINEAR_AM_PM,
+            noise_lo_dbfs=-160.0,   # <= -120 → distortion-floor branch
+            noise_hi_dbfs=-50.0,
+            ola_filter_span=_OLA_SPAN,
+            ola_block_size=_OLA_BLOCK,
+            max_iter=4,
+            n_final_seeds=1,
+            seed=0,
+        )
+
+
 def test_invalid_bracket_hi_too_quiet():
     """
     If even the loudest bracket endpoint gives BER < target, raise ValueError.

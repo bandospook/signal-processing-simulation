@@ -250,7 +250,7 @@ def seek_ber_noise_level(
         step_frac = 0.10 + 0.75 * (k / max_iter)
         _cb(step_frac,
             f"[seeker] '{carrier_name}' — step {k + 1}/{max_iter}  "
-            f"BER {ber_mid:.2e} → target {target_ber:.2e}  "
+            f"BER {ber_mid:.2e} -> target {target_ber:.2e}  "
             f"noise {mid:.2f} dBFS")
 
         # Higher noise → higher BER.  If mid is too noisy (BER > target), pull hi down.

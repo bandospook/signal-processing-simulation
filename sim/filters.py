@@ -74,20 +74,24 @@ def rrc_coeffs(filter_span: int, rolloff: float, sps: int) -> np.ndarray:
     num_taps = filter_span * sps + 1
     t = np.arange(-(num_taps // 2), num_taps // 2 + 1) / sps
 
-    h = np.zeros(num_taps)
-    for i, ti in enumerate(t):
-        if ti == 0.0:
-            h[i] = 1.0 - rolloff + 4 * rolloff / np.pi
-        elif abs(abs(ti) - 1.0 / (4.0 * rolloff)) < 1e-10:
-            h[i] = (rolloff / np.sqrt(2)) * (
-                (1 + 2 / np.pi) * np.sin(np.pi / (4 * rolloff))
-                + (1 - 2 / np.pi) * np.cos(np.pi / (4 * rolloff))
-            )
-        else:
-            num = (np.sin(np.pi * ti * (1 - rolloff))
-                   + 4 * rolloff * ti * np.cos(np.pi * ti * (1 + rolloff)))
-            den = np.pi * ti * (1 - (4 * rolloff * ti) ** 2)
-            h[i] = num / den
+    # Evaluate the general formula everywhere, guarding the two singularities
+    # (t=0 and |t|=1/(4r)) against division by zero, then overwrite with the
+    # correct closed-form limits via np.where.
+    t_safe  = np.where(np.abs(t) < 1e-10, 1.0, t)
+    denom_f = 1.0 - (4.0 * rolloff * t_safe) ** 2
+    denom_f = np.where(np.abs(denom_f) < 1e-10, 1.0, denom_f)
+    num = (np.sin(np.pi * t_safe * (1.0 - rolloff))
+           + 4.0 * rolloff * t_safe * np.cos(np.pi * t_safe * (1.0 + rolloff)))
+    h_gen = num / (np.pi * t_safe * denom_f)
+
+    h_t0   = 1.0 - rolloff + 4.0 * rolloff / np.pi
+    h_sing = (rolloff / np.sqrt(2.0)) * (
+        (1.0 + 2.0 / np.pi) * np.sin(np.pi / (4.0 * rolloff))
+        + (1.0 - 2.0 / np.pi) * np.cos(np.pi / (4.0 * rolloff))
+    )
+    is_t0   = np.abs(t) < 1e-10
+    is_sing = np.abs(np.abs(t) - 1.0 / (4.0 * rolloff)) < 1e-10
+    h = np.where(is_t0, h_t0, np.where(is_sing, h_sing, h_gen))
 
     return h / np.sqrt(np.sum(h ** 2))
 

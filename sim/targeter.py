@@ -11,6 +11,7 @@ should produce implementation_loss_db ≈ 0 because CNIR = CNR in that case.
 import math
 from typing import Callable
 import numpy as np
+from scipy.special import erfinv as _erfinv
 
 from .modulation import bits_per_symbol
 from .simulation import wideband_bpsk_simulation
@@ -18,26 +19,6 @@ from .theory import ebn0_for_ber
 
 _ProgressCB = Callable[[float, str], None] | None
 _PrintCB = Callable[[str], None] | None
-
-
-def _erfinv(p: float) -> float:
-    """
-    Inverse error function via bisection on math.erf.
-    Works for p ∈ (-1, 1).  Used only for computing normal-distribution
-    quantiles from a confidence level, so the small bisection overhead is fine.
-    """
-    if p < 0:
-        return -_erfinv(-p)
-    if p == 0.0:
-        return 0.0
-    lo, hi = 0.0, 6.0  # erf(6) ≈ 1 - 2e-17, safe upper bound
-    for _ in range(60):
-        mid = (lo + hi) / 2.0
-        if math.erf(mid) < p:
-            lo = mid
-        else:
-            hi = mid
-    return (lo + hi) / 2.0
 
 
 def _n_bits_for_ci(target_ber: float, confidence: float = 0.95,

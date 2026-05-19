@@ -1,6 +1,7 @@
 """Closed-form AWGN BER curves and their numerical inverses."""
 
 import math
+from scipy.optimize import brentq
 from .modulation import bits_per_symbol
 
 
@@ -57,13 +58,5 @@ def ebn0_for_ber(mod: str, target_ber: float,
     if target_ber > ber_lo or target_ber < ber_hi:
         return None  # out of range
 
-    lo, hi = ebn0_lo_db, ebn0_hi_db
-    for _ in range(80):
-        mid = (lo + hi) / 2.0
-        if theory_ber(mid) > target_ber:
-            lo = mid
-        else:
-            hi = mid
-        if hi - lo < tol_db:
-            break
-    return (lo + hi) / 2.0
+    return float(brentq(lambda e: theory_ber(e) - target_ber,
+                        ebn0_lo_db, ebn0_hi_db, xtol=tol_db))

@@ -264,20 +264,44 @@ def seek_ber_noise_level(
 
     converged_noise = (lo + hi) / 2.0
 
-    _cb(0.88, f"[seeker] '{carrier_name}' — final measurement ({n_final_seeds} seeds)...")
-    # Final pooled measurement at full bit budget
-    final_seeds = [int(x) for x in rng.integers(0, 2 ** 31, n_final_seeds)]
-    ber_final, cnr_db, cir_db, cnir_db = _simulate_ber_at_noise(
-        converged_noise, carrier_name, carriers, sample_rate,
-        am_am_cfg, am_pm_cfg, input_backoff_db,
-        ola_filter_span, ola_block_size, n_bits_final, final_seeds,
-        chunk_print=chunk_print)
-
-    n_sym_final = max(1, n_bits_final // (bps * n_final_seeds))
-    n_bits_total = n_sym_final * bps * n_final_seeds
-
+    # Adaptive final measurement: pool rounds of n_final_seeds each until the
+    # CI half-width is actually ≤ ber_accuracy.  Each round uses n_bits_final
+    # bits so the first round matches the old single-shot behaviour; subsequent
+    # rounds double the precision until the guarantee is met (cap: 16 rounds).
+    _cb(0.88, f"[seeker] '{carrier_name}' — final measurement ({n_final_seeds} seeds/round)...")
     z_ci = math.sqrt(2.0) * _erfinv(confidence)
-    sigma = math.sqrt(max(ber_final, 1e-10) * (1.0 - ber_final) / n_bits_total)
+    n_sym_per_seed = max(1, n_bits_final // (bps * n_final_seeds))
+    bits_per_round = n_sym_per_seed * bps * n_final_seeds
+
+    pooled_bers:  list[float] = []
+    pooled_cnrs:  list[float] = []
+    pooled_cirs:  list[float] = []
+    pooled_cnirs: list[float] = []
+
+    for rnd in range(16):
+        rnd_seeds = [int(x) for x in rng.integers(0, 2 ** 31, n_final_seeds)]
+        ber_r, cnr_r, cir_r, cnir_r = _simulate_ber_at_noise(
+            converged_noise, carrier_name, carriers, sample_rate,
+            am_am_cfg, am_pm_cfg, input_backoff_db,
+            ola_filter_span, ola_block_size, n_bits_final, rnd_seeds,
+            chunk_print=chunk_print)
+        pooled_bers.append(ber_r)
+        pooled_cnrs.append(cnr_r)
+        pooled_cirs.append(cir_r)
+        pooled_cnirs.append(cnir_r)
+
+        ber_final    = float(np.mean(pooled_bers))
+        n_bits_total = (rnd + 1) * bits_per_round
+        sigma = math.sqrt(max(ber_final, 1e-10) * (1.0 - ber_final) / n_bits_total)
+        if z_ci * sigma <= ber_accuracy:
+            break
+        _cb(0.88 + 0.09 * (rnd + 1) / 16,
+            f"[seeker] '{carrier_name}' — CI still wide ({z_ci * sigma:.2e} > "
+            f"{ber_accuracy:.2e}), adding round {rnd + 2}...")
+
+    cnr_db  = float(np.mean(pooled_cnrs))
+    cir_db  = float(np.mean(pooled_cirs))
+    cnir_db = float(np.mean(pooled_cnirs))
     ber_ci_lo = max(0.0, ber_final - z_ci * sigma)
     ber_ci_hi = min(1.0, ber_final + z_ci * sigma)
 

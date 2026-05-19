@@ -121,6 +121,52 @@ def test_seek_ber_convergence():
 
 
 # ----------------------------------------------------------------------------
+# Test: final measurement adds rounds when CI is too wide
+# ----------------------------------------------------------------------------
+
+def test_final_measurement_adds_rounds_when_ci_wide(monkeypatch):
+    """
+    When n_bits_final is tiny, one round of n_final_seeds seeds produces a CI
+    that is wider than ber_accuracy.  The adaptive loop should keep adding
+    rounds (hitting the progress callback each time) until the cap is reached.
+    """
+    from sim import targeter
+
+    # Force n_bits_final = 10 so each round is tiny and CI stays wide for all
+    # 16 capped rounds.  The _cb path at line 298 fires whenever a round does
+    # not meet the accuracy requirement.
+    monkeypatch.setattr(targeter, "_n_bits_for_ci", lambda *a, **kw: 10)
+
+    cb_msgs: list[str] = []
+
+    result = seek_ber_noise_level(
+        target_ber=_TARGET_BER,
+        confidence=_CONFIDENCE,
+        ber_accuracy=_ACCURACY,
+        carrier_name="tgt",
+        carriers=[_CARRIER],
+        sample_rate=_SAMPLE_RATE,
+        am_am_cfg=_LINEAR_AM_AM,
+        am_pm_cfg=_LINEAR_AM_PM,
+        noise_lo_dbfs=_NOISE_LO,
+        noise_hi_dbfs=_NOISE_HI,
+        ola_filter_span=_OLA_SPAN,
+        ola_block_size=_OLA_BLOCK,
+        max_iter=_MAX_ITER,
+        n_final_seeds=_N_SEEDS,
+        seed=0,
+        progress_callback=lambda _f, msg: cb_msgs.append(msg),
+    )
+
+    # Extra rounds were triggered — at least one "CI still wide" message expected
+    assert any("CI still wide" in m for m in cb_msgs)
+    # Result is still valid
+    assert result["ber"] >= 0
+    assert result["ber_ci_lo"] <= result["ber"] <= result["ber_ci_hi"]
+    assert result["n_bits_total"] > 10   # more than one round of 10 bits
+
+
+# ----------------------------------------------------------------------------
 # Integration test: linear amplifier → near-zero implementation loss
 # ----------------------------------------------------------------------------
 

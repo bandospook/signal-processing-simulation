@@ -258,6 +258,9 @@ def seek_ber_noise_level(
     pooled_cnrs:  list[float] = []
     pooled_cirs:  list[float] = []
     pooled_cnirs: list[float] = []
+    ber_final    = 0.0
+    sigma        = 0.0
+    n_bits_total = 0
 
     for rnd in range(16):
         rnd_seeds = [int(x) for x in rng.integers(0, 2 ** 31, n_final_seeds)]

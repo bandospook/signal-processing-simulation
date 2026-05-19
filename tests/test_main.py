@@ -130,7 +130,7 @@ _MINIMAL_TOML = """\
 seed = 99
 
 [wideband]
-sample_rate = 16_000_000
+sample_rate = 16
 
 [amplifier]
 input_backoff_db = 6.0
@@ -149,19 +149,31 @@ block_size  = 1024
 
 [output]
 output_dir = "."
+
+[[carrier]]
+name        = "test"
+symbol_rate = 1
+sps         = 4
+rolloff     = 0.35
+filter_span = 8
+num_symbols = 100
+power_db    = 0.0
+freq        = -3
 """
 
 
 def test_load_config(tmp_path):
-    """load_config parses a TOML file and returns the expected structure."""
+    """load_config parses a TOML file and converts MHz fields to Hz."""
     path = tmp_path / "test.toml"
     path.write_text(_MINIMAL_TOML, encoding="utf-8")
 
     cfg = load_config(path)
 
     assert cfg["simulation"]["seed"] == 99
-    assert cfg["wideband"]["sample_rate"] == 16_000_000
+    assert cfg["wideband"]["sample_rate"] == 16_000_000   # 16 MHz -> Hz
     assert cfg["amplifier"]["input_backoff_db"] == 6.0
     assert cfg["amplifier"]["am_am"]["input"] == [0.0, 1.0]
     assert cfg["amplifier"]["am_pm"]["phase_deg"] == [0.0, 5.0]
     assert cfg["ola"]["filter_span"] == 8
+    assert cfg["carrier"][0]["symbol_rate"] == 1_000_000  # 1 MHz -> Hz
+    assert cfg["carrier"][0]["freq"] == -3_000_000        # -3 MHz -> Hz

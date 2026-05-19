@@ -58,5 +58,5 @@ def ebn0_for_ber(mod: str, target_ber: float,
     if target_ber > ber_lo or target_ber < ber_hi:
         return None  # out of range
 
-    return float(brentq(lambda e: theory_ber(e) - target_ber,
+    return float(brentq(lambda e: theory_ber(e) - target_ber,  # type: ignore[arg-type]
                         ebn0_lo_db, ebn0_hi_db, xtol=tol_db))

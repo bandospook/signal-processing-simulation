@@ -169,8 +169,8 @@ class CarrierFrame(ttk.LabelFrame):
          "Unique identifier for this carrier. Used in output reports and seeker results."),
         ("modulation",  "Modulation",       "str",   "BPSK",
          "Modulation scheme: BPSK, DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK"),
-        ("symbol_rate", "Symbol Rate (Hz)", "float", "1e6",
-         "Symbol rate in symbols/second (baud). Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
+        ("symbol_rate", "Symbol Rate (MHz)", "float", "1",
+         "Symbol rate in MHz (megabaud). Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
         ("sps",         "SPS",              "int",   "4",
          "Samples per symbol at the wideband composite sample rate. Integer ≥ 2; typical value: 4."),
         ("rolloff",     "Roll-off",         "float", "0.35",
@@ -181,8 +181,8 @@ class CarrierFrame(ttk.LabelFrame):
          "Symbols simulated per run. Higher count improves BER statistical accuracy."),
         ("power_db",    "Power (dB)",       "float", "0.0",
          "Carrier power in dBFS relative to the wideband composite full-scale."),
-        ("freq",        "Freq (Hz)",        "float", "0.0",
-         "Carrier centre frequency offset from DC (Hz). Negative = below centre frequency."),
+        ("freq",        "Freq (MHz)",       "float", "0.0",
+         "Carrier centre frequency offset from DC (MHz). Negative = below centre frequency."),
     ]
     _SEEKER = [
         ("target_ber",    "Target BER",          "float", "0.001",
@@ -232,13 +232,21 @@ class CarrierFrame(ttk.LabelFrame):
                    width=8).grid(row=0, column=3, sticky="ne", padx=2)
 
         # Main parameter fields (2-column grid)
+        _MODS = ["BPSK", "DBPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
         for i, (key, label, _, dflt, tip) in enumerate(self._MAIN):
             raw = d.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
             self._vars[key] = var
             r, c = (i // 2) + 1, (i % 2) * 2
             _lf(self, label + ":", r, c)
-            _ent(self, var, r, c + 1, width=14, tip=tip)
+            if key == "modulation":
+                cb = ttk.Combobox(self, textvariable=var, values=_MODS,
+                                  state="readonly", width=12)
+                cb.grid(row=r, column=c + 1, sticky="w", pady=2)
+                if tip:
+                    _Tip(cb, tip)
+            else:
+                _ent(self, var, r, c + 1, width=14, tip=tip)
             if key == "name":
                 var.trace_add("write",
                               lambda *_, v=var: self.configure(text=v.get() or "carrier"))
@@ -490,10 +498,10 @@ class App:
              tip="Random seed for reproducible simulations (integer)."); r += 1
 
         r = self._section(f, "Wideband", r)
-        _lf(f, "Sample Rate (Hz):", r, 0)
+        _lf(f, "Sample Rate (MHz):", r, 0)
         _ent(f, self._sv("wb.sample_rate"), r, 1, width=20,
-             tip="Composite wideband sample rate in samples/second.\n"
-                 "Must be at least 2× the highest carrier edge frequency."); r += 1
+             tip="Composite wideband sample rate in MHz.\n"
+                 "Must be at least 2x the highest carrier edge frequency."); r += 1
         _lf(f, "Noise Density (dBFS/Hz):", r, 0)
         _ent(f, self._sv("wb.noise"), r, 1,
              tip="AWGN noise power spectral density added after the amplifier (dBFS/Hz).\n"
@@ -645,7 +653,7 @@ class App:
         self._vars["sim.seed"].set(str(sim.get("seed", 42)))
 
         wb = cfg.get("wideband", {})
-        self._vars["wb.sample_rate"].set(_fmt(wb.get("sample_rate", 16e6)))
+        self._vars["wb.sample_rate"].set(_fmt(wb.get("sample_rate", 16)))
         nd = wb.get("noise_density_dbfs")
         self._vars["wb.noise"].set(_fmt(nd) if nd is not None else "")
 

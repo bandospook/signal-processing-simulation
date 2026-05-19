@@ -2,7 +2,7 @@
 seed = 42
 
 [wideband]
-sample_rate        = 500_000_000
+sample_rate        = 500
 noise_density_dbfs = -80
 
 [amplifier]
@@ -29,40 +29,33 @@ sweep_table        = "sweep_table.md"
 detector_results   = "detector_table.md"
 
 [sweep]
-ibo_db             = [0, 1.5, 3, 4.5, 6]
-noise_density_dbfs = [-100, -95, -90, -85]
+ibo_db             = [0]
+noise_density_dbfs = [-85, -83, -81, -79]
 
 [[carrier]]
 name         = "slow"
 modulation   = "BPSK"
-symbol_rate  = 1_000_000
+symbol_rate  = 1
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
 num_symbols  = 2_000
 power_db     = 0
-freq         = -200_000_000
-enabled      = true
-sweep_demod  = true
+freq         = -200
+enabled      = false
+sweep_demod  = false
 use_seeker   = false
-
-[carrier.channel]
-ripple_db              = 0.5
-ripple_cycles          = 2
-max_phase_dev_deg      = 5
-phase_poly_order       = 2
-plot                   = "channel_slow.png"
 
 [[carrier]]
 name         = "fast"
 modulation   = "BPSK"
-symbol_rate  = 2_000_000
+symbol_rate  = 2
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
-num_symbols  = 10_000
+num_symbols  = 1_000_000
 power_db     = 0
-freq         = 100_000_000
+freq         = 100
 enabled      = true
 sweep_demod  = true
 use_seeker   = true

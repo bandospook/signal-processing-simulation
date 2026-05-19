@@ -159,15 +159,15 @@ def seek_ber_noise_level(
     frac is in [0, 1]; msg is a human-readable status string.
 
     Returns a dict:
-        noise_density_dbfs    — converged noise level (dBFS/Hz)
-        ber                   — measured BER at convergence
-        ber_ci_lo / ber_ci_hi — normal-approximation confidence interval
-        effective_ebn0_db     — C/(N+I) per bit in dB
-        theory_ebn0_db        — theory Eb/N0 for measured BER (None if no formula)
-        implementation_loss_db — effective - theory (None if no formula)
+        noise_density_dbfs    -- converged noise level (dBFS/Hz)
+        ber                   -- measured BER at convergence
+        ber_ci_lo / ber_ci_hi -- normal-approximation confidence interval
+        effective_ebn0_db     -- C/(N+I) per bit in dB
+        theory_ebn0_db        -- theory Eb/N0 for measured BER (None if no formula)
+        implementation_loss_db -- effective - theory (None if no formula)
         cnr_db, cir_db, cnir_db
-        n_bits_total          — total bits used in final measurement
-        n_iter                — bisection steps taken
+        n_bits_total          -- total bits used in final measurement
+        n_iter                -- bisection steps taken
     """
     def _cb(frac: float, msg: str) -> None:
         if progress_callback is not None:
@@ -192,14 +192,14 @@ def seek_ber_noise_level(
 
     bisect_seed = [int(rng.integers(0, 2 ** 31))]
 
-    _cb(0.03, f"[seeker] '{carrier_name}' — bracket check (lo: {noise_lo_dbfs:.1f} dBFS)...")
+    _cb(0.03, f"[seeker] '{carrier_name}' -- bracket check (lo: {noise_lo_dbfs:.1f} dBFS)...")
     ber_at_lo, *_ = _simulate_ber_at_noise(
         noise_lo_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
         ola_filter_span, ola_block_size, n_bits_initial, bisect_seed,
         chunk_print=chunk_print)
 
-    _cb(0.08, f"[seeker] '{carrier_name}' — bracket check (hi: {noise_hi_dbfs:.1f} dBFS)...")
+    _cb(0.08, f"[seeker] '{carrier_name}' -- bracket check (hi: {noise_hi_dbfs:.1f} dBFS)...")
     ber_at_hi, *_ = _simulate_ber_at_noise(
         noise_hi_dbfs, carrier_name, carriers, sample_rate,
         am_am_cfg, am_pm_cfg, input_backoff_db,
@@ -211,14 +211,14 @@ def seek_ber_noise_level(
         # noise power at native rate = noise_density * symbol_rate * sps, so:
         #   CNR_dB = power_db - noise_lo_dbfs - 10*log10(symbol_rate * sps)
         # If CNR >> 30 dB, BER from thermal noise alone is essentially zero; any
-        # residual BER is a distortion floor from the NLA — lowering noise_lo_dbfs
+        # residual BER is a distortion floor from the NLA -- lowering noise_lo_dbfs
         # further will not help.
         cnr_at_lo_db = power_db - noise_lo_dbfs - 10.0 * math.log10(symbol_rate * sps)
         if cnr_at_lo_db > 30.0:
             raise ValueError(
                 f"BER at noise_lo_dbfs={noise_lo_dbfs:.1f} dBFS is {ber_at_lo:.4f} "
                 f"> target {target_ber:.4f}. "
-                f"CNR at noise_lo is {cnr_at_lo_db:.0f} dB — thermal noise is "
+                f"CNR at noise_lo is {cnr_at_lo_db:.0f} dB -- thermal noise is "
                 f"negligible; this BER floor is from nonlinear distortion. "
                 f"Raise target_ber above {ber_at_lo:.4f} or increase input_backoff_db."
             )
@@ -249,7 +249,7 @@ def seek_ber_noise_level(
 
         step_frac = 0.10 + 0.75 * (k / max_iter)
         _cb(step_frac,
-            f"[seeker] '{carrier_name}' — step {k + 1}/{max_iter}  "
+            f"[seeker] '{carrier_name}' -- step {k + 1}/{max_iter}  "
             f"BER {ber_mid:.2e} -> target {target_ber:.2e}  "
             f"noise {mid:.2f} dBFS")
 
@@ -268,7 +268,7 @@ def seek_ber_noise_level(
     # CI half-width is actually ≤ ber_accuracy.  Each round uses n_bits_final
     # bits so the first round matches the old single-shot behaviour; subsequent
     # rounds double the precision until the guarantee is met (cap: 16 rounds).
-    _cb(0.88, f"[seeker] '{carrier_name}' — final measurement ({n_final_seeds} seeds/round)...")
+    _cb(0.88, f"[seeker] '{carrier_name}' -- final measurement ({n_final_seeds} seeds/round)...")
     z_ci = math.sqrt(2.0) * _erfinv(confidence)
     n_sym_per_seed = max(1, n_bits_final // (bps * n_final_seeds))
     bits_per_round = n_sym_per_seed * bps * n_final_seeds
@@ -296,7 +296,7 @@ def seek_ber_noise_level(
         if z_ci * sigma <= ber_accuracy:
             break
         _cb(0.88 + 0.09 * (rnd + 1) / 16,
-            f"[seeker] '{carrier_name}' — CI still wide ({z_ci * sigma:.2e} > "
+            f"[seeker] '{carrier_name}' -- CI still wide ({z_ci * sigma:.2e} > "
             f"{ber_accuracy:.2e}), adding round {rnd + 2}...")
 
     cnr_db  = float(np.mean(pooled_cnrs))
@@ -313,10 +313,10 @@ def seek_ber_noise_level(
         if theory_ebn0_db is not None else None
     )
 
-    _cb(1.0, f"[seeker] '{carrier_name}' — done.  "
+    _cb(1.0, f"[seeker] '{carrier_name}' -- done.  "
         f"BER={ber_final:.3e}  IL={implementation_loss_db:.2f} dB"
         if implementation_loss_db is not None else
-        f"[seeker] '{carrier_name}' — done.  BER={ber_final:.3e}")
+        f"[seeker] '{carrier_name}' -- done.  BER={ber_final:.3e}")
 
     return dict(
         noise_density_dbfs=converged_noise,

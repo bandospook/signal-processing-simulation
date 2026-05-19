@@ -305,10 +305,14 @@ def wideband_bpsk_simulation(carriers: list[dict],
         p_noise = (float(np.mean(np.abs(nl_down - nl_pure) ** 2))
                    if has_noise else 0.0)
 
+        # Normalise noise to the symbol-rate bandwidth (÷ sps) so that CNR and CNIR
+        # match the link-budget convention: noise bandwidth ≈ symbol_rate for RRC.
+        sps_f   = float(cr["sps"])
+        p_noise_bw = p_noise / sps_f
         eps     = 1e-30
         cir_db  = 10.0 * np.log10(p_sig / (p_dist + eps))
-        cnr_db  = (10.0 * np.log10(p_sig / p_noise) if p_noise > 0 else float("inf"))
-        cnir_db = 10.0 * np.log10(p_sig / (p_dist + p_noise + eps))
+        cnr_db  = (10.0 * np.log10(p_sig / p_noise_bw) if p_noise > 0 else float("inf"))
+        cnir_db = 10.0 * np.log10(p_sig / (p_dist + p_noise_bw + eps))
 
         cr["nl"]      = nl_down
         cr["cnr_db"]  = cnr_db

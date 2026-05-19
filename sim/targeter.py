@@ -281,10 +281,8 @@ def seek_ber_noise_level(
     ber_ci_lo = max(0.0, ber_final - z_ci * sigma)
     ber_ci_hi = min(1.0, ber_final + z_ci * sigma)
 
-    # CNIR is measured at the native sample rate (sps samples/symbol), so it is
-    # sps × Eb/N0 per bit.  Dividing by bps and multiplying by sps converts from
-    # the per-sample power ratio to Eb/N0.  For linear, distortion-free: IL = 0.
-    effective_ebn0_db = cnir_db + 10.0 * math.log10(sps / bps)
+    # CNIR is in the symbol-rate bandwidth, so Eb/N0 = CNIR / bps.
+    effective_ebn0_db = cnir_db - 10.0 * math.log10(bps)
     theory_ebn0_db = ebn0_for_ber(modulation, ber_final)
     implementation_loss_db = (
         effective_ebn0_db - theory_ebn0_db

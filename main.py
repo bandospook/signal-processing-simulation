@@ -211,7 +211,7 @@ def main(config_path: str = "simulation.toml",
     if all_detector:
         det_path = out_path(out.get("detector_results", "detector_results.md"))
         write_detector_results(all_detector, det_path)
-        _prog(0.99, f"Detector results written → {det_path}")
+        _prog(0.99, f"Detector results written -> {det_path}")
 
     _prog(1.00, "Done.")
 

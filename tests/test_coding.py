@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sim.coding import ConvolutionalCode, LDPCCode, TurboCode
+from sim.coding import ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode
 from sim.receiver import soft_demap
 
 _LDPC_ALIST = Path(__file__).resolve().parent.parent / "data" / "ldpc" / "mackay_13298.alist"
@@ -145,3 +145,49 @@ def test_turbo_coding_gain():
 
     assert coded_ber < uncoded_ber, f"no coding gain: {coded_ber} vs {uncoded_ber}"
     assert coded_ber < 0.01, f"coded BER too high: {coded_ber}"
+
+
+# ── Concatenated code (Reed-Solomon outer + convolutional inner) ─────────────
+
+def test_concat_encode_length():
+    """Encoded length matches the reported coded_bits."""
+    code = ConcatenatedCode()
+    coded = code.encode(np.zeros(code.k_data_bits, dtype=int))
+    assert len(coded) == code.coded_bits
+
+
+def test_concat_roundtrip_noiseless():
+    """Noiseless high-confidence LLRs decode back to the original data exactly."""
+    rng = np.random.default_rng(6)
+    code = ConcatenatedCode()
+    data = rng.integers(0, 2, code.k_data_bits)
+    coded = code.encode(data)
+    llrs = np.where(coded == 0, 30.0, -30.0)
+    assert np.array_equal(code.decode(llrs), data)
+
+
+def test_concat_coding_gain():
+    """Concatenated (RS + convolutional) decoding beats uncoded BPSK at same Eb/N0."""
+    rng = np.random.default_rng(7)
+    code = ConcatenatedCode()
+    ebn0 = 10.0 ** (4.0 / 10.0)
+    n_frames = 3
+
+    sigma = np.sqrt(1.0 / (2.0 * ebn0 * code.rate))
+    errs = 0
+    for _ in range(n_frames):
+        data = rng.integers(0, 2, code.k_data_bits)
+        tx = 1.0 - 2.0 * code.encode(data)
+        rx = tx + sigma * (rng.standard_normal(len(tx)) + 1j * rng.standard_normal(len(tx)))
+        llrs = soft_demap(rx, "BPSK", noise_var=2.0 * sigma ** 2)
+        errs += int(np.sum(code.decode(llrs) != data))
+    coded_ber = errs / (n_frames * code.k_data_bits)
+
+    nbits = n_frames * code.k_data_bits
+    data_u = rng.integers(0, 2, nbits)
+    sigma_u = np.sqrt(1.0 / (2.0 * ebn0))
+    rx_u = (1.0 - 2.0 * data_u) + sigma_u * rng.standard_normal(nbits)
+    uncoded_ber = float(np.mean((rx_u < 0) != data_u))
+
+    assert coded_ber < uncoded_ber, f"no coding gain: {coded_ber} vs {uncoded_ber}"
+    assert coded_ber < 0.005, f"coded BER too high: {coded_ber}"

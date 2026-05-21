@@ -118,6 +118,20 @@ wheels = [
 ]
 
 [[package]]
+name = "galois"
+version = "0.4.11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/08/84/996f1c4a7e8fe973a7f8e4d7901e125a91d0abb62615e35076ff47e9383a/galois-0.4.11.tar.gz", hash = "sha256:f5055546c4b39d1e36decae9d4f21f3d66d9c6c7c9aec39189cb5d2284e9022f", size = 7402587, upload-time = "2026-05-02T18:21:28.615Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/89/dc69acbd34bde07b9dee9f9f88d7ce61ff97fd99d6d576d72d2db1461349/galois-0.4.11-py3-none-any.whl", hash = "sha256:d2e12a2b7fd44b108cc15d7de27dabcb8a98a556ea2c69c94fe695139629d9aa", size = 4197346, upload-time = "2026-05-02T18:21:26.868Z" },
+]
+
+[[package]]
 name = "iniconfig"
 version = "2.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -456,6 +470,7 @@ name = "signal-processing-simulation"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "galois" },
     { name = "matplotlib" },
     { name = "numba" },
     { name = "numpy" },
@@ -473,6 +488,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "galois", specifier = ">=0.4" },
     { name = "matplotlib", specifier = ">=3.10" },
     { name = "numba", specifier = ">=0.65" },
     { name = "numpy", specifier = ">=2.4.4" },

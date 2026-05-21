@@ -713,6 +713,26 @@ equal statistical confidence across all modulations. Current default: `10_000` b
 (≈4 s total). For a rigorous run set `_N_BITS_PLOT = 1_000_000`; this gives ±0.001
 BER accuracy at 95% confidence.
 
+### `tests/test_modulations.py`
+
+Unit and round-trip tests for `sim/modulation.py`, `sim/baseband.py`, and
+`sim/receiver.py`. Confirms every constellation has unit average power and
+`2^bits_per_symbol` points; that `map_bits` → `decide` recovers the original bits
+with no noise; and that the full baseband → receive chain yields zero BER and low
+EVM in the absence of noise and nonlinearity. Also covers DBPSK differential
+encode/decode (including 180° phase immunity), MSK phase-ambiguity correction,
+the `ber is None` path when no reference bits are supplied, and error paths
+(unknown modulation, non-integer `sps`).
+
+### `tests/test_theory.py`
+
+Unit tests for the closed-form BER module `sim/theory.py`. Checks that `ber_awgn`
+returns sensible in-range values for each modulation family, is monotonically
+decreasing in Es/N0, ranks DBPSK above coherent BPSK, and returns `None` for the
+APSK formats that have no closed form. Verifies that `ebn0_for_ber` numerically
+inverts `ber_awgn`, and returns `None` when the target BER is unreachable within
+the search bracket.
+
 ### `tests/test_targeter.py`
 
 Validates the BER seeker in `sim/targeter.py`.

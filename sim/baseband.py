@@ -49,21 +49,25 @@ def rrc_baseband(modulation: str,
     rng = np.random.default_rng(seed)
     bits = rng.integers(0, 2, num_symbols * bps).astype(int)
 
-    if mod == "DBPSK":
+    if mod == "MSK":
+        symbols = (1 - 2 * bits).astype(complex)
+        bb = _msk_baseband(bits, sps)
+    elif mod == "DBPSK":
         encoded_bits = differential_encode(bits)
-        # Map encoded bits to BPSK symbols (0→+1, 1→-1)
         symbols = np.where(encoded_bits == 0, 1.0 + 0j, -1.0 + 0j)
-    else:
-        symbols = map_bits(bits, mod, **mod_kwargs)
-
-    h = rrc_coeffs(filter_span, rolloff, sps)
-
-    if mod == "OQPSK":
-        bb = _oqpsk_baseband(symbols, sps, h)
-    else:
+        h = rrc_coeffs(filter_span, rolloff, sps)
         upsampled = np.zeros(num_symbols * sps, dtype=complex)
         upsampled[::sps] = symbols
         bb = np.convolve(upsampled, h, mode='same').astype(complex)
+    else:
+        symbols = map_bits(bits, mod, **mod_kwargs)
+        h = rrc_coeffs(filter_span, rolloff, sps)
+        if mod == "OQPSK":
+            bb = _oqpsk_baseband(symbols, sps, h)
+        else:
+            upsampled = np.zeros(num_symbols * sps, dtype=complex)
+            upsampled[::sps] = symbols
+            bb = np.convolve(upsampled, h, mode='same').astype(complex)
 
     rms = float(np.sqrt(np.mean(np.abs(bb) ** 2)))
     if rms > 0:
@@ -71,6 +75,32 @@ def rrc_baseband(modulation: str,
 
     t = np.arange(len(bb)) / sample_rate
     return bb, t, bits, symbols
+
+
+def _msk_baseband(bits: np.ndarray, sps: int) -> np.ndarray:
+    """
+    MSK baseband, built as offset-QPSK with half-sine pulse shaping.
+
+    MSK is exactly offset-QPSK whose pulse is a half-sine 2*sps samples wide:
+    even-indexed bits drive the in-phase rail, odd-indexed bits the quadrature
+    rail, and the Q rail is delayed by sps.  The sum is the constant-envelope,
+    continuous-phase MSK waveform.  Because each rail is then an independent
+    antipodal channel, a per-rail matched filter attains the BPSK error rate.
+
+    Returns a complex array of length n_sym * sps.
+    """
+    n_sym = len(bits)
+    total = n_sym * sps
+    d = 1.0 - 2.0 * bits.astype(float)                  # bit 0 -> +1, bit 1 -> -1
+    pulse = np.sin(np.pi * np.arange(2 * sps) / (2.0 * sps))
+
+    i_rail = np.repeat(d[0::2], 2 * sps) * np.tile(pulse, (n_sym + 1) // 2)
+    q_rail = np.repeat(d[1::2], 2 * sps) * np.tile(pulse, n_sym // 2)
+
+    bb = np.zeros(total, dtype=complex)
+    bb += i_rail[:total]
+    bb[sps:] += 1j * q_rail[:total - sps]
+    return bb
 
 
 def _oqpsk_baseband(symbols: np.ndarray, sps: int, h: np.ndarray) -> np.ndarray:

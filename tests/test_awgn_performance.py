@@ -19,7 +19,7 @@ ROLLOFF = 0.35
 FILTER_SPAN = 10
 PLOT_DIR = os.path.join(os.path.dirname(__file__), "plots", "performance")
 
-ALL_MODS = ["BPSK", "DBPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
+ALL_MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
 
 # Bits per simulation run for the performance plot.
 # n_sym is derived per modulation as _N_BITS_PLOT // bps so all modulations
@@ -39,7 +39,7 @@ def ber_theory(mod: str, EsN0_dB: float) -> float | None:
     bps = bits_per_symbol(mod.upper())
     EbN0 = 10.0 ** (EsN0_dB / 10.0) / bps
     m = mod.upper()
-    if m in ("BPSK", "QPSK", "OQPSK"):
+    if m in ("BPSK", "QPSK", "OQPSK", "MSK"):
         return 0.5 * math.erfc(math.sqrt(EbN0))
     if m == "DBPSK":
         # Two DBPSK variants exist with different theory curves:
@@ -116,6 +116,7 @@ def test_ber_monotone(mod):
 # EsN0_dB chosen per modulation so theory BER ≈ 4–6 %
 _THEORY_POINTS = [
     ("BPSK",   2.0),
+    ("MSK",    2.0),
     ("QPSK",   5.0),
     ("OQPSK",  5.0),
     ("8PSK",   9.5),
@@ -139,7 +140,7 @@ def test_ber_matches_theory(mod, EsN0_dB):
 # ── Theory comparison table ───────────────────────────────────────────────────
 
 _TARGET_BERS = [0.10, 0.05, 0.02, 0.01, 0.005]
-_THEORY_MODS = ["BPSK", "DBPSK", "QPSK", "OQPSK", "8PSK", "16QAM"]
+_THEORY_MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM"]
 
 
 def test_ber_theory_table():
@@ -239,7 +240,7 @@ def test_generate_performance_plots():
         _plot_eye(mod)
 
 
-_BPSK_EQUIV = {"BPSK", "QPSK", "OQPSK"}  # share the same theory formula
+_BPSK_EQUIV = {"BPSK", "QPSK", "OQPSK", "MSK"}  # share the same theory formula
 
 
 def _plot_ber(sweep: dict) -> None:

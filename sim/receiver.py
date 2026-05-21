@@ -73,6 +73,8 @@ def receive(signal: np.ndarray,
     dict with keys: samples, decisions, ber, evm_rms
     """
     mod = modulation.upper()
+    if mod == "MSK":
+        return _msk_receive(signal, sps, reference_bits)
     mf = matched_filter(signal, rolloff, filter_span, sps)
 
     if mod == "OQPSK":
@@ -110,6 +112,53 @@ def receive(signal: np.ndarray,
 
     evm = measure_evm_rms(samples_norm, sym_decisions)
     return dict(samples=samples_norm, decisions=bit_decisions, ber=ber, evm_rms=evm)
+
+
+def _msk_receive(signal: np.ndarray, sps: int,
+                 reference_bits: np.ndarray | None) -> dict:
+    """
+    Coherent MSK receiver via the offset-QPSK / half-sine matched filter.
+
+    MSK is offset-QPSK with a half-sine pulse (see sim.baseband._msk_baseband):
+    the in-phase rail carries even-indexed bits, the quadrature rail (delayed
+    by sps) carries odd-indexed bits.  Each rail is matched-filtered with the
+    same 2*sps half-sine pulse, giving two independent antipodal decisions and
+    hence the BPSK error rate.  A residual 180 degree ambiguity (BER > 0.5) is
+    corrected by inverting every decision.
+
+    EVM is not defined for a constant-envelope signal, so evm_rms is NaN.
+    """
+    n_sym = len(signal) // sps
+    total = n_sym * sps
+    n_i = (n_sym + 1) // 2
+    n_q = n_sym // 2
+    pulse = np.sin(np.pi * np.arange(2 * sps) / (2.0 * sps))
+
+    # In-phase rail: matched filter over non-overlapping 2*sps windows.
+    i_buf = np.zeros(n_i * 2 * sps)
+    i_buf[:total] = np.real(signal[:total])
+    i_dec = (i_buf.reshape(n_i, 2 * sps) @ pulse <= 0.0).astype(int)
+
+    # Quadrature rail: same, but shifted by sps (the offset-QPSK delay).
+    q_buf = np.zeros(n_q * 2 * sps)
+    q_buf[:total - sps] = np.imag(signal[sps:total])
+    q_dec = (q_buf.reshape(n_q, 2 * sps) @ pulse <= 0.0).astype(int)
+
+    bit_decisions = np.empty(n_sym, dtype=int)
+    bit_decisions[0::2] = i_dec
+    bit_decisions[1::2] = q_dec
+
+    ber: float | None = None
+    if reference_bits is not None:
+        ref = np.asarray(reference_bits[:n_sym], dtype=int)
+        n = min(len(bit_decisions), len(ref))
+        ber = float(np.mean(bit_decisions[:n] != ref[:n]))
+        if ber > 0.5:
+            ber = 1.0 - ber
+            bit_decisions = 1 - bit_decisions
+
+    return dict(samples=signal[:total:sps], decisions=bit_decisions,
+                ber=ber, evm_rms=float("nan"))
 
 
 def _ber_with_ambiguity(samples: np.ndarray, reference_bits: np.ndarray,

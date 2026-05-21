@@ -22,7 +22,7 @@ import numpy as np
 # ── Supported modulations ─────────────────────────────────────────────────────
 
 _BITS_PER_SYMBOL: dict[str, int] = {
-    "BPSK": 1, "DBPSK": 1,
+    "BPSK": 1, "DBPSK": 1, "MSK": 1,
     "QPSK": 2, "OQPSK": 2,
     "8PSK": 3,
     "16QAM": 4, "16APSK": 4,
@@ -34,7 +34,7 @@ SUPPORTED: list[str] = list(_BITS_PER_SYMBOL)
 # Rotational symmetry order used to resolve phase ambiguity in BER measurement.
 # DBPSK = 1 because differential decoding resolves the 180° flip automatically.
 _ROTATIONAL_SYMMETRY: dict[str, int] = {
-    "BPSK": 2, "DBPSK": 1,
+    "BPSK": 2, "DBPSK": 1, "MSK": 1,
     "QPSK": 4, "OQPSK": 4,
     "8PSK": 8,
     "16QAM": 4, "16APSK": 4, "32APSK": 4,
@@ -139,7 +139,7 @@ def constellation(mod: str, **kwargs) -> np.ndarray:
         apsk_gamma2       float  r3/r1 for 32APSK (default 5.27)
     """
     mod = mod.upper()
-    if mod in ("BPSK", "DBPSK"):
+    if mod in ("BPSK", "DBPSK", "MSK"):
         return _psk_constellation(2, offset=0.0)
     elif mod in ("QPSK", "OQPSK"):
         return _psk_constellation(4, offset=np.pi / 4)

@@ -168,7 +168,7 @@ class CarrierFrame(ttk.LabelFrame):
         ("name",        "Name",             "str",   "carrier",
          "Unique identifier for this carrier. Used in output reports and seeker results."),
         ("modulation",  "Modulation",       "str",   "BPSK",
-         "Modulation scheme: BPSK, DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK"),
+         "Modulation scheme: BPSK, DBPSK, MSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK"),
         ("symbol_rate", "Symbol Rate (MHz)", "float", "1",
          "Symbol rate in MHz (megabaud). Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
         ("sps",         "SPS",              "int",   "4",
@@ -232,7 +232,7 @@ class CarrierFrame(ttk.LabelFrame):
                    width=8).grid(row=0, column=3, sticky="ne", padx=2)
 
         # Main parameter fields (2-column grid)
-        _MODS = ["BPSK", "DBPSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
+        _MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
         for i, (key, label, _, dflt, tip) in enumerate(self._MAIN):
             raw = d.get(key, dflt)
             var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))

@@ -80,6 +80,7 @@ def test_differential_decode_phase_immune():
 _E2E_CASES = [
     ("BPSK",   300,  1e6, 8),
     ("DBPSK",  300,  1e6, 8),
+    ("MSK",    300,  1e6, 8),
     ("QPSK",   300,  1e6, 8),
     ("OQPSK",  300,  1e6, 8),
     ("8PSK",   300,  1e6, 8),
@@ -116,7 +117,8 @@ def test_noiseless_ber_zero(mod, n_sym, sym_rate, sps):
 
 @pytest.mark.parametrize("mod,n_sym,sym_rate,sps", _E2E_CASES)
 def test_evm_noiseless_low(mod, n_sym, sym_rate, sps):
-    """Noiseless EVM must be below 5% (residual from filter truncation only)."""
+    """Noiseless EVM must be below 5% (residual from filter truncation only).
+    MSK is skipped — constant-envelope signal has no discrete constellation."""
     native_rate = float(sps) * sym_rate
     bb, _t, bits, _symbols = rrc_baseband(
         mod, n_sym, sym_rate, native_rate,
@@ -124,6 +126,8 @@ def test_evm_noiseless_low(mod, n_sym, sym_rate, sps):
     result = receive(bb, mod, rolloff=0.35, filter_span=10, sps=sps,
                      reference_bits=bits)
     evm = result["evm_rms"]
+    if np.isnan(evm):
+        return
     assert evm < 5.0, f"{mod}: noiseless EVM = {evm:.2f}%, expected < 5%"
 
 
@@ -160,6 +164,25 @@ def test_receive_no_reference_bits_dbpsk():
                                 sample_rate=4e6, seed=0)
     result = receive(bb, "DBPSK", rolloff=0.35, filter_span=8, sps=4)
     assert result["ber"] is None
+
+
+def test_receive_no_reference_bits_msk():
+    """receive() with no reference_bits → ber is None and EVM is NaN for MSK."""
+    bb, _, _, _ = rrc_baseband("MSK", num_symbols=200, symbol_rate=1e6,
+                                sample_rate=4e6, seed=0)
+    result = receive(bb, "MSK", rolloff=0.35, filter_span=8, sps=4)
+    assert result["ber"] is None
+    assert np.isnan(result["evm_rms"])
+
+
+def test_msk_phase_ambiguity_correction():
+    """MSK receiver corrects a global π phase offset (ber > 0.5 → flip all decisions)."""
+    bb, _, bits, _ = rrc_baseband("MSK", num_symbols=300, symbol_rate=1e6,
+                                   sample_rate=4e6, seed=7)
+    result = receive(-bb, "MSK", rolloff=0.35, filter_span=8, sps=4,
+                     reference_bits=bits)
+    assert result["ber"] is not None
+    assert result["ber"] < 0.01
 
 
 def test_measure_evm_zero_signal():

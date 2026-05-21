@@ -9,7 +9,7 @@ from sim.modulation import bits_per_symbol
 
 # ── ber_awgn ─────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("mod", ["BPSK", "QPSK", "OQPSK"])
+@pytest.mark.parametrize("mod", ["BPSK", "QPSK", "OQPSK", "MSK"])
 def test_ber_awgn_bpsk_family(mod):
     val = ber_awgn(mod, 0.0)
     assert val is not None

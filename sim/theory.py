@@ -19,7 +19,7 @@ def ber_awgn(mod: str, EsN0_dB: float) -> float | None:
     bps = bits_per_symbol(mod.upper())
     EbN0 = 10.0 ** (EsN0_dB / 10.0) / bps
     m = mod.upper()
-    if m in ("BPSK", "QPSK", "OQPSK"):
+    if m in ("BPSK", "QPSK", "OQPSK", "MSK"):
         return 0.5 * math.erfc(math.sqrt(EbN0))
     if m == "DBPSK":
         p = 0.5 * math.erfc(math.sqrt(EbN0))

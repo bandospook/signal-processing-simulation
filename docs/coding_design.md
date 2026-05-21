@@ -13,7 +13,7 @@ existing uncoded theory curves:
 - **Concatenated** — convolutional inner code + Reed-Solomon outer code (classic
   CCSDS-style), with an interleaver between them.
 - **Turbo** — parallel-concatenated convolutional codes, iteratively decoded.
-- **LDPC** — sparse parity-check codes, decoded with belief propagation.
+- **LDPC** — DVB-S2X parity-check codes, decoded with belief propagation.
 
 ---
 
@@ -52,10 +52,10 @@ max-log:  LLR(b) ≈ ( min_{s: b=1} |y-s|²  −  min_{s: b=0} |y-s|² ) / σ²
 ```
 
 `y` is the received symbol, `s` ranges over constellation points, `σ²` is the
-noise variance (already known — the simulator sets the noise density). The
-max-log form is ~0.1–0.5 dB from exact, vectorizes cleanly in NumPy, and is the
-recommended default. The demapper is a single pass — **not** a performance
-hot spot.
+noise variance (already known — the simulator sets the noise density). **The
+exact LLR is the chosen form**; max-log (~0.1–0.5 dB worse) stays available as a
+cheaper fallback. Either way the demapper is a single vectorized pass — **not** a
+performance hot spot — so the exact form's extra cost is immaterial.
 
 ---
 
@@ -169,10 +169,66 @@ No change to the project's Python version is required.
   curves; only the convolutional inner code has tractable bounds.
 - **Eb/N0 bookkeeping** — Eb becomes energy per *information* bit, so the
   Es/N0 ↔ Eb/N0 conversion must include the code rate.
-- **Runtime budget** — the existing OLA chunk pipeline already exists for
-  performance reasons (see `memory_scaling.md`); coded low-BER sweeps are the
-  next runtime pressure point. The target BER floor for sweeps should be chosen
-  deliberately.
+- **Runtime budget** — coded low-BER sweeps are a significant new runtime
+  pressure point; see *Runtime budget and BER floor* below.
+
+---
+
+## Runtime budget and BER floor
+
+BER measurement is a counting experiment: to estimate an error rate `p`, transmit
+`N` units and count errors. Accuracy depends on the *error count*, not `N`:
+
+```
+relative standard error  ≈  1 / √(errors counted)
+    100 errors → ~10%      400 errors → ~5%
+N  ≈  (errors wanted) / p
+```
+
+So **each decade lower in target BER costs ~10× the bits and ~10× the runtime.**
+
+Coded specifics:
+
+- Decoding works on **frames**, not bits. DVB-S2X FECFRAME is 64,800 bits
+  (normal) or 16,200 (short). The natural rare event is a **frame error**; report
+  FER alongside coded BER.
+- Coded curves fall in a steep **waterfall** (many decades per dB), sometimes
+  followed by an **error floor** at very low BER (trapping sets). DVB-S2X codes
+  are designed for floors below ~1e-9, so the routine job is to characterize the
+  *waterfall*, not the floor.
+
+Illustrative runtime — actual decoder throughput must be measured, but the shape
+holds (100 frame-errors per SNR point):
+
+```
+runtime ≈ (frames needed) / (decoder throughput) × (SNR points) × (MODCODs)
+```
+
+| Target FER | Frames needed | @ 5000 frame/s | @ 500 frame/s |
+|---|---|---|---|
+| 1e-3 | 1e5 | ~20 s/pt | ~3 min/pt |
+| 1e-4 | 1e6 | ~3 min/pt | ~33 min/pt |
+| 1e-5 | 1e7 | ~33 min/pt | ~5.5 h/pt |
+| 1e-6 | 1e8 | ~5.5 h/pt | ~2 days/pt |
+
+A 64,800-bit LDPC frame under iterative belief propagation is heavy; throughput
+depends on code rate, frame size, and iteration count. Three techniques keep it
+tractable and should be built in from the start:
+
+- **Early termination** — stop belief propagation once the parity check is
+  satisfied. At high SNR most frames decode in a few iterations rather than the
+  50-iteration cap. Biggest single win, and it accelerates exactly the low-BER
+  region.
+- **Adaptive stop-on-errors** — end an SNR point once enough frame errors are
+  collected, instead of running a fixed `N`.
+- **Multicore** — frames are independent; Numba `prange` parallelises across
+  cores (~8–16× on a typical desktop).
+
+Recommended policy: a routine sweep floor of **1e-5** (overnight-feasible), an
+opt-in long-run mode for **1e-6**, and sub-1e-7 floor characterization treated as
+a separate dedicated campaign rather than a sweep point. If the BER seeker is
+extended to coded carriers it should target ~1e-3–1e-4, since it evaluates the
+rate many times per bisection.
 
 ---
 
@@ -193,12 +249,21 @@ Reed-Solomon (`galois`) + interleaver, chained.
 
 ---
 
-## Open decisions
+## Decisions
 
-1. Approve adding `numba` and `galois` as dependencies? (Python-3.14 support is
-   verified — see above.)
-2. Confirm the from-scratch-decoders + Numba approach over a compiled library?
-3. Which standards to target — DVB-S2 LDPC? CCSDS turbo / convolutional? Which
-   code rates?
-4. Target BER floor for coded sweeps — this sets the runtime budget.
-5. Soft demapper: max-log (recommended) vs. exact LLR.
+Settled with the project owner:
+
+- **Dependencies / approach** — `numba` and `galois` approved; decoders written
+  from scratch and JIT-compiled with Numba, rather than a compiled library
+  (Python-3.14 compatibility verified above).
+- **Codes** — DVB-S2X LDPC; plus turbo and convolutional codes as selectable
+  options. The specific turbo/convolutional parameterisation (CCSDS is the
+  natural satcom choice) to be fixed at implementation time.
+- **Soft demapper** — exact LLR, not the max-log approximation.
+
+Still open:
+
+- **Routine BER/FER floor for sweeps** — sets the runtime budget; see *Runtime
+  budget and BER floor* above. Recommendation: 1e-5 routine with a 1e-6 opt-in
+  long-run mode. Also pending: whether the BER seeker should operate on coded
+  carriers (and at what target FER).

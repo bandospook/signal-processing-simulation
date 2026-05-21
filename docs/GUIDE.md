@@ -20,6 +20,7 @@
 16. [Toolchain](toolchain.md) — correct invocations for pytest/pyright/ruff, Windows Store Python stub, pyrightconfig.json
 17. [Channel impairment model](channel_impairment.md) — transfer function, band-edge behaviour, baseband-equivalent representation, cross-carrier limitation
 18. [MSK modulation](msk_modulation.md) — why MSK uses a matched-filter (offset-QPSK) demodulator rather than a Viterbi decoder, and why it attains the BPSK error rate
+19. [Synchronization](synchronization.md) — why timing and carrier recovery are genie-aided by design, and the blind alternatives that were considered
 
 ---
 
@@ -210,7 +211,8 @@ signal-processing-simulation/
 │   ├── filter_analysis.md    ← filter size justification (§15)
 │   ├── toolchain.md          ← toolchain invocations and Windows quirks (§16)
 │   ├── channel_impairment.md ← channel transfer function model (§17)
-│   └── msk_modulation.md     ← MSK matched-filter implementation (§18)
+│   ├── msk_modulation.md     ← MSK matched-filter implementation (§18)
+│   └── synchronization.md    ← genie-aided sync design decision (§19)
 ├── output/                   ← generated files (git-ignored)
 ├── gui.py                    ← standalone TOML editor + launcher with live progress
 ├── main.py                   ← CLI entry point

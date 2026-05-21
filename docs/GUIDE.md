@@ -52,7 +52,7 @@ operating points.
 flowchart LR
     subgraph TX["Per carrier  —  native rate = sps × symbol_rate"]
         direction TB
-        S["Random symbols<br/>BPSK · DBPSK · QPSK · OQPSK<br/>8PSK · 16QAM · 16APSK · 32APSK"]
+        S["Random symbols<br/>BPSK · DBPSK · MSK · QPSK · OQPSK<br/>8PSK · 16QAM · 16APSK · 32APSK"]
         RRC_TX["RRC transmit filter<br/>baseband.py"]
         CHIMP["Channel impairment — optional<br/>filters.py<br/>amplitude ripple · phase nonlinearity"]
         UPSMPL["OLA upsample to wideband rate<br/>filters.py"]
@@ -184,7 +184,7 @@ live in the GUI. See [§11 GUI](#11-gui).
 signal-processing-simulation/
 ├── sim/                      ← simulation package
 │   ├── baseband.py           ← multi-modulation RRC baseband generation
-│   ├── modulation.py         ← constellation definitions (all 8 modulations)
+│   ├── modulation.py         ← constellation definitions (all 9 modulations)
 │   ├── config.py             ← TOML loader
 │   ├── filters.py            ← RRC, OLA convolution, upsample/downsample, channel impairment
 │   ├── nonlinear_amplifier.py← memoryless AM-AM + AM-PM model
@@ -196,6 +196,8 @@ signal-processing-simulation/
 │   └── targeter.py           ← adaptive BER seeker (bisection over noise_density_dbfs)
 ├── tests/
 │   ├── test_awgn_performance.py  ← BER vs theory (see §12)
+│   ├── test_modulations.py       ← constellation + baseband/receive round-trip
+│   ├── test_theory.py            ← closed-form BER and Eb/N0 inverse
 │   ├── test_filters.py           ← RRC and OLA correctness
 │   ├── test_nonlinear_amplifier.py
 │   ├── test_main.py              ← end-to-end smoke test
@@ -206,7 +208,9 @@ signal-processing-simulation/
 │   ├── simulation_overview.md← execution paths and output files (§13)
 │   ├── memory_scaling.md     ← OLA memory analysis (§14)
 │   ├── filter_analysis.md    ← filter size justification (§15)
-│   └── toolchain.md          ← toolchain invocations and Windows quirks (§16)
+│   ├── toolchain.md          ← toolchain invocations and Windows quirks (§16)
+│   ├── channel_impairment.md ← channel transfer function model (§17)
+│   └── msk_modulation.md     ← MSK matched-filter implementation (§18)
 ├── output/                   ← generated files (git-ignored)
 ├── gui.py                    ← standalone TOML editor + launcher with live progress
 ├── main.py                   ← CLI entry point
@@ -216,14 +220,14 @@ signal-processing-simulation/
 
 | File | Role |
 |---|---|
-| `sim/baseband.py` | Generates RRC-filtered complex baseband signal for any supported modulation at native sample rate. Normalised to unit RMS power. |
+| `sim/baseband.py` | Generates the complex baseband signal for any supported modulation at native sample rate — RRC pulse shaping, except MSK which uses offset-QPSK half-sine shaping (see §18). Normalised to unit RMS power. |
 | `sim/modulation.py` | Constellation definitions, Gray coding, APSK ring ratios, `bits_per_symbol()`. All constellations normalised to unit average power. |
 | `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample (anti-alias Kaiser sinc), per-carrier channel impairments. |
 | `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model; piecewise linear interpolation of user-supplied lookup tables. |
 | `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set (carriers not in the set contribute to the IM environment but skip the expensive receiver chain). Returns CNR/CIR/CNIR per carrier via projection method. |
 | `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
 | `sim/sweep.py` | 2-D sweep over IBO × noise; honours `sweep_demod` per carrier. |
-| `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
+| `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/MSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
 | `sim/targeter.py` | `seek_ber_noise_level` — adaptive bisection finding `noise_density_dbfs` that achieves a target BER, then computes implementation loss. `seek_all_carriers` — runs the seeker for each carrier that has `enabled=True`, `sweep_demod=True`, `use_seeker=True`. Both accept an optional `progress_callback(frac, msg)`. |
 | `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, `write_sweep_report` (markdown), `write_detector_results` (markdown table of BER/Eb/N0/implementation loss per carrier). |
 
@@ -293,7 +297,7 @@ Remove this section to disable the sweep. Both keys required to trigger a run.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | — | Label used in plots and console output. |
-| `modulation` | string | `"BPSK"` | One of: `BPSK`, `DBPSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. |
+| `modulation` | string | `"BPSK"` | One of: `BPSK`, `DBPSK`, `MSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. |
 | `symbol_rate` | int (Hz) | — | Symbol rate. Native sample rate = `sps × symbol_rate`. |
 | `sps` | int | — | Samples per symbol at native rate. |
 | `rolloff` | float | — | RRC rolloff factor (0–1). Occupied BW ≈ `(1+rolloff) × symbol_rate`. |
@@ -688,14 +692,14 @@ receiver modules independently.
 |---|---|---|
 | `test_ber_monotone[MOD]` | BER strictly decreases as Eb/N0 increases over 5 points | Catches sign errors, inverted noise, or sampling timing bugs |
 | `test_ber_matches_theory[MOD]` | Measured BER is within 2× of theory at one mid-range SNR point | Confirms the noise model and symbol count are calibrated |
-| `test_ber_theory_table` | Interpolation-based Eb/N0 vs BER comparison across 5 target BER levels for 6 modulations; writes `tests/plots/performance/theory_comparison.md` | Quantifies implementation loss across the full BER range; catches systematic offsets |
+| `test_ber_theory_table` | Interpolation-based Eb/N0 vs BER comparison across 5 target BER levels for 7 modulations; writes `tests/plots/performance/theory_comparison.md` | Quantifies implementation loss across the full BER range; catches systematic offsets |
 | `test_generate_performance_plots` | Generates BER-vs-Eb/N0 and EVM-vs-Eb/N0 plots with 1/2/3σ uncertainty bands; writes PNGs to `tests/plots/performance/` | Visual regression reference; sigma bands show where statistical confidence is meaningful |
 
 **Theory formulas used:**
 
 | Modulation | BER formula | Notes |
 |---|---|---|
-| BPSK, QPSK, OQPSK | `0.5 · erfc(√(Eb/N0))` | Same formula; curves are identical |
+| BPSK, QPSK, OQPSK, MSK | `0.5 · erfc(√(Eb/N0))` | Same formula; curves are identical. MSK detail in §18 |
 | DBPSK | `2p(1−p)`, `p = 0.5·erfc(√(Eb/N0))` | Coherent detection + differential decoding; NOT the differentially-coherent `0.5·exp(−Eb/N0)` |
 | 8PSK | `(1/3)·erfc(√(3·Eb/N0)·sin(π/8))` | Approximate for Gray-coded 8PSK |
 | 16QAM | `(3/8)·erfc(√(2·Eb/N0/5))` | Standard rectangular 16QAM |

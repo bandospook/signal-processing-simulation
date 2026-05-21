@@ -1,7 +1,8 @@
-"""Receive chain: matched filter, symbol sampling, decisions, BER, and EVM."""
+"""Receive chain: matched filter, sampling, decisions, BER, EVM, and soft LLRs."""
 import numpy as np
+from scipy.special import logsumexp
 from .filters import rrc_coeffs, ola_convolve
-from .modulation import decide, differential_decode, rotational_symmetry
+from .modulation import bits_per_symbol, constellation, decide, differential_decode, rotational_symmetry
 
 
 def matched_filter(signal: np.ndarray, rolloff: float,
@@ -37,6 +38,38 @@ def measure_evm_rms(samples: np.ndarray, ideal: np.ndarray) -> float:
     rms_ref = float(np.sqrt(np.mean(np.abs(d) ** 2)))
     d_norm = d / rms_ref if rms_ref > 1e-30 else d
     return 100.0 * float(np.sqrt(np.mean(np.abs(norm - d_norm) ** 2)))
+
+
+def soft_demap(samples: np.ndarray, modulation: str, noise_var: float,
+               **mod_kwargs) -> np.ndarray:
+    """
+    Exact per-bit log-likelihood ratios (LLRs) for constellation-mapped symbols.
+
+    Returns one LLR per coded bit, MSB-first within each symbol (matching
+    map_bits / decide), flattened to length n_symbols * bits_per_symbol.
+
+    Sign convention: LLR = log P(bit=0 | y) - log P(bit=1 | y), so a positive
+    LLR favours bit 0.  The exact value marginalises over the constellation:
+
+        LLR = logsumexp_{s: bit=0}(-|y - s|^2 / noise_var)
+            - logsumexp_{s: bit=1}(-|y - s|^2 / noise_var)
+
+    noise_var is the total noise power per complex sample, on the same scale as
+    the unit-average-power constellation, and must be positive.
+    """
+    mod = modulation.upper()
+    C = constellation(mod, **mod_kwargs)
+    bps = bits_per_symbol(mod)
+    y = np.asarray(samples, dtype=complex)
+
+    metric = -np.abs(y[:, np.newaxis] - C[np.newaxis, :]) ** 2 / noise_var
+    sym_idx = np.arange(len(C))
+    llrs = np.empty((len(y), bps))
+    for i in range(bps):
+        is_zero = ((sym_idx >> (bps - 1 - i)) & 1) == 0
+        llrs[:, i] = (logsumexp(metric[:, is_zero], axis=1)
+                      - logsumexp(metric[:, ~is_zero], axis=1))
+    return llrs.ravel()
 
 
 def receive(signal: np.ndarray,

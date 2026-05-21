@@ -13,7 +13,7 @@ from sim.modulation import (
     differential_encode, differential_decode,
 )
 from sim.baseband import rrc_baseband
-from sim.receiver import receive, measure_evm_rms
+from sim.receiver import receive, measure_evm_rms, soft_demap
 
 
 # ── Constellation unit tests ──────────────────────────────────────────────────
@@ -190,3 +190,46 @@ def test_measure_evm_zero_signal():
     zeros = np.zeros(20, dtype=complex)
     ideal = np.ones(20, dtype=complex)
     assert np.isnan(measure_evm_rms(zeros, ideal))
+
+
+# ── Soft-decision demapping ──────────────────────────────────────────────────
+
+def test_soft_demap_length():
+    """Output holds one LLR per coded bit: n_symbols × bits_per_symbol."""
+    rng = np.random.default_rng(1)
+    for mod, n in (("BPSK", 50), ("QPSK", 40), ("16QAM", 30)):
+        bps = bits_per_symbol(mod)
+        sym = map_bits(rng.integers(0, 2, n * bps).astype(int), mod)
+        llrs = soft_demap(sym, mod, noise_var=0.1)
+        assert len(llrs) == n * bps
+
+
+def test_soft_demap_bpsk_sign():
+    """Positive LLR favours bit 0 (symbol +1); negative favours bit 1 (symbol -1)."""
+    samples = np.array([1.0, -1.0, 0.9, -0.85], dtype=complex)
+    llrs = soft_demap(samples, "BPSK", noise_var=0.1)
+    assert llrs[0] > 0 and llrs[2] > 0
+    assert llrs[1] < 0 and llrs[3] < 0
+
+
+def test_soft_demap_confidence_grows_with_snr():
+    """LLR magnitude increases as the noise variance falls."""
+    y = np.array([0.7 + 0.1j], dtype=complex)
+    weak = soft_demap(y, "QPSK", noise_var=0.5)
+    strong = soft_demap(y, "QPSK", noise_var=0.02)
+    assert np.all(np.abs(strong) > np.abs(weak))
+
+
+@pytest.mark.parametrize("mod", ["BPSK", "QPSK", "8PSK", "16QAM", "16APSK", "32APSK"])
+def test_soft_demap_hard_consistency(mod):
+    """At high SNR, slicing the LLRs at zero reproduces decide()'s hard bits."""
+    rng = np.random.default_rng(0)
+    bps = bits_per_symbol(mod)
+    bits = rng.integers(0, 2, 200 * bps).astype(int)
+    symbols = map_bits(bits, mod)
+    noise = 0.01 * (rng.standard_normal(len(symbols))
+                    + 1j * rng.standard_normal(len(symbols)))
+    rx = symbols + noise
+    llr_bits = (soft_demap(rx, mod, noise_var=2e-4) < 0).astype(int)
+    _, decide_bits = decide(rx, mod)
+    assert np.array_equal(llr_bits, decide_bits)

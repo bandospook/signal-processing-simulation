@@ -144,16 +144,18 @@ Net: **our own decoders, JIT-compiled with Numba; `galois` for the RS layer;
 standard matrices shipped as data.** Near-library speed, fully inspectable and
 documentable code, two lightweight new dependencies.
 
-### Open risk — Numba and the Python version
+### Python version — verified compatible (checked 2026-05-20)
 
-Numba typically trails new CPython releases by a few months. This project
-currently runs on Python 3.14, which may be ahead of Numba's supported range.
-**Verify current Numba 3.14 support before committing to this plan.** If Numba
-does not yet support 3.14, the options are: (a) a NumPy-vectorized LDPC decoder
-— acceptable (~5–20× off compiled), though weak for the sequential turbo/Viterbi
-recursions; (b) Cython, which supports any Python but adds a build-time C
-compiler requirement; or (c) hold the turbo decoder until Numba catches up.
-`galois` depends on Numba and inherits the same constraint.
+Earlier drafts flagged a risk that Numba might trail CPython and not yet support
+this project's Python 3.14. **That risk has been checked and does not apply.**
+
+- Numba 0.65.1 (released 2026-04-24) officially supports Python 3.10–3.14 and
+  ships `cp314` wheels (standard and free-threaded).
+- galois 0.4.11 (released 2026-05-02) supports Python 3.7–3.14.
+- `uv pip install --dry-run numba galois` against this machine's Python 3.14.4
+  resolves cleanly: `numba==0.65.1`, `llvmlite==0.47.0`, `galois==0.4.11`.
+
+No change to the project's Python version is required.
 
 ---
 
@@ -193,8 +195,8 @@ Reed-Solomon (`galois`) + interleaver, chained.
 
 ## Open decisions
 
-1. Approve adding `numba` and `galois` as dependencies (pending the Python-3.14
-   support check above)?
+1. Approve adding `numba` and `galois` as dependencies? (Python-3.14 support is
+   verified — see above.)
 2. Confirm the from-scratch-decoders + Numba approach over a compiled library?
 3. Which standards to target — DVB-S2 LDPC? CCSDS turbo / convolutional? Which
    code rates?

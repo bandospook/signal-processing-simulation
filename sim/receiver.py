@@ -1,6 +1,5 @@
 """Receive chain: matched filter, sampling, decisions, BER, EVM, and soft LLRs."""
 import numpy as np
-from scipy.special import logsumexp
 from .filters import rrc_coeffs, ola_convolve
 from .modulation import bits_per_symbol, constellation, decide, differential_decode, rotational_symmetry
 
@@ -40,6 +39,13 @@ def measure_evm_rms(samples: np.ndarray, ideal: np.ndarray) -> float:
     return 100.0 * float(np.sqrt(np.mean(np.abs(norm - d_norm) ** 2)))
 
 
+def _logsumexp(values: np.ndarray, axis: int) -> np.ndarray:
+    """Numerically stable log(sum(exp(values))) reduced along an axis."""
+    peak = np.max(values, axis=axis, keepdims=True)
+    summed = np.sum(np.exp(values - peak), axis=axis, keepdims=True)
+    return np.squeeze(peak + np.log(summed), axis=axis)
+
+
 def soft_demap(samples: np.ndarray, modulation: str, noise_var: float,
                **mod_kwargs) -> np.ndarray:
     """
@@ -67,8 +73,8 @@ def soft_demap(samples: np.ndarray, modulation: str, noise_var: float,
     llrs = np.empty((len(y), bps))
     for i in range(bps):
         is_zero = ((sym_idx >> (bps - 1 - i)) & 1) == 0
-        llrs[:, i] = (logsumexp(metric[:, is_zero], axis=1)
-                      - logsumexp(metric[:, ~is_zero], axis=1))
+        llrs[:, i] = (_logsumexp(metric[:, is_zero], axis=1)
+                      - _logsumexp(metric[:, ~is_zero], axis=1))
     return llrs.ravel()
 
 

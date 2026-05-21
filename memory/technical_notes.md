@@ -70,10 +70,31 @@ Non-seekable carriers still contribute to wideband IM.
 
 ---
 
-## BPSK / QPSK / OQPSK share the same theory BER curve
+## BPSK / QPSK / OQPSK / MSK share the same theory BER curve
 
-All three: BER = 0.5 * erfc(sqrt(Eb/N0)). The BER plot draws the dashed theory line
+All four: BER = 0.5 * erfc(sqrt(Eb/N0)). The BER plot draws the dashed theory line
 once via the _BPSK_EQUIV set to avoid duplicate legend entries.
+
+---
+
+## MSK is implemented as offset-QPSK, NOT as CPFSK
+
+MSK is generated and detected as offset-QPSK with a half-sine pulse 2*sps samples
+wide (even bits -> I rail, odd bits -> Q rail delayed by sps), not as a
+continuous-phase FSK phase accumulator.
+
+Why it matters: a symbol-by-symbol correlator on the CPFSK form is ~3 dB worse than
+BPSK, because over a single bit period the two MSK waveforms (phase ramping up vs.
+down) are nearly orthogonal, not antipodal. Recovering MSK's defining BPSK-equal
+BER requires a 2-bit-period observation. The OQPSK/half-sine view makes each rail an
+independent antipodal channel, so a plain per-rail matched filter is optimal -- no
+Viterbi/MLSE needed. The half-sine matched-filter energy is exactly sps, so there is
+no discretization loss; measured BER tracks the BPSK theory curve within ~0.05 dB.
+
+A consequence: the at-most-one rail symbol whose 2*sps window runs off the signal
+end is detected from a clipped (half-energy) window. Negligible for the test sizes
+(n_sym >= 300) and harmless noiseless. EVM is NaN for MSK (constant envelope, no
+discrete constellation).
 
 ---
 

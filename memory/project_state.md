@@ -6,17 +6,18 @@ Last updated: 2026-05-17, commit ec936f3
 
 ## Current code quality
 
-- **Tests:** 150 passing, 0 failing
+- **Tests:** 162 passing, 0 failing
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
-- **Coverage:** 100% across all modules (1032 statements, 0 missed)
+- **Coverage:** 100% across all modules (1091 statements, 0 missed)
 - **Branch:** master, up to date with origin/master
 
 ---
 
 ## What is complete (all committed and pushed)
 
-- Multi-modulation baseband: BPSK, DBPSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK
+- Multi-modulation baseband: BPSK, DBPSK, MSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK
+  (MSK built as offset-QPSK/half-sine — see technical_notes.md)
 - AWGN performance test suite: BER monotonicity, theory comparison, BER/EVM/eye-diagram plots
 - N-carrier wideband simulation with shared NLA, per-carrier channel impairments, CNR/CIR/CNIR
 - OLA upsample/downsample with chunk-progress callbacks (for GUI progress reporting)

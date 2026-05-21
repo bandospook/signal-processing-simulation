@@ -32,7 +32,7 @@ sim/            Core simulation library
 main.py         CLI entry point — runs full sim + seeker + writes outputs
 gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI)
 simulation.toml Example / default configuration
-tests/          112 tests, all passing, 86% coverage
+tests/          162 tests, all passing, 100% coverage
 misc/
   __init__.py   Makes misc a package (importable by gui.py)
   gen_icon.py   build_icon() generates the app icon PNG; imported by gui.py at startup.
@@ -78,7 +78,7 @@ memory/
 ```toml
 [[carrier]]
 name = "c1"
-modulation = "BPSK"          # BPSK DBPSK QPSK OQPSK 8PSK 16QAM 16APSK 32APSK
+modulation = "BPSK"          # BPSK DBPSK MSK QPSK OQPSK 8PSK 16QAM 16APSK 32APSK
 symbol_rate = 1_000_000
 sps = 4
 rolloff = 0.35

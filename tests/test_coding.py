@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sim.coding import ConvolutionalCode, LDPCCode
+from sim.coding import ConvolutionalCode, LDPCCode, TurboCode
 from sim.receiver import soft_demap
 
 _LDPC_ALIST = Path(__file__).resolve().parent.parent / "data" / "ldpc" / "mackay_13298.alist"
@@ -103,3 +103,45 @@ def test_ldpc_coding_gain():
 
     assert coded_ber < uncoded_ber, f"no coding gain: {coded_ber} vs {uncoded_ber}"
     assert coded_ber < 0.005, f"coded BER too high: {coded_ber}"
+
+
+# ── Turbo code ───────────────────────────────────────────────────────────────
+
+def test_turbo_encode_length():
+    """Rate-1/3 turbo: encoded length is 3 * k (systematic + two parity streams)."""
+    code = TurboCode(500)
+    assert len(code.encode(np.zeros(500, dtype=int))) == 3 * 500
+
+
+def test_turbo_roundtrip_noiseless():
+    """Noiseless high-confidence LLRs decode back to the original data exactly."""
+    rng = np.random.default_rng(4)
+    code = TurboCode(800)
+    data = rng.integers(0, 2, 800)
+    coded = code.encode(data)
+    llrs = np.where(coded == 0, 30.0, -30.0)
+    decoded = code.decode(llrs, iterations=4)
+    assert np.array_equal(decoded, data)
+
+
+def test_turbo_coding_gain():
+    """Iterative BCJR turbo decoding beats uncoded BPSK at the same Eb/N0."""
+    rng = np.random.default_rng(5)
+    code = TurboCode(2000)
+    data = rng.integers(0, 2, code.k)
+    ebn0 = 10.0 ** (2.5 / 10.0)
+
+    coded = code.encode(data)
+    tx = 1.0 - 2.0 * coded
+    esn0 = ebn0 * code.rate
+    sigma = np.sqrt(1.0 / (2.0 * esn0))
+    rx = tx + sigma * (rng.standard_normal(len(tx)) + 1j * rng.standard_normal(len(tx)))
+    llrs = soft_demap(rx, "BPSK", noise_var=2.0 * sigma ** 2)
+    coded_ber = float(np.mean(code.decode(llrs, iterations=8) != data))
+
+    sigma_u = np.sqrt(1.0 / (2.0 * ebn0))
+    rx_u = (1.0 - 2.0 * data) + sigma_u * rng.standard_normal(code.k)
+    uncoded_ber = float(np.mean((rx_u < 0) != data))
+
+    assert coded_ber < uncoded_ber, f"no coding gain: {coded_ber} vs {uncoded_ber}"
+    assert coded_ber < 0.01, f"coded BER too high: {coded_ber}"

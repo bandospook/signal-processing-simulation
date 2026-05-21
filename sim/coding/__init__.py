@@ -4,5 +4,6 @@ See docs/coding_design.md for the design rationale and staging plan.
 """
 from .convolutional import ConvolutionalCode
 from .ldpc import LDPCCode
+from .turbo import TurboCode
 
-__all__ = ["ConvolutionalCode", "LDPCCode"]
+__all__ = ["ConvolutionalCode", "LDPCCode", "TurboCode"]

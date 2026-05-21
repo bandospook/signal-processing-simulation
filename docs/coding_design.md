@@ -161,9 +161,15 @@ No change to the project's Python version is required.
 
 ## Knock-on effects
 
-- **BER seeker (`targeter.py`)** — would bisect on *post-decoder* BER or FER.
-  Coded curves have a steep waterfall, so convergence is fast but the bracket
-  and accuracy logic near the cliff need review.
+- **BER seeker (`targeter.py`)** — extended to coded carriers, bisecting noise
+  density to hit a target coded BER/FER. Coded curves waterfall steeply, so
+  convergence is fast, but two things must be added: (a) the per-evaluation frame
+  count scales with the target — a rarer target needs more frames for a
+  confident estimate; (b) a **feasibility guard** — if the requested target is
+  too low to reach within the configured frame budget (or lies below the code's
+  error floor), the seeker raises a clear error telling the user the target is
+  infeasible, rather than running indefinitely. This mirrors the existing
+  invalid-bracket `ValueError`s.
 - **`theory.py`** — turbo and LDPC have no closed-form BER. Comparison shifts to
   the uncoded curve plus a coding-gain annotation, or to published reference
   curves; only the convolutional inner code has tractable bounds.
@@ -232,6 +238,29 @@ rate many times per bisection.
 
 ---
 
+## Testing strategy
+
+Coded-decoder tests follow the existing `_N_BITS_PLOT` pattern in
+`test_awgn_performance.py`: a module-level frame-count constant kept small enough
+that the suite still runs in seconds, raised by hand for a thorough validation
+run.
+
+- **Default (routine `pytest`)** — a few hundred to a few thousand frames per
+  point, in the *shallow* waterfall (FER ~1e-1…1e-2). Confirms the decoder runs,
+  converges, and lands on roughly the right curve. Adds seconds to the suite,
+  not minutes.
+- **Thorough (on demand)** — raise the constant to push down to FER 1e-5–1e-6
+  and compare against published reference curves. This is the deep validation
+  gate from *Runtime budget and BER floor* — run deliberately, not on every
+  invocation.
+
+The fast default catches gross breakage — a decoder that fails to converge, or
+sits at FER ≈ 1. Subtle correctness bugs (message-passing scaling,
+early-termination, interleaver off-by-one) hide in the deep region, so the
+thorough run against reference curves is the real correctness gate.
+
+---
+
 ## Recommended staging
 
 Each stage is independently testable against known reference curves:
@@ -251,7 +280,7 @@ Reed-Solomon (`galois`) + interleaver, chained.
 
 ## Decisions
 
-Settled with the project owner:
+All settled with the project owner:
 
 - **Dependencies / approach** — `numba` and `galois` approved; decoders written
   from scratch and JIT-compiled with Numba, rather than a compiled library
@@ -260,10 +289,9 @@ Settled with the project owner:
   options. The specific turbo/convolutional parameterisation (CCSDS is the
   natural satcom choice) to be fixed at implementation time.
 - **Soft demapper** — exact LLR, not the max-log approximation.
-
-Still open:
-
-- **Routine BER/FER floor for sweeps** — sets the runtime budget; see *Runtime
-  budget and BER floor* above. Recommendation: 1e-5 routine with a 1e-6 opt-in
-  long-run mode. Also pending: whether the BER seeker should operate on coded
-  carriers (and at what target FER).
+- **Test runtime** — coded tests default to a small frame count so the suite
+  still runs in seconds, with a constant to raise for thorough deep validation;
+  see *Testing strategy*.
+- **Seeker** — extended to coded carriers, with a feasibility guard that reports
+  an infeasible (too-low) target rather than running indefinitely; see the
+  seeker bullet under *Knock-on effects*.

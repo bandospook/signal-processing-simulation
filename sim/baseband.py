@@ -11,6 +11,7 @@ def rrc_baseband(modulation: str,
                  rolloff: float = 0.35,
                  filter_span: int = 10,
                  seed: int | None = None,
+                 bits: np.ndarray | None = None,
                  **mod_kwargs,
                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -23,12 +24,14 @@ def rrc_baseband(modulation: str,
     Parameters
     ----------
     modulation   : str    Modulation name (see sim.modulation.SUPPORTED)
-    num_symbols  : int    Number of symbols to generate
+    num_symbols  : int    Number of symbols to generate (ignored when `bits` given)
     symbol_rate  : float  Symbol rate in Hz
     sample_rate  : float  Sample rate in Hz (must be integer multiple of symbol_rate)
     rolloff      : float  RRC rolloff factor
     filter_span  : int    RRC filter half-span in symbols
-    seed         : int    Random seed
+    seed         : int    Random seed (used only when `bits` is None)
+    bits         : array  Pre-supplied transmit bits (e.g. FEC-coded bits); when
+                          given, num_symbols is derived from its length
     **mod_kwargs          Passed to modulation helpers (e.g. apsk_gamma)
 
     Returns
@@ -46,8 +49,12 @@ def rrc_baseband(modulation: str,
     sps = int(round(sps))
 
     bps = bits_per_symbol(mod)
-    rng = np.random.default_rng(seed)
-    bits = rng.integers(0, 2, num_symbols * bps).astype(int)
+    if bits is None:
+        rng = np.random.default_rng(seed)
+        bits = rng.integers(0, 2, num_symbols * bps).astype(int)
+    else:
+        bits = np.asarray(bits, dtype=int)
+        num_symbols = len(bits) // bps
 
     if mod == "MSK":
         symbols = (1 - 2 * bits).astype(complex)

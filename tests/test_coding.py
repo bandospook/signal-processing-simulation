@@ -4,7 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from sim.coding import ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode
+from sim.coding import (ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode,
+                        build_code)
 from sim.receiver import soft_demap
 
 _LDPC_ALIST = Path(__file__).resolve().parent.parent / "data" / "ldpc" / "mackay_13298.alist"
@@ -263,3 +264,19 @@ def test_decode_batch_matches_decode():
     lf = rng.standard_normal((3, ldpc.n))
     lb = ldpc.decode_batch(lf)
     assert all(np.array_equal(lb[i], ldpc.decode(lf[i])) for i in range(len(lf)))
+
+
+# ── Code factory ─────────────────────────────────────────────────────────────
+
+def test_build_code():
+    """build_code constructs the right code object for each scheme."""
+    assert isinstance(build_code({"scheme": "convolutional"}), ConvolutionalCode)
+    assert isinstance(build_code({"scheme": "concatenated"}), ConcatenatedCode)
+    assert isinstance(build_code({"scheme": "turbo", "block_length": 400}), TurboCode)
+    assert isinstance(build_code({"scheme": "ldpc", "matrix": _LDPC_ALIST}), LDPCCode)
+
+
+def test_build_code_unknown_scheme():
+    """build_code rejects an unknown coding scheme."""
+    with pytest.raises(ValueError, match="Unknown coding scheme"):
+        build_code({"scheme": "polar"})

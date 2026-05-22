@@ -149,6 +149,15 @@ def test_rrc_baseband_non_integer_sps():
         rrc_baseband("BPSK", num_symbols=10, symbol_rate=3e6, sample_rate=7e6, seed=0)
 
 
+def test_rrc_baseband_accepts_supplied_bits():
+    """rrc_baseband uses pre-supplied bits and derives num_symbols from them."""
+    supplied = np.array([0, 1, 1, 0, 1, 0, 0, 1] * 5, dtype=int)   # 40 bits
+    bb, _t, bits, _sym = rrc_baseband("QPSK", num_symbols=0, symbol_rate=1e6,
+                                      sample_rate=4e6, bits=supplied)
+    assert np.array_equal(bits, supplied)
+    assert len(bb) == (len(supplied) // 2) * 4   # QPSK: 2 bits/symbol, sps=4
+
+
 def test_receive_no_reference_bits_bpsk():
     """receive() with no reference_bits → ber is None for non-DBPSK."""
     bb, _, _, _ = rrc_baseband("BPSK", num_symbols=200, symbol_rate=1e6,

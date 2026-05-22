@@ -1,15 +1,15 @@
 # Project State
 
-Last updated: 2026-05-17, commit ec936f3
+Last updated: 2026-05-22, commit d7ae2b8
 
 ---
 
 ## Current code quality
 
-- **Tests:** 162 passing, 0 failing
+- **Tests:** 180 passing, 0 failing
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
-- **Coverage:** 100% across all modules (1091 statements, 0 missed)
+- **Coverage:** 100% across all modules (1253 statements, 0 missed)
 - **Branch:** master, up to date with origin/master
 
 ---
@@ -22,33 +22,34 @@ Last updated: 2026-05-17, commit ec936f3
 - N-carrier wideband simulation with shared NLA, per-carrier channel impairments, CNR/CIR/CNIR
 - OLA upsample/downsample with chunk-progress callbacks (for GUI progress reporting)
 - 2D IBO × noise density sweep
-- Adaptive BER seeker (bisects noise_density_dbfs to hit a target BER per carrier)
-- GUI: tkinter TOML editor, SO-WAT branding, per-carrier enable/seeker controls, progress log
+- FEC coding: convolutional (K=7, rate-1/2, soft Viterbi), concatenated (RS+convolutional),
+  turbo (rate-1/3 PCCC, max-log-MAP BCJR), LDPC (normalized min-sum BP)
+  — fully wired into simulation TX/RX chain via [carrier.coding] config block
+- GUI: tkinter TOML editor, SO-WAT branding, per-carrier enable/FEC coding controls, progress log
 - GUI: app icon generated at runtime (misc.gen_icon.build_icon() + Pillow); no base64 blob in gui.py
 - GUI: simulation stdout teed to `simulation.log` in the configured output directory each run
 - BER theory module + numerical inverse (ber_awgn, ebn0_for_ber) for all non-APSK modulations
 - Detector results markdown table (write_detector_results in plots.py)
-- Docs: GUIDE.md, simulation_overview.md, memory_scaling.md, filter_analysis.md (all Mermaid diagrams)
+- Docs: GUIDE.md, simulation_overview.md, memory_scaling.md, filter_analysis.md,
+  channel_impairment.md, msk_modulation.md, synchronization.md, coding_design.md
 
 ---
 
-## Recent major change: chunk pipeline refactor (complete, commit e33778e)
+## FEC coding implementation (complete, commit d7ae2b8)
 
-wideband_bpsk_simulation now processes the composite signal in OLA blocks of
-ola_block_size wideband samples. No full-length wideband arrays are ever held in RAM.
+Four codec classes in sim/coding/:
+- ConvolutionalCode: (171,133)-octal K=7, soft Viterbi, Numba @njit(parallel=True) batch decode
+- ConcatenatedCode: RS(255,223) outer (galois) + ConvolutionalCode inner + random interleaver
+- TurboCode: rate-1/3 PCCC, two RSC encoders, max-log-MAP BCJR, Numba @njit(parallel=True)
+- LDPCCode: normalized min-sum belief propagation, GF(2) systematic generator, Numba @njit(parallel=True)
 
-Key implementation details (sim/simulation.py):
-- OLAState (sim/filters.py) — stateful overlap-add convolution; process() returns
-  block_size filtered samples per call, maintaining the overlap tail between calls
-- x_up_block() — zero-inserted upsample block without allocating the full N_wb array
-- _WelchState — Welch PSD accumulator; feeds chunks until nfft=16384 samples, averages
-- _decimate() — phase-coherent decimation; carries offset across chunk boundaries
-- Analytical RMS normalization: norm = drive / sqrt(sum(10^(power_db/10))) per carrier
-  (replaces seed-dependent np.max() — see technical_notes.md § "NLA input normalization")
-- Three downsampler paths per carrier: pre-NL reference, post-NL noiseless, post-NL+noise
-- Transient trim: 2 * ola_filter_span native samples stripped from collected buffers
-  before BER/EVM computation (restores symbol alignment across the two OLA filter stages)
-- Return dict keys: psd_pre_nl, psd_post_nl, psd_noisy, has_noise, carriers
+Wiring in simulation.py:
+- TX: if carrier has [carrier.coding], encode_frames() → FEC coded bits → rrc_baseband(bits=...)
+- RX: soft_demap() → decode_frames() → post-decoder BER; uncoded_ber also stored
+
+Config: [carrier.coding] block with scheme, block_length (conv/turbo), matrix (ldpc), num_frames
+
+BER seeker (sim/targeter.py) removed. Implementation loss now computed from single fixed-noise run.
 
 ---
 
@@ -62,9 +63,8 @@ Key implementation details (sim/simulation.py):
 ## Toolchain / setup
 
 - Package manager: `uv`; venv at `.venv/`
-- Python: `.venv/Scripts/python.exe` (Windows) or `.venv/bin/python` (Linux/Mac)
-- Run tests: `python -m pytest tests/ -v`
-- Run tests with coverage: `python -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing`
-- Type check: `python -m pyright gui.py main.py sim/ tests/`
-- Lint: `python -m ruff check gui.py main.py sim/ tests/`
+- Python: `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Linux/Mac)
+- Run tests: `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing`
+- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
+- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
 - Git remote: https://github.com/bandospook/signal-processing-simulation.git, branch master

@@ -19,8 +19,10 @@ def _viterbi_core(llrs, next_state, out_bits, n_states, n_gen, n_steps):  # prag
     neg = -1.0e18
     pm = np.full(n_states, neg)
     pm[0] = 0.0
-    pred = np.zeros((n_steps, n_states), dtype=np.int64)
-    inbit = np.zeros((n_steps, n_states), dtype=np.int64)
+    # pred/inbit need no zero-init: every entry is written by the add-compare-
+    # select before traceback reads it (traceback only visits surviving states).
+    pred = np.empty((n_steps, n_states), dtype=np.int64)
+    inbit = np.empty((n_steps, n_states), dtype=np.int64)
 
     for step in range(n_steps):
         new_pm = np.full(n_states, neg)
@@ -40,7 +42,7 @@ def _viterbi_core(llrs, next_state, out_bits, n_states, n_gen, n_steps):  # prag
                     inbit[step, ns] = u
         pm = new_pm
 
-    decoded = np.zeros(n_steps, dtype=np.int64)
+    decoded = np.empty(n_steps, dtype=np.int64)
     s = 0
     for step in range(n_steps - 1, -1, -1):
         decoded[step] = inbit[step, s]

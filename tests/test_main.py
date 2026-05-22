@@ -73,12 +73,11 @@ def test_main_progress_callback(tmp_path):
 
 
 def test_main_fixed_demod_writes_detector_results(tmp_path):
-    """A carrier with sweep_demod=True, use_seeker=False triggers the fixed-demod
-    path and writes detector_results.md."""
+    """A carrier with sweep_demod=True is demodulated and writes detector_results.md."""
     fixed_carrier = dict(
         name="fd", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
         num_symbols=200, power_db=0.0, freq=0.0,
-        modulation="BPSK", sweep_demod=True, use_seeker=False,
+        modulation="BPSK", sweep_demod=True,
     )
     cfg = _make_cfg(tmp_path, extra_carriers=[fixed_carrier])
     cfg["output"]["detector_results"] = "detector_results.md"
@@ -89,40 +88,6 @@ def test_main_fixed_demod_writes_detector_results(tmp_path):
 
     assert (tmp_path / "detector_results.md").exists()
 
-
-def test_main_seeker_path(tmp_path):
-    """Carriers with use_seeker=True trigger seek_all_carriers; results written to
-    detector_results.md.  seek_all_carriers is mocked so the test is fast."""
-    seeker_carrier = dict(
-        name="sk", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-        num_symbols=200, power_db=0.0, freq=0.0,
-        modulation="BPSK", sweep_demod=True, use_seeker=True, enabled=True,
-        seeker=dict(target_ber=0.01, confidence=0.95, ber_accuracy=0.005,
-                    noise_lo_dbfs=-160.0, noise_hi_dbfs=-80.0),
-    )
-    cfg = _make_cfg(tmp_path)
-    del cfg["sweep"]
-    cfg["carrier"].append(seeker_carrier)
-    cfg["output"]["detector_results"] = "detector_results.md"
-
-    mock_result = {
-        "sk": dict(noise_density_dbfs=-120.0, ber=0.01, ber_ci_lo=0.008,
-                   ber_ci_hi=0.012, effective_ebn0_db=9.5, theory_ebn0_db=9.4,
-                   implementation_loss_db=0.1, cnr_db=60.0, cir_db=40.0,
-                   cnir_db=39.9, evm_rms=5.0, n_bits_total=1500, n_iter=12)
-    }
-
-    def _mock_seek(*args, progress_callback=None, **kwargs):
-        if progress_callback is not None:
-            progress_callback(0.5, "mock seeker step")
-        return mock_result
-
-    with patch("main.load_config", return_value=cfg), \
-         patch("main.seek_all_carriers", side_effect=_mock_seek), \
-         patch("matplotlib.pyplot.show"):
-        main_module.main()
-
-    assert (tmp_path / "detector_results.md").exists()
 
 
 _MINIMAL_TOML = """\

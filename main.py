@@ -17,7 +17,6 @@ from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_respo
                        print_metrics_table, plot_sweep_results, write_sweep_report,
                        write_detector_results)
 from sim.sweep import parameter_sweep
-from sim.targeter import seek_all_carriers
 
 _ProgressCB = Callable[[float, str], None] | None
 
@@ -61,14 +60,9 @@ def main(config_path: str = "simulation.toml",
     noise_sweep = sweep_cfg.get("noise_density_dbfs", [])
     n_sweep     = len(ibo_sweep) * len(noise_sweep) if (ibo_sweep and noise_sweep) else 0
 
-    has_seeker  = any(c.get("enabled", True) and c.get("sweep_demod", False)
-                      and c.get("use_seeker", False) for c in active_carriers)
-
-    _SIM_START    = 0.05
-    _PLOT_FRAC    = 0.03   # fixed budget for saving plots
-    _SEEKER_START = 0.25   # seeker section always begins here when present
-    _budget_end   = _SEEKER_START if has_seeker else 0.94
-    _unit         = (_budget_end - _SIM_START - _PLOT_FRAC) / (1 + n_sweep)
+    _SIM_START  = 0.05
+    _PLOT_FRAC  = 0.03
+    _unit       = (0.94 - _SIM_START - _PLOT_FRAC) / (1 + n_sweep)
     _P_sim_done   = _SIM_START + _unit
     _P_plots_done = _P_sim_done + _PLOT_FRAC
 
@@ -143,12 +137,10 @@ def main(config_path: str = "simulation.toml",
         _prog(_P_plots_done + _unit * n_sweep, "Sweep complete.")
 
     # ── Fixed-noise demod carriers ──────────────────────────────────────────
-    # Carriers with sweep_demod=True and use_seeker=False were already
-    # demodulated in the main wideband run.  Extract their stats and compute
-    # effective Eb/N0 from the CNIR measurement.
+    # Carriers with sweep_demod=True were demodulated in the main wideband run.
+    # Extract their stats and compute effective Eb/N0 from the CNIR measurement.
     noise_dbfs = wb.get("noise_density_dbfs")
-    fixed_demod = [c for c in active_carriers
-                   if c.get("sweep_demod", False) and not c.get("use_seeker", False)]
+    fixed_demod = [c for c in active_carriers if c.get("sweep_demod", False)]
     fixed_results: dict[str, dict] = {}
     for carr in fixed_demod:
         cr = next((r for r in results["carriers"] if r["name"] == carr["name"]), None)
@@ -179,35 +171,8 @@ def main(config_path: str = "simulation.toml",
             n_iter=None,
         )
 
-    # ── BER seeker for seekable carriers ────────────────────────────────────
-    seekable = [c for c in active_carriers
-                if c.get("enabled", True)
-                and c.get("sweep_demod", False)
-                and c.get("use_seeker", False)]
-    seeker_results: dict[str, dict] = {}
-    if seekable:
-        _prog(_SEEKER_START, f"Starting BER seeker for {len(seekable)} carrier(s)...")
-
-        def _seeker_cb(frac: float, msg: str) -> None:
-            _prog(_SEEKER_START + frac * (0.99 - _SEEKER_START), msg)
-
-        raw = seek_all_carriers(
-            carriers          = active_carriers,
-            sample_rate       = wb["sample_rate"],
-            am_am_cfg         = amp["am_am"],
-            am_pm_cfg         = amp["am_pm"],
-            input_backoff_db  = amp["input_backoff_db"],
-            ola_filter_span   = ola["filter_span"],
-            ola_block_size    = ola["block_size"],
-            seed              = sim["seed"],
-            progress_callback = _seeker_cb,
-            chunk_print       = _chunk_print,
-        )
-        for name, r in raw.items():
-            seeker_results[name] = dict(r, mode="seeker")
-
     # ── Write detector results ───────────────────────────────────────────────
-    all_detector: dict[str, dict] = {**fixed_results, **seeker_results}
+    all_detector: dict[str, dict] = {**fixed_results}
     if all_detector:
         det_path = out_path(out.get("detector_results", "detector_results.md"))
         write_detector_results(all_detector, det_path)

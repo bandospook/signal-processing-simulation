@@ -133,12 +133,12 @@ _FIXED = {
                n_bits_total=None, n_iter=None),
 }
 
-_SEEKER = {
-    "c1": dict(mode="seeker", noise_density_dbfs=-120.0, ber=0.01,
+_WITH_CI = {
+    "c1": dict(mode="fixed", noise_density_dbfs=-120.0, ber=0.01,
                ber_ci_lo=0.008, ber_ci_hi=0.012, effective_ebn0_db=9.5,
                theory_ebn0_db=9.4, implementation_loss_db=0.1,
                cnr_db=60.0, cir_db=40.0, cnir_db=39.9, evm_rms=5.0,
-               n_bits_total=1500, n_iter=12),
+               n_bits_total=1500, n_iter=None),
 }
 
 
@@ -163,9 +163,9 @@ def test_write_detector_results_fixed(tmp_path):
 
 
 def test_write_detector_results_with_ci(tmp_path):
-    """Seeker result: CI bounds and bit count appear in output."""
+    """CI bounds and bit count format correctly in output."""
     path = str(tmp_path / "det.md")
-    write_detector_results(_SEEKER, save_path=path)
+    write_detector_results(_WITH_CI, save_path=path)
     text = Path(path).read_text(encoding="utf-8")
     assert "8.00e-03" in text   # ber_ci_lo
     assert "1,500" in text      # n_bits_total formatted with comma

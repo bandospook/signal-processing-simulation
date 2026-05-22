@@ -75,13 +75,13 @@ def build_toml(cfg: dict) -> str:
     for carr in cfg.get("carrier", []):
         ln("[[carrier]]")
         for k in ("name", "modulation", "symbol_rate", "sps", "rolloff", "filter_span",
-                  "num_symbols", "power_db", "freq", "enabled", "sweep_demod", "use_seeker"):
+                  "num_symbols", "power_db", "freq", "enabled", "sweep_demod"):
             if k in carr:
                 kv(f"{k:12}", carr[k])
-        sk = carr.get("seeker")
-        if sk:
-            ln();  ln("[carrier.seeker]")
-            for k, v in sk.items():
+        cod = carr.get("coding")
+        if cod:
+            ln();  ln("[carrier.coding]")
+            for k, v in cod.items():
                 kv(f"{k:14}", v)
         ch = carr.get("channel")
         if ch:
@@ -184,18 +184,7 @@ class CarrierFrame(ttk.LabelFrame):
         ("freq",        "Freq (MHz)",       "float", "0.0",
          "Carrier centre frequency offset from DC (MHz). Negative = below centre frequency."),
     ]
-    _SEEKER = [
-        ("target_ber",    "Target BER",          "float", "0.001",
-         "Target bit-error ratio the seeker converges to (e.g. 0.001 = 10⁻³)."),
-        ("confidence",    "Confidence",           "float", "0.95",
-         "Statistical confidence level for the final BER estimate (e.g. 0.95 = 95%)."),
-        ("ber_accuracy",  "BER Accuracy",         "float", "0.0005",
-         "Acceptable half-width of the BER confidence interval at the converged noise level."),
-        ("noise_lo_dbfs", "Noise Lo (dBFS/Hz)",   "float", "-160.0",
-         "Lower bound of the bisection search. Must produce a BER below the target (dBFS/Hz)."),
-        ("noise_hi_dbfs", "Noise Hi (dBFS/Hz)",   "float", "-80.0",
-         "Upper bound of the bisection search. Must produce a BER above the target (dBFS/Hz)."),
-    ]
+    _CODING_SCHEMES = ["convolutional", "concatenated", "turbo", "ldpc"]
     _CH = [
         ("ripple_db",         "Ripple (dB)",      "float", "0.5",
          "Peak-to-peak amplitude ripple across the carrier bandwidth (dB)."),
@@ -212,13 +201,12 @@ class CarrierFrame(ttk.LabelFrame):
     def __init__(self, parent, on_remove, data: dict, **kw):
         super().__init__(parent, text=data.get("name", "carrier"), padding=6, **kw)
         self._on_remove = on_remove
-        self._vars:    dict[str, tk.Variable] = {}
-        self._ch_vars: dict[str, tk.Variable] = {}
-        self._sk_vars: dict[str, tk.Variable] = {}
+        self._vars:        dict[str, tk.Variable] = {}
+        self._ch_vars:     dict[str, tk.Variable] = {}
+        self._coding_vars: dict[str, tk.Variable] = {}
         self._enabled     = tk.BooleanVar(value=data.get("enabled", True))
         self._sweep_demod = tk.BooleanVar(value=data.get("sweep_demod", False))
-        # Use IntVar for radio: 0=fixed, 1=seeker
-        self._use_seeker  = tk.IntVar(value=1 if data.get("use_seeker", False) else 0)
+        self._has_coding  = tk.BooleanVar(value=bool(data.get("coding")))
         ch = data.get("channel", {})
         self._has_ch = tk.BooleanVar(value=bool(ch) and ch.get("enabled", True))
         self._build(data)
@@ -253,44 +241,28 @@ class CarrierFrame(ttk.LabelFrame):
 
         n_main_rows = (len(self._MAIN) + 1) // 2  # ceil(9/2) = 5
         check_row   = n_main_rows + 1              # row 6
-        det_row     = check_row + 1                # row 7
-        sk_row      = det_row + 1                  # row 8
-        ch_row      = sk_row + 1                   # row 9
+        cod_row     = check_row + 1                # row 7
+        ch_row      = cod_row + 2                  # row 9
 
         # ── Enable checkboxes ────────────────────────────────────────────────
         ttk.Checkbutton(self, text="Include in wideband",
-                        variable=self._enabled,
-                        command=self._update_visibility).grid(
+                        variable=self._enabled).grid(
             row=check_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Checkbutton(self, text="Enable detector model",
-                        variable=self._sweep_demod,
-                        command=self._update_visibility).grid(
+                        variable=self._sweep_demod).grid(
             row=check_row, column=2, columnspan=2, sticky="w", pady=(8, 0))
 
-        # ── Mode radio buttons (shown only when both enables are on) ─────────
-        self._radio_frame = ttk.Frame(self)
-        self._radio_frame.grid(row=det_row, column=0, columnspan=4, sticky="w",
-                                pady=(2, 0))
-        ttk.Label(self._radio_frame, text="Mode:").pack(side="left", padx=(0, 6))
-        ttk.Radiobutton(self._radio_frame, text="Fixed noise level",
-                        variable=self._use_seeker, value=0,
-                        command=self._update_visibility).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(self._radio_frame, text="BER seeker",
-                        variable=self._use_seeker, value=1,
-                        command=self._update_visibility).pack(side="left")
-
-        # ── Seeker parameter frame (shown only in seeker mode) ───────────────
-        self._seeker_frame = ttk.LabelFrame(self, text="BER Seeker Parameters", padding=4)
-        self._seeker_frame.grid(row=sk_row, column=0, columnspan=4, sticky="ew",
-                                 padx=(14, 0), pady=(2, 0))
-        sk = d.get("seeker", {})
-        for i, (key, label, _, dflt, tip) in enumerate(self._SEEKER):
-            raw = sk.get(key, dflt)
-            var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
-            self._sk_vars[key] = var
-            r, c = i // 2, (i % 2) * 2
-            _lf(self._seeker_frame, label + ":", r, c)
-            _ent(self._seeker_frame, var, r, c + 1, width=12, tip=tip)
+        # ── FEC coding ────────────────────────────────────────────────────────
+        ttk.Checkbutton(self, text="FEC coding", variable=self._has_coding,
+                        command=self._toggle_coding).grid(
+            row=cod_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._coding_frame = ttk.LabelFrame(self, text="FEC Parameters", padding=4)
+        self._coding_frame.grid(row=cod_row + 1, column=0, columnspan=4,
+                                 sticky="ew", padx=(14, 0), pady=(2, 0))
+        if d.get("coding"):
+            self._populate_coding(d["coding"])
+        else:
+            self._coding_frame.grid_remove()
 
         # ── Channel impairments ──────────────────────────────────────────────
         ttk.Checkbutton(self, text="Channel impairments", variable=self._has_ch,
@@ -301,19 +273,40 @@ class CarrierFrame(ttk.LabelFrame):
         if "channel" in d:
             self._populate_ch(d["channel"])
 
-        self._update_visibility()
-
-    def _update_visibility(self):
-        both_on = self._enabled.get() and self._sweep_demod.get()
-        if both_on:
-            self._radio_frame.grid()
-            if self._use_seeker.get():
-                self._seeker_frame.grid()
-            else:
-                self._seeker_frame.grid_remove()
+    def _toggle_coding(self):
+        if self._has_coding.get():
+            self._populate_coding({})
+            self._coding_frame.grid()
         else:
-            self._radio_frame.grid_remove()
-            self._seeker_frame.grid_remove()
+            for w in self._coding_frame.winfo_children(): w.destroy()
+            self._coding_vars.clear()
+            self._coding_frame.grid_remove()
+
+    def _populate_coding(self, cod: dict):
+        for w in self._coding_frame.winfo_children(): w.destroy()
+        self._coding_vars.clear()
+        _lf(self._coding_frame, "Scheme:", 0, 0)
+        scheme_var = tk.StringVar(value=cod.get("scheme", "convolutional"))
+        self._coding_vars["scheme"] = scheme_var
+        cb = ttk.Combobox(self._coding_frame, textvariable=scheme_var,
+                          values=self._CODING_SCHEMES, state="readonly", width=14)
+        cb.grid(row=0, column=1, sticky="w", pady=2)
+        _Tip(cb, "FEC scheme: convolutional, concatenated, turbo, or ldpc.")
+        _lf(self._coding_frame, "Num Frames:", 0, 2)
+        nf_var = tk.StringVar(value=_fmt(cod.get("num_frames", 5)))
+        self._coding_vars["num_frames"] = nf_var
+        _ent(self._coding_frame, nf_var, 0, 3, width=8,
+             tip="Frames to simulate (num_symbols derived from frame count × code parameters).")
+        _lf(self._coding_frame, "Block Length:", 1, 0)
+        bl_var = tk.StringVar(value=_fmt(cod.get("block_length", 1024)))
+        self._coding_vars["block_length"] = bl_var
+        _ent(self._coding_frame, bl_var, 1, 1, width=10,
+             tip="Data bits per frame (convolutional and turbo). Ignored for concatenated/ldpc.")
+        _lf(self._coding_frame, "LDPC Matrix:", 1, 2)
+        lm_var = tk.StringVar(value=cod.get("matrix", ""))
+        self._coding_vars["matrix"] = lm_var
+        _ent(self._coding_frame, lm_var, 1, 3, width=24,
+             tip="Path to .alist file for LDPC code (e.g. data/ldpc/mackay_13298.alist).")
 
     def _toggle_ch(self):
         if self._has_ch.get():
@@ -341,18 +334,23 @@ class CarrierFrame(ttk.LabelFrame):
                       else float(raw) if typ == "float" else raw)
         d["enabled"]     = bool(self._enabled.get())
         d["sweep_demod"] = bool(self._sweep_demod.get())
-        d["use_seeker"]  = bool(self._use_seeker.get())
 
-        if d["enabled"] and d["sweep_demod"] and d["use_seeker"]:
-            sk: dict = {}
-            for key, _, _, _, _ in self._SEEKER:
-                raw = self._sk_vars[key].get().strip()
+        if self._has_coding.get() and self._coding_vars:
+            cod: dict = {}
+            scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
+            if scheme:
+                cod["scheme"] = scheme
+            for key in ("num_frames", "block_length"):
+                raw = self._coding_vars.get(key, tk.StringVar()).get().strip()
                 try:
-                    sk[key] = float(raw)
+                    cod[key] = int(float(raw))
                 except ValueError:
                     pass
-            if sk:
-                d["seeker"] = sk
+            matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
+            if matrix:
+                cod["matrix"] = matrix
+            if cod:
+                d["coding"] = cod
 
         if self._has_ch.get() and self._ch_vars:
             ch: dict = {}

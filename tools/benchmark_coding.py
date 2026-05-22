@@ -1,4 +1,4 @@
-"""Benchmark FEC decoder throughput.
+"""Benchmark FEC decoder throughput — serial vs parallel batch decoding.
 
 Run from the repo root:  .venv\\Scripts\\python.exe tools/benchmark_coding.py
 """
@@ -14,7 +14,7 @@ from sim.coding import ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode 
 from sim.receiver import soft_demap  # noqa: E402
 
 _ALIST = Path(__file__).resolve().parent.parent / "data" / "ldpc" / "mackay_13298.alist"
-_TRIALS = 30
+_BATCH = 64
 
 
 def _llrs(coded_bits, ebn0_db, rate, rng):
@@ -25,50 +25,48 @@ def _llrs(coded_bits, ebn0_db, rate, rng):
     return soft_demap(rx, "BPSK", noise_var=2.0 * sigma ** 2)
 
 
-def _mean_seconds(decode, inputs):
-    """Mean wall-clock seconds per decode call, excluding one JIT warmup call."""
-    decode(inputs[0])
+def _row(label, decode, decode_batch, batch):
+    """Time serial (per-frame) and parallel-batch decoding; print the comparison."""
+    frames = list(batch)
+    decode(frames[0])                            # warm up serial JIT
     start = time.perf_counter()
-    for x in inputs:
-        decode(x)
-    return (time.perf_counter() - start) / len(inputs)
+    for f in frames:
+        decode(f)
+    serial = (time.perf_counter() - start) / len(frames)
 
+    decode_batch(batch[:4])                      # warm up batch JIT
+    start = time.perf_counter()
+    decode_batch(batch)
+    batched = (time.perf_counter() - start) / len(batch)
 
-def _report(label, info_bits, seconds):
-    print(f"{label:<18}{info_bits:>12}{seconds * 1e3:>14.2f}"
-          f"{info_bits / seconds / 1e6:>16.3f}")
+    print(f"{label:<16}{serial * 1e3:>14.2f}{batched * 1e3:>14.2f}{serial / batched:>9.1f}x")
 
 
 def main():
     rng = np.random.default_rng(0)
-    print(f"{'decoder':<18}{'info bits':>12}{'ms / frame':>14}{'info Mbit/s':>16}")
-    print("-" * 60)
+    print(f"{'decoder':<16}{'serial ms/fr':>14}{'batch ms/fr':>14}{'speedup':>10}")
+    print("-" * 54)
 
     conv = ConvolutionalCode()
-    frames = [_llrs(conv.encode(rng.integers(0, 2, 4000)), 3.0, conv.rate, rng)
-              for _ in range(_TRIALS)]
-    _report("convolutional", 4000, _mean_seconds(conv.decode, frames))
+    batch = np.stack([_llrs(conv.encode(rng.integers(0, 2, 4000)), 3.0, conv.rate, rng)
+                      for _ in range(_BATCH)])
+    _row("convolutional", conv.decode, conv.decode_batch, batch)
 
     turbo = TurboCode(2000)
-    frames = [_llrs(turbo.encode(rng.integers(0, 2, turbo.k)), 2.0, turbo.rate, rng)
-              for _ in range(_TRIALS)]
-    _report("turbo", turbo.k, _mean_seconds(turbo.decode, frames))
+    batch = np.stack([_llrs(turbo.encode(rng.integers(0, 2, turbo.k)), 2.0, turbo.rate, rng)
+                      for _ in range(_BATCH)])
+    _row("turbo", turbo.decode, turbo.decode_batch, batch)
 
     concat = ConcatenatedCode()
-    frames = [_llrs(concat.encode(rng.integers(0, 2, concat.k_data_bits)),
-                    3.5, concat.rate, rng) for _ in range(_TRIALS)]
-    _report("concatenated", concat.k_data_bits, _mean_seconds(concat.decode, frames))
+    batch = np.stack([_llrs(concat.encode(rng.integers(0, 2, concat.k_data_bits)),
+                            3.5, concat.rate, rng) for _ in range(_BATCH)])
+    _row("concatenated", concat.decode, concat.decode_batch, batch)
 
     ldpc = LDPCCode(_ALIST)
-    info = int(round(ldpc.design_rate * ldpc.n))
     zero = np.zeros(ldpc.n, dtype=int)
     for ebn0 in (1.0, 2.0, 4.0):
-        frames = [_llrs(zero, ebn0, ldpc.design_rate, rng) for _ in range(_TRIALS)]
-        _report(f"ldpc @ {ebn0:.0f} dB", info, _mean_seconds(ldpc.decode, frames))
-
-    start = time.perf_counter()
-    ldpc.build_generator()
-    print(f"\nLDPC generator build (one-time): {time.perf_counter() - start:.1f} s")
+        batch = np.stack([_llrs(zero, ebn0, ldpc.design_rate, rng) for _ in range(_BATCH)])
+        _row(f"ldpc @ {ebn0:.0f} dB", ldpc.decode, ldpc.decode_batch, batch)
 
 
 if __name__ == "__main__":

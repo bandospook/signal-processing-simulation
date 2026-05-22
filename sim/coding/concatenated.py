@@ -32,10 +32,22 @@ class ConcatenatedCode:
         rs_bits = np.unpackbits(rs_codeword)
         return self.conv.encode(rs_bits[self._perm])
 
-    def decode(self, llrs: np.ndarray) -> np.ndarray:
-        """Decode coded LLRs: soft-decision Viterbi inner, then algebraic RS outer."""
-        inner = self.conv.decode(llrs).astype(np.uint8)
+    def _rs_outer(self, inner: np.ndarray) -> np.ndarray:
+        """Deinterleave inner-decoder bits and run the algebraic RS outer decode."""
         rs_bits = np.empty(self._rs_coded_bits, dtype=np.uint8)
-        rs_bits[self._perm] = inner                       # deinterleave
+        rs_bits[self._perm] = inner.astype(np.uint8)      # deinterleave
         message = self.rs.decode(np.packbits(rs_bits))
         return np.unpackbits(np.asarray(message, dtype=np.uint8)).astype(np.int64)
+
+    def decode(self, llrs: np.ndarray) -> np.ndarray:
+        """Decode coded LLRs: soft-decision Viterbi inner, then algebraic RS outer."""
+        return self._rs_outer(self.conv.decode(llrs))
+
+    def decode_batch(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode many equal-length frames; the inner Viterbi runs in parallel.
+
+        The convolutional inner code is decoded across CPU cores; the
+        algebraic RS outer decode (galois) is then applied per frame.
+        """
+        inner = self.conv.decode_batch(llrs_batch)
+        return np.stack([self._rs_outer(row) for row in inner])

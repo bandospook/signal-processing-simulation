@@ -1,7 +1,7 @@
 """LDPC code: alist parity-check matrix, belief-propagation decoder, encoder."""
 from pathlib import Path
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 
 def _parse_alist(path: str | Path) -> tuple[list[np.ndarray], int, int]:
@@ -53,7 +53,7 @@ def _gf2_rref_packed(packed: np.ndarray, m: int, n: int) -> tuple[np.ndarray, in
 
 # _bp_decode runs as Numba-compiled native code, invisible to coverage.py's
 # line tracer; it is exercised by the LDPC tests in tests/test_coding.py.
-@njit
+@njit(cache=True)
 def _bp_decode(channel_llr, n, m, cn_ptr, edge_vn, vn_ptr, vn_edges, max_iter, alpha):  # pragma: no cover
     """Normalized min-sum belief propagation over the Tanner graph.
 
@@ -125,6 +125,18 @@ def _bp_decode(channel_llr, n, m, cn_ptr, edge_vn, vn_ptr, vn_edges, max_iter, a
     return bits
 
 
+@njit(parallel=True, cache=True)
+def _bp_decode_batch(llrs_2d, n, m, cn_ptr, edge_vn, vn_ptr,  # pragma: no cover
+                     vn_edges, max_iter, alpha):
+    """Decode a batch of equal-length frames, one per parallel thread."""
+    n_frames = llrs_2d.shape[0]
+    out = np.empty((n_frames, n), dtype=np.int64)
+    for f in prange(n_frames):
+        out[f] = _bp_decode(llrs_2d[f], n, m, cn_ptr, edge_vn, vn_ptr,
+                            vn_edges, max_iter, alpha)
+    return out
+
+
 class LDPCCode:
     """LDPC code defined by an alist parity-check matrix.
 
@@ -155,6 +167,17 @@ class LDPCCode:
         return _bp_decode(np.ascontiguousarray(llrs, dtype=np.float64),
                           self.n, self.m, self._cn_ptr, self._edge_vn,
                           self._vn_ptr, self._vn_edges, max_iter, alpha)
+
+    def decode_batch(self, llrs_batch: np.ndarray, max_iter: int = 50,
+                     alpha: float = 0.8) -> np.ndarray:
+        """Decode many equal-length frames in parallel across CPU cores.
+
+        llrs_batch is a 2-D array (n_frames x n); returns an (n_frames x n)
+        array of hard-decision bits.
+        """
+        arr = np.ascontiguousarray(llrs_batch, dtype=np.float64)
+        return _bp_decode_batch(arr, self.n, self.m, self._cn_ptr, self._edge_vn,
+                                self._vn_ptr, self._vn_edges, max_iter, alpha)
 
     def build_generator(self) -> None:
         """Derive the systematic generator from H via GF(2) row reduction.

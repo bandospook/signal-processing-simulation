@@ -236,3 +236,30 @@ def test_concat_coding_gain():
 
     assert coded_ber < uncoded_ber, f"no coding gain: {coded_ber} vs {uncoded_ber}"
     assert coded_ber < 0.005, f"coded BER too high: {coded_ber}"
+
+
+# ── Parallel batch decoding ──────────────────────────────────────────────────
+
+def test_decode_batch_matches_decode():
+    """decode_batch reproduces looping decode per frame, exactly, for every code."""
+    rng = np.random.default_rng(20)
+
+    conv = ConvolutionalCode()
+    cf = rng.standard_normal((4, 1000))
+    cb = conv.decode_batch(cf)
+    assert all(np.array_equal(cb[i], conv.decode(cf[i])) for i in range(len(cf)))
+
+    turbo = TurboCode(300)
+    tf = rng.standard_normal((4, 900))
+    tb = turbo.decode_batch(tf)
+    assert all(np.array_equal(tb[i], turbo.decode(tf[i])) for i in range(len(tf)))
+
+    concat = ConcatenatedCode()
+    qf = rng.standard_normal((3, concat.coded_bits))
+    qb = concat.decode_batch(qf)
+    assert all(np.array_equal(qb[i], concat.decode(qf[i])) for i in range(len(qf)))
+
+    ldpc = LDPCCode(_LDPC_ALIST)
+    lf = rng.standard_normal((3, ldpc.n))
+    lb = ldpc.decode_batch(lf)
+    assert all(np.array_equal(lb[i], ldpc.decode(lf[i])) for i in range(len(lf)))

@@ -2,12 +2,12 @@
 import math
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 
 # _viterbi_core runs as Numba-compiled native code, which coverage.py's line
 # tracer cannot observe; it is exercised by the tests in tests/test_coding.py.
-@njit
+@njit(cache=True)
 def _viterbi_core(llrs, next_state, out_bits, n_states, n_gen, n_steps):  # pragma: no cover
     """Maximum-likelihood Viterbi sweep over the trellis, then traceback.
 
@@ -46,6 +46,16 @@ def _viterbi_core(llrs, next_state, out_bits, n_states, n_gen, n_steps):  # prag
         decoded[step] = inbit[step, s]
         s = pred[step, s]
     return decoded
+
+
+@njit(parallel=True, cache=True)
+def _viterbi_batch(llrs_2d, next_state, out_bits, n_states, n_gen, n_steps):  # pragma: no cover
+    """Decode a batch of equal-length frames, one per parallel thread."""
+    n_frames = llrs_2d.shape[0]
+    out = np.empty((n_frames, n_steps), dtype=np.int64)
+    for f in prange(n_frames):
+        out[f] = _viterbi_core(llrs_2d[f], next_state, out_bits, n_states, n_gen, n_steps)
+    return out
 
 
 class ConvolutionalCode:
@@ -103,6 +113,18 @@ class ConvolutionalCode:
         decoded = _viterbi_core(llrs, self._next_state, self._out_bits,
                                 self.n_states, self.n, n_steps)
         return decoded[:n_steps - (self.K - 1)]
+
+    def decode_batch(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode many equal-length frames in parallel across CPU cores.
+
+        llrs_batch is a 2-D array (n_frames x coded_bits); returns an
+        (n_frames x data_bits) array of decoded bits.
+        """
+        arr = np.ascontiguousarray(llrs_batch, dtype=np.float64)
+        n_steps = arr.shape[1] // self.n
+        decoded = _viterbi_batch(arr, self._next_state, self._out_bits,
+                                 self.n_states, self.n, n_steps)
+        return decoded[:, :n_steps - (self.K - 1)]
 
     def weight_spectrum(self, d_max: int = 24) -> np.ndarray:
         """Information-weighted output-weight spectrum B_d, for d up to d_max.

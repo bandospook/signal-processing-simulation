@@ -1,6 +1,6 @@
 """Rate-1/3 parallel-concatenated turbo code with an iterative BCJR decoder."""
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 
 def _rsc_trellis() -> tuple[np.ndarray, np.ndarray]:
@@ -23,7 +23,7 @@ def _rsc_trellis() -> tuple[np.ndarray, np.ndarray]:
 
 # _siso runs as Numba-compiled native code, invisible to coverage.py's line
 # tracer; it is exercised by the turbo tests in tests/test_coding.py.
-@njit
+@njit(cache=True)
 def _siso(lc_sys, lc_par, la, next_state, parity, n_states):  # pragma: no cover
     """Max-log-MAP soft-in/soft-out decoder for one constituent RSC.
 
@@ -95,6 +95,39 @@ def _siso(lc_sys, lc_par, la, next_state, parity, n_states):  # pragma: no cover
     return extrinsic
 
 
+@njit(cache=True)
+def _turbo_decode_one(llrs, perm, inv_perm, next_state, parity,  # pragma: no cover
+                      n_states, iterations):
+    """Iterative max-log-MAP turbo decode of one frame; returns the k data bits."""
+    k = len(perm)
+    lc_sys = llrs[:k]
+    lc_par1 = llrs[k:2 * k]
+    lc_par2 = llrs[2 * k:3 * k]
+    lc_sys_il = lc_sys[perm]
+    la1 = np.zeros(k)
+    le1 = np.zeros(k)
+    for _ in range(iterations):
+        le1 = _siso(lc_sys, lc_par1, la1, next_state, parity, n_states)
+        le2 = _siso(lc_sys_il, lc_par2, le1[perm], next_state, parity, n_states)
+        la1 = le2[inv_perm]
+    out = np.empty(k, dtype=np.int64)
+    for i in range(k):
+        out[i] = 1 if (lc_sys[i] + le1[i] + la1[i]) < 0.0 else 0
+    return out
+
+
+@njit(parallel=True, cache=True)
+def _turbo_decode_batch(llrs_2d, perm, inv_perm, next_state,  # pragma: no cover
+                        parity, n_states, iterations):
+    """Decode a batch of equal-length frames, one per parallel thread."""
+    n_frames = llrs_2d.shape[0]
+    out = np.empty((n_frames, len(perm)), dtype=np.int64)
+    for f in prange(n_frames):
+        out[f] = _turbo_decode_one(llrs_2d[f], perm, inv_perm, next_state,
+                                   parity, n_states, iterations)
+    return out
+
+
 class TurboCode:
     """Rate-1/3 parallel-concatenated turbo code (two LTE-style RSC encoders).
 
@@ -136,18 +169,16 @@ class TurboCode:
 
         llrs holds 3k channel LLRs ordered systematic, parity 1, parity 2.
         """
-        llrs = np.asarray(llrs, dtype=np.float64)
-        k = self.k
-        lc_sys = llrs[:k]
-        lc_par1 = llrs[k:2 * k]
-        lc_par2 = llrs[2 * k:3 * k]
-        lc_sys_il = lc_sys[self._perm]
-        la1 = np.zeros(k)
-        le1 = np.zeros(k)
-        for _ in range(iterations):
-            le1 = _siso(lc_sys, lc_par1, la1, self._next, self._parity, self.n_states)
-            le2 = _siso(lc_sys_il, lc_par2, le1[self._perm],
-                        self._next, self._parity, self.n_states)
-            la1 = le2[self._inv_perm]
-        total = lc_sys + le1 + la1
-        return (total < 0.0).astype(np.int64)
+        return _turbo_decode_one(np.asarray(llrs, dtype=np.float64),
+                                 self._perm, self._inv_perm, self._next,
+                                 self._parity, self.n_states, iterations)
+
+    def decode_batch(self, llrs_batch: np.ndarray, iterations: int = 8) -> np.ndarray:
+        """Decode many equal-length frames in parallel across CPU cores.
+
+        llrs_batch is a 2-D array (n_frames x 3k); returns an (n_frames x k)
+        array of decoded data bits.
+        """
+        arr = np.ascontiguousarray(llrs_batch, dtype=np.float64)
+        return _turbo_decode_batch(arr, self._perm, self._inv_perm, self._next,
+                                   self._parity, self.n_states, iterations)

@@ -1,4 +1,6 @@
 """Tail-terminated convolutional code with a soft-decision Viterbi decoder."""
+import math
+
 import numpy as np
 from numba import njit
 
@@ -101,3 +103,53 @@ class ConvolutionalCode:
         decoded = _viterbi_core(llrs, self._next_state, self._out_bits,
                                 self.n_states, self.n, n_steps)
         return decoded[:n_steps - (self.K - 1)]
+
+    def weight_spectrum(self, d_max: int = 24) -> np.ndarray:
+        """Information-weighted output-weight spectrum B_d, for d up to d_max.
+
+        B_d is the total number of nonzero information bits over all error
+        events — trellis paths that leave the all-zero state and remerge with
+        it — of output Hamming weight d.  It feeds the soft-decision Viterbi
+        union bound.  This code is non-catastrophic, so the enumeration ends.
+        """
+        out_weight = self._out_bits.sum(axis=2)
+        next_state = self._next_state
+        spectrum = np.zeros(d_max + 1, dtype=np.int64)
+        # dp[state] = {output_weight: (path_count, information_weight_sum)}
+        dp: dict[int, dict[int, tuple[int, int]]] = {
+            int(next_state[0, 1]): {int(out_weight[0, 1]): (1, 1)}}
+        for _ in range(3000):
+            if not dp:
+                break
+            nxt: dict[int, dict[int, tuple[int, int]]] = {}
+            for s, by_weight in dp.items():
+                for d, (count, info) in by_weight.items():
+                    for u in (0, 1):
+                        d2 = d + int(out_weight[s, u])
+                        if d2 > d_max:
+                            continue
+                        info2 = info + u * count
+                        s2 = int(next_state[s, u])
+                        if s2 == 0:
+                            spectrum[d2] += info2
+                        else:
+                            cell = nxt.setdefault(s2, {})
+                            c0, i0 = cell.get(d2, (0, 0))
+                            cell[d2] = (c0 + count, i0 + info2)
+            dp = nxt
+        return spectrum
+
+    def union_bound_ber(self, ebn0_db: float, d_max: int = 24) -> float:
+        """Soft-decision Viterbi BER union bound at the given Eb/N0 (dB).
+
+        Sums B_d * Q(sqrt(2 d R Eb/N0)) over the weight spectrum — an upper
+        bound on BER that is tight at moderate-to-high SNR.
+        """
+        spectrum = self.weight_spectrum(d_max)
+        ebn0 = 10.0 ** (ebn0_db / 10.0)
+        ber = 0.0
+        for d in range(d_max + 1):
+            if spectrum[d] > 0:
+                arg = math.sqrt(2.0 * d * self.rate * ebn0)
+                ber += float(spectrum[d]) * 0.5 * math.erfc(arg / math.sqrt(2.0))
+        return ber

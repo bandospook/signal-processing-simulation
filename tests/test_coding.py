@@ -56,6 +56,23 @@ def test_conv_coding_gain():
     assert coded_ber < 0.01, f"coded BER too high: {coded_ber}"
 
 
+def test_conv_weight_spectrum():
+    """The (171,133) code has free distance 10 and the textbook weight spectrum."""
+    spectrum = ConvolutionalCode().weight_spectrum(18)
+    assert int(np.argmax(spectrum > 0)) == 10            # free distance
+    assert np.all(spectrum[:10] == 0)
+    assert spectrum[10] == 36                            # B at d_free (textbook)
+    assert spectrum[12] == 211 and spectrum[14] == 1404
+
+
+def test_conv_union_bound_monotone():
+    """The Viterbi union bound is a positive, monotonically decreasing BER curve."""
+    code = ConvolutionalCode()
+    vals = [code.union_bound_ber(e) for e in (2.0, 4.0, 6.0, 8.0)]
+    assert all(0.0 < v < 1.0 for v in vals)
+    assert all(vals[i] > vals[i + 1] for i in range(len(vals) - 1))
+
+
 # ── LDPC code ────────────────────────────────────────────────────────────────
 
 def test_ldpc_parses():

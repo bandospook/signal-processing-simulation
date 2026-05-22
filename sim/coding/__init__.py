@@ -19,7 +19,7 @@ def build_code(coding_cfg: dict) -> ConvolutionalCode | ConcatenatedCode | LDPCC
     """
     scheme = str(coding_cfg["scheme"]).lower()
     if scheme == "convolutional":
-        return ConvolutionalCode()
+        return ConvolutionalCode(block_length=int(coding_cfg.get("block_length", 1024)))
     if scheme == "concatenated":
         return ConcatenatedCode()
     if scheme == "turbo":

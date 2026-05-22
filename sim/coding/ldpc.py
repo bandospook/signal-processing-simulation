@@ -179,6 +179,14 @@ class LDPCCode:
         return _bp_decode_batch(arr, self.n, self.m, self._cn_ptr, self._edge_vn,
                                 self._vn_ptr, self._vn_edges, max_iter, alpha)
 
+    def decode_data(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode a batch of frames to an (n_frames x k) array of data bits.
+
+        Extracts the systematic information columns from the decoded codewords.
+        """
+        self.build_generator()
+        return self.decode_batch(llrs_batch)[:, self.info_cols]
+
     def build_generator(self) -> None:
         """Derive the systematic generator from H via GF(2) row reduction.
 

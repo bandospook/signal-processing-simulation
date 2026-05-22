@@ -18,15 +18,15 @@ class ConcatenatedCode:
     def __init__(self, interleaver_seed: int = 0xCAFE) -> None:
         self.rs = galois.ReedSolomon(255, 223)
         self.conv = ConvolutionalCode()
-        self.k_data_bits = self.rs.k * 8
+        self.k = self.rs.k * 8
         self._rs_coded_bits = self.rs.n * 8
         self.coded_bits = (self._rs_coded_bits + self.conv.K - 1) * self.conv.n
-        self.rate = self.k_data_bits / self.coded_bits
+        self.rate = self.k / self.coded_bits
         perm = np.random.default_rng(interleaver_seed).permutation(self._rs_coded_bits)
         self._perm = perm.astype(np.int64)
 
     def encode(self, data_bits: np.ndarray) -> np.ndarray:
-        """Encode k_data_bits data bits to coded_bits coded bits."""
+        """Encode k data bits to coded_bits coded bits."""
         data = np.asarray(data_bits, dtype=np.uint8)
         rs_codeword = np.asarray(self.rs.encode(np.packbits(data)), dtype=np.uint8)
         rs_bits = np.unpackbits(rs_codeword)
@@ -51,3 +51,7 @@ class ConcatenatedCode:
         """
         inner = self.conv.decode_batch(llrs_batch)
         return np.stack([self._rs_outer(row) for row in inner])
+
+    def decode_data(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode a batch of frames to an (n_frames x k) array of data bits."""
+        return self.decode_batch(llrs_batch)

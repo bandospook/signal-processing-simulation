@@ -68,12 +68,14 @@ class ConvolutionalCode:
     the encoder back to state 0 so the decoder can traceback from a known end.
     """
 
-    def __init__(self, generators: tuple[int, ...] = (0o171, 0o133), K: int = 7) -> None:
+    def __init__(self, generators: tuple[int, ...] = (0o171, 0o133), K: int = 7,
+                 block_length: int = 1024) -> None:
         self.K = K
         self.generators = tuple(generators)
         self.n = len(self.generators)            # coded bits per input bit
         self.rate = 1.0 / self.n
         self.n_states = 1 << (K - 1)
+        self.k = block_length                    # data bits per frame (framed use)
         self._build_trellis()
 
     def _build_trellis(self) -> None:
@@ -127,6 +129,10 @@ class ConvolutionalCode:
         decoded = _viterbi_batch(arr, self._next_state, self._out_bits,
                                  self.n_states, self.n, n_steps)
         return decoded[:, :n_steps - (self.K - 1)]
+
+    def decode_data(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode a batch of frames to an (n_frames x k) array of data bits."""
+        return self.decode_batch(llrs_batch)
 
     def weight_spectrum(self, d_max: int = 24) -> np.ndarray:
         """Information-weighted output-weight spectrum B_d, for d up to d_max.

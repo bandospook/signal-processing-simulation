@@ -84,7 +84,7 @@ def test_coding_gain_waterfall():
     turbo_code = TurboCode(2000)
     turbo = _sweep_blockcode(turbo_code, turbo_code.k, rng)
     concat_code = ConcatenatedCode()
-    concat = _sweep_blockcode(concat_code, concat_code.k_data_bits, rng)
+    concat = _sweep_blockcode(concat_code, concat_code.k, rng)
     ldpc = _sweep_ldpc(LDPCCode(_LDPC_ALIST), rng)
 
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -138,7 +138,7 @@ def test_coding_validation():
     assert turbo_ber < 1e-2, f"turbo BER {turbo_ber:.2e} too high at 2.5 dB"
 
     concat = ConcatenatedCode()
-    concat_ber = _block_ber(concat, concat.k_data_bits, 4.0, 6, rng)
+    concat_ber = _block_ber(concat, concat.k, 4.0, 6, rng)
     assert concat_ber < 1e-2, f"concatenated BER {concat_ber:.2e} too high at 4.0 dB"
 
     ldpc = LDPCCode(_LDPC_ALIST)

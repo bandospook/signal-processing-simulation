@@ -182,3 +182,7 @@ class TurboCode:
         arr = np.ascontiguousarray(llrs_batch, dtype=np.float64)
         return _turbo_decode_batch(arr, self._perm, self._inv_perm, self._next,
                                    self._parity, self.n_states, iterations)
+
+    def decode_data(self, llrs_batch: np.ndarray) -> np.ndarray:
+        """Decode a batch of frames to an (n_frames x k) array of data bits."""
+        return self.decode_batch(llrs_batch)

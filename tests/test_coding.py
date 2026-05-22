@@ -198,7 +198,7 @@ def test_turbo_coding_gain():
 def test_concat_encode_length():
     """Encoded length matches the reported coded_bits."""
     code = ConcatenatedCode()
-    coded = code.encode(np.zeros(code.k_data_bits, dtype=int))
+    coded = code.encode(np.zeros(code.k, dtype=int))
     assert len(coded) == code.coded_bits
 
 
@@ -206,7 +206,7 @@ def test_concat_roundtrip_noiseless():
     """Noiseless high-confidence LLRs decode back to the original data exactly."""
     rng = np.random.default_rng(6)
     code = ConcatenatedCode()
-    data = rng.integers(0, 2, code.k_data_bits)
+    data = rng.integers(0, 2, code.k)
     coded = code.encode(data)
     llrs = np.where(coded == 0, 30.0, -30.0)
     assert np.array_equal(code.decode(llrs), data)
@@ -222,14 +222,14 @@ def test_concat_coding_gain():
     sigma = np.sqrt(1.0 / (2.0 * ebn0 * code.rate))
     errs = 0
     for _ in range(n_frames):
-        data = rng.integers(0, 2, code.k_data_bits)
+        data = rng.integers(0, 2, code.k)
         tx = 1.0 - 2.0 * code.encode(data)
         rx = tx + sigma * (rng.standard_normal(len(tx)) + 1j * rng.standard_normal(len(tx)))
         llrs = soft_demap(rx, "BPSK", noise_var=2.0 * sigma ** 2)
         errs += int(np.sum(code.decode(llrs) != data))
-    coded_ber = errs / (n_frames * code.k_data_bits)
+    coded_ber = errs / (n_frames * code.k)
 
-    nbits = n_frames * code.k_data_bits
+    nbits = n_frames * code.k
     data_u = rng.integers(0, 2, nbits)
     sigma_u = np.sqrt(1.0 / (2.0 * ebn0))
     rx_u = (1.0 - 2.0 * data_u) + sigma_u * rng.standard_normal(nbits)
@@ -264,6 +264,17 @@ def test_decode_batch_matches_decode():
     lf = rng.standard_normal((3, ldpc.n))
     lb = ldpc.decode_batch(lf)
     assert all(np.array_equal(lb[i], ldpc.decode(lf[i])) for i in range(len(lf)))
+
+
+def test_decode_data_recovers_frames(ldpc_with_generator):
+    """Every code exposes .k and round-trips multi-frame data through decode_data."""
+    rng = np.random.default_rng(21)
+    codes = [ConvolutionalCode(), TurboCode(300), ConcatenatedCode(), ldpc_with_generator]
+    for code in codes:
+        data = np.stack([rng.integers(0, 2, code.k) for _ in range(3)])
+        coded = np.stack([code.encode(row) for row in data])
+        llrs = np.where(coded == 0, 30.0, -30.0).astype(float)
+        assert np.array_equal(code.decode_data(llrs), data)
 
 
 # ── Code factory ─────────────────────────────────────────────────────────────

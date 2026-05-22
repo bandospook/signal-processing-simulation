@@ -1,4 +1,4 @@
-"""LDPC code: alist parity-check matrix + Numba belief-propagation decoder."""
+"""LDPC code: alist parity-check matrix, belief-propagation decoder, encoder."""
 from pathlib import Path
 import numpy as np
 from numba import njit
@@ -19,6 +19,36 @@ def _parse_alist(path: str | Path) -> tuple[list[np.ndarray], int, int]:
         vs = [v - 1 for v in map(int, ln.split()) if v != 0]
         check_vars.append(np.array(vs, dtype=np.int64))
     return check_vars, n, m
+
+
+def _gf2_rref_packed(packed: np.ndarray, m: int, n: int) -> tuple[np.ndarray, int]:
+    """In-place GF(2) reduced row echelon form of a bit-packed matrix.
+
+    `packed` is m rows of ceil(n/64) uint64 words.  Returns the pivot column
+    index for each of the `rank` pivot rows, and the rank itself.
+    """
+    one = np.uint64(1)
+    pivot_col = np.full(m, -1, dtype=np.int64)
+    rank = 0
+    for col in range(n):
+        word = col >> 6
+        shift = np.uint64(col & 63)
+        col_bits = (packed[:, word] >> shift) & one
+        below = np.nonzero(col_bits[rank:])[0]
+        if below.size == 0:
+            continue                                  # free (non-pivot) column
+        pivot_row = rank + int(below[0])
+        if pivot_row != rank:
+            packed[[rank, pivot_row]] = packed[[pivot_row, rank]]
+            col_bits = (packed[:, word] >> shift) & one
+        elim = col_bits.astype(bool)
+        elim[rank] = False
+        packed[elim] ^= packed[rank]                  # clear the column elsewhere
+        pivot_col[rank] = col
+        rank += 1
+        if rank == m:
+            break
+    return pivot_col, rank
 
 
 # _bp_decode runs as Numba-compiled native code, invisible to coverage.py's
@@ -96,11 +126,12 @@ def _bp_decode(channel_llr, n, m, cn_ptr, edge_vn, vn_ptr, vn_edges, max_iter, a
 
 
 class LDPCCode:
-    """LDPC code defined by an alist parity-check matrix, with a min-sum decoder.
+    """LDPC code defined by an alist parity-check matrix.
 
-    Loads a sparse parity-check matrix H (n variable nodes, m check nodes) and
-    decodes soft LLRs with normalized min-sum belief propagation.  The decoder
-    needs only H; encoding is handled elsewhere.
+    Loads a sparse parity-check matrix H (n variable nodes, m check nodes),
+    decodes soft LLRs with normalized min-sum belief propagation, and encodes
+    via a systematic generator derived from H by GF(2) elimination.  The
+    generator is built lazily on the first encode() call.
     """
 
     def __init__(self, alist_path: str | Path) -> None:
@@ -114,9 +145,56 @@ class LDPCCode:
         vn_deg = np.bincount(self._edge_vn, minlength=n)
         self._vn_ptr = np.concatenate([np.zeros(1, np.int64), np.cumsum(vn_deg)])
         self._vn_edges = np.argsort(self._edge_vn, kind="stable").astype(np.int64)
+        self.info_cols = np.array([], dtype=np.int64)     # set by _build_generator
+        self._parity_cols = np.array([], dtype=np.int64)
+        self._parity_gen: np.ndarray | None = None
+        self.k = 0
 
     def decode(self, llrs: np.ndarray, max_iter: int = 50, alpha: float = 0.8) -> np.ndarray:
         """Min-sum BP decode of per-bit LLRs; returns the n hard-decision bits."""
         return _bp_decode(np.ascontiguousarray(llrs, dtype=np.float64),
                           self.n, self.m, self._cn_ptr, self._edge_vn,
                           self._vn_ptr, self._vn_edges, max_iter, alpha)
+
+    def build_generator(self) -> None:
+        """Derive the systematic generator from H via GF(2) row reduction.
+
+        Idempotent — call it before encode() (encode() also triggers it).  Row-
+        reduces H to find rank pivot ("parity") columns; the remaining k =
+        n - rank columns carry the message, and each parity bit is the XOR of
+        the message bits picked out by its reduced row.  Sets self.k.
+        """
+        if self._parity_gen is not None:
+            return
+        n_words = (self.n + 63) // 64
+        packed = np.zeros((self.m, n_words), dtype=np.uint64)
+        for c in range(self.m):
+            for e in range(int(self._cn_ptr[c]), int(self._cn_ptr[c + 1])):
+                v = int(self._edge_vn[e])
+                packed[c, v >> 6] |= np.uint64(1) << np.uint64(v & 63)
+
+        pivot_col, rank = _gf2_rref_packed(packed, self.m, self.n)
+        parity_cols = pivot_col[:rank]
+        is_parity = np.zeros(self.n, dtype=bool)
+        is_parity[parity_cols] = True
+        info_cols = np.nonzero(~is_parity)[0]
+
+        parity_gen = np.zeros((rank, info_cols.size), dtype=np.uint8)
+        for j, col in enumerate(info_cols):
+            bit = (packed[:rank, col >> 6] >> np.uint64(col & 63)) & np.uint64(1)
+            parity_gen[:, j] = bit.astype(np.uint8)
+
+        self.info_cols = info_cols
+        self._parity_cols = parity_cols
+        self._parity_gen = parity_gen
+        self.k = int(info_cols.size)
+
+    def encode(self, data_bits: np.ndarray) -> np.ndarray:
+        """Encode k data bits to an n-bit codeword (builds the generator if needed)."""
+        self.build_generator()
+        assert self._parity_gen is not None
+        message = np.asarray(data_bits, dtype=np.int64)
+        codeword = np.zeros(self.n, dtype=np.int64)
+        codeword[self.info_cols] = message
+        codeword[self._parity_cols] = (self._parity_gen @ message) & 1
+        return codeword

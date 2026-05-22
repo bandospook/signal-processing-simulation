@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from sim.coding import ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode
 from sim.receiver import soft_demap
@@ -73,6 +74,33 @@ def test_ldpc_decodes_clean():
     rx = 1.0 + sigma * (rng.standard_normal(code.n) + 1j * rng.standard_normal(code.n))
     llrs = soft_demap(rx, "BPSK", noise_var=2.0 * sigma ** 2)
     assert np.all(code.decode(llrs) == 0)
+
+
+@pytest.fixture(scope="module")
+def ldpc_with_generator():
+    """LDPC code with its systematic generator built once, shared across encode tests."""
+    code = LDPCCode(_LDPC_ALIST)
+    code.build_generator()
+    return code
+
+
+def test_ldpc_encode_valid_codeword(ldpc_with_generator):
+    """Every encoded codeword satisfies all parity checks of H."""
+    code = ldpc_with_generator
+    rng = np.random.default_rng(10)
+    codeword = code.encode(rng.integers(0, 2, code.k))
+    syndrome = np.bitwise_xor.reduceat(codeword[code._edge_vn], code._cn_ptr[:-1])
+    assert np.all(syndrome == 0)
+
+
+def test_ldpc_encode_decode_roundtrip(ldpc_with_generator):
+    """Encode then noiseless decode recovers the message in the info columns."""
+    code = ldpc_with_generator
+    rng = np.random.default_rng(11)
+    data = rng.integers(0, 2, code.k)
+    codeword = code.encode(data)
+    llrs = np.where(codeword == 0, 30.0, -30.0)
+    assert np.array_equal(code.decode(llrs)[code.info_cols], data)
 
 
 def test_ldpc_coding_gain():

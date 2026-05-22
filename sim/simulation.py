@@ -6,9 +6,10 @@ import numpy as np
 from .baseband import rrc_baseband
 from scipy.signal import resample_poly
 
+from .coding import build_code, decode_frames, encode_frames
 from .filters import OLAState, x_up_block, apply_channel_impairment
 from .nonlinear_amplifier import nonlinear_amplifier
-from .receiver import receive
+from .receiver import receive, soft_demap
 
 _PrintCB = Callable[[str], None] | None
 
@@ -125,7 +126,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
         sps         = int(carr["sps"])
         rolloff     = float(carr["rolloff"])
         filter_span = int(carr["filter_span"])
-        num_symbols = int(carr["num_symbols"])
+        num_symbols = int(carr.get("num_symbols", 0))
         power_db    = float(carr.get("power_db", 0.0))
         freq        = float(carr["freq"])
         channel_cfg = carr.get("channel")
@@ -146,9 +147,24 @@ def wideband_bpsk_simulation(carriers: list[dict],
         mod_kwargs = {k: carr[k] for k in ("apsk_gamma", "apsk_gamma1", "apsk_gamma2")
                       if k in carr}
 
-        bb, t, bits, symbols = rrc_baseband(
-            modulation, num_symbols, symbol_rate, native_rate,
-            rolloff, filter_span, seed=int(per_carrier_seeds[i]), **mod_kwargs)
+        # FEC-coded carrier: encode random data frames and feed the coded bits
+        # to the modulator.  Uncoded carrier: rrc_baseband generates the bits.
+        coding_cfg = carr.get("coding")
+        if coding_cfg is not None:
+            code = build_code(coding_cfg)
+            n_frames = int(carr["num_frames"])
+            data_bits, coded_bits = encode_frames(
+                code, n_frames, np.random.default_rng(int(per_carrier_seeds[i])))
+            bb, t, bits, symbols = rrc_baseband(
+                modulation, 0, symbol_rate, native_rate,
+                rolloff, filter_span, bits=coded_bits, **mod_kwargs)
+        else:
+            code = None
+            data_bits = None
+            n_frames = 0
+            bb, t, bits, symbols = rrc_baseband(
+                modulation, num_symbols, symbol_rate, native_rate,
+                rolloff, filter_span, seed=int(per_carrier_seeds[i]), **mod_kwargs)
 
         signal_bw = (1 + rolloff) * symbol_rate
         bb_ch = (apply_channel_impairment(bb, native_rate, signal_bw, channel_cfg)
@@ -168,6 +184,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
             rolloff=rolloff, filter_span=filter_span, sps=sps,
             amp_scale=10 ** (power_db / 20),
             P_rs=P_rs, Q_rs=Q_rs, n_bb_orig=n_bb_orig,
+            code=code, data_bits=data_bits, n_frames=n_frames,
         ))
 
     # ── Wideband extent (trim to shortest carrier, as in the non-chunk path) ─
@@ -318,7 +335,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
         cr["cnr_db"]  = cnr_db
         cr["cir_db"]  = cir_db
         cr["cnir_db"] = cnir_db
-        cr.update(receive(
+        rx = receive(
             nl_down,
             modulation=cr["modulation"],
             rolloff=cr["rolloff"],
@@ -326,7 +343,20 @@ def wideband_bpsk_simulation(carriers: list[dict],
             sps=cr["sps"],
             reference_bits=cr["bits"],
             **cr["mod_kwargs"],
-        ))
+        )
+        # For a coded carrier, soft-demap the symbol samples, FEC-decode, and
+        # report the post-decoder BER as `ber` (the channel BER becomes uncoded_ber).
+        if cr["code"] is not None:
+            evm = rx["evm_rms"]
+            noise_var = (evm / 100.0) ** 2 if (not math.isnan(evm) and evm > 0) else 1.0
+            llrs = soft_demap(rx["samples"], cr["modulation"], noise_var,
+                              **cr["mod_kwargs"])
+            decoded = decode_frames(cr["code"], llrs, cr["n_frames"])
+            data = cr["data_bits"]
+            n = min(len(decoded), len(data))
+            rx["uncoded_ber"] = rx["ber"]
+            rx["ber"] = float(np.mean(decoded[:n] != data[:n]))
+        cr.update(rx)
 
     # ── Finalise Welch PSDs ───────────────────────────────────────────────────
     psd_pre_nl  = w_pre.result(sample_rate)

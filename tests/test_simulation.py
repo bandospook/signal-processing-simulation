@@ -89,6 +89,23 @@ def test_simulation_raises_sample_rate_below_native():
         )
 
 
+def test_coded_carrier_decodes():
+    """A convolutionally-coded carrier is FEC-encoded into the chain and decoded out."""
+    coded = dict(name="cc", modulation="BPSK", symbol_rate=1e6, sps=4,
+                 rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
+                 coding=dict(scheme="convolutional", block_length=400), num_frames=2)
+    result = wideband_bpsk_simulation(
+        carriers=[coded], sample_rate=16e6,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM, input_backoff_db=12.0,
+        noise_density_dbfs=-100.0,
+        ola_filter_span=8, ola_block_size=1024, seed=1,
+        demod_carriers={"cc"})
+    cr = result["carriers"][0]
+    assert cr["ber"] is not None and 0.0 <= cr["ber"] <= 1.0   # post-decoder BER
+    assert "uncoded_ber" in cr
+    assert cr["ber"] < 0.05                                    # coded carrier decodes
+
+
 def test_distortion_increases_with_drive():
     """
     CIR must decrease monotonically as input backoff decreases (harder drive

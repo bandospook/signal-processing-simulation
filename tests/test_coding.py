@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from sim.coding import (ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode,
-                        build_code)
+                        build_code, decode_frames, encode_frames)
 from sim.receiver import soft_demap
 
 _LDPC_ALIST = Path(__file__).resolve().parent.parent / "data" / "ldpc" / "mackay_13298.alist"
@@ -291,3 +291,14 @@ def test_build_code_unknown_scheme():
     """build_code rejects an unknown coding scheme."""
     with pytest.raises(ValueError, match="Unknown coding scheme"):
         build_code({"scheme": "polar"})
+
+
+def test_encode_decode_frames(ldpc_with_generator):
+    """encode_frames / decode_frames round-trip multi-frame data, LDPC and otherwise."""
+    rng = np.random.default_rng(30)
+    for code in (ConvolutionalCode(block_length=200), ldpc_with_generator):
+        data, coded = encode_frames(code, 3, rng)
+        assert len(data) == 3 * code.k
+        llrs = np.where(coded == 0, 25.0, -25.0).astype(float)
+        decoded = decode_frames(code, llrs, 3)
+        assert np.array_equal(decoded, data)

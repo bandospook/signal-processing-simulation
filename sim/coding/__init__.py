@@ -2,12 +2,15 @@
 
 See docs/coding_design.md for the design rationale and staging plan.
 """
+import numpy as np
+
 from .concatenated import ConcatenatedCode
 from .convolutional import ConvolutionalCode
 from .ldpc import LDPCCode
 from .turbo import TurboCode
 
-__all__ = ["ConcatenatedCode", "ConvolutionalCode", "LDPCCode", "TurboCode", "build_code"]
+__all__ = ["ConcatenatedCode", "ConvolutionalCode", "LDPCCode", "TurboCode",
+           "build_code", "encode_frames", "decode_frames"]
 
 
 def build_code(coding_cfg: dict) -> ConvolutionalCode | ConcatenatedCode | LDPCCode | TurboCode:
@@ -27,3 +30,26 @@ def build_code(coding_cfg: dict) -> ConvolutionalCode | ConcatenatedCode | LDPCC
     if scheme == "ldpc":
         return LDPCCode(coding_cfg["matrix"])
     raise ValueError(f"Unknown coding scheme '{scheme}'")
+
+
+def encode_frames(code, n_frames: int,
+                  rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Generate n_frames random data frames and FEC-encode them.
+
+    Returns (data_bits, coded_bits) as flat arrays, frames concatenated.
+    """
+    if isinstance(code, LDPCCode):
+        code.build_generator()              # sets .k and enables encode()
+    k = code.k
+    data = rng.integers(0, 2, n_frames * k)
+    coded = np.concatenate([code.encode(data[f * k:(f + 1) * k])
+                            for f in range(n_frames)])
+    return data, coded
+
+
+def decode_frames(code, llrs: np.ndarray, n_frames: int) -> np.ndarray:
+    """Decode flat channel LLRs (n_frames concatenated frames) to flat data bits."""
+    llrs = np.asarray(llrs, dtype=float)
+    per_frame = len(llrs) // n_frames
+    frames = llrs[:n_frames * per_frame].reshape(n_frames, per_frame)
+    return code.decode_data(frames).ravel()

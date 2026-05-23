@@ -29,7 +29,7 @@ Last updated: 2026-05-22, commit d7ae2b8
 - GUI: app icon generated at runtime (misc.gen_icon.build_icon() + Pillow); no base64 blob in gui.py
 - GUI: simulation stdout teed to `simulation.log` in the configured output directory each run
 - BER theory module + numerical inverse (ber_awgn, ebn0_for_ber) for all non-APSK modulations
-- Detector results markdown table (write_detector_results in plots.py)
+- Per-(carrier, IBO, noise) results markdown table (write_report in plots.py → report.md)
 - Docs: GUIDE.md, simulation_overview.md, memory_scaling.md, filter_analysis.md,
   channel_impairment.md, msk_modulation.md, synchronization.md, coding_design.md
 

@@ -23,8 +23,7 @@ output_dir         = "output"
 wideband           = "wideband.png"
 nl_tables          = "amplifier_nl.png"
 sweep              = "sweep_results.png"
-sweep_table        = "sweep_table.md"
-detector_results   = "detector_table.md"
+report             = "report.md"
 
 [[carrier]]
 name         = "slow"

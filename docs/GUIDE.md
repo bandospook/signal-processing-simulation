@@ -163,9 +163,9 @@ This will:
 3. Save PNG files into the `output/` directory: `wideband.png` from the first
    sweep point, `amplifier_nl.png`, optional per-carrier channel responses, and
    `sweep_results.png` (BER/EVM/CNR vs IBO across all noise values).
-4. Write `sweep_table.md` (config + per-point grid) and, if any carriers have
-   `sweep_demod = true`, `detector_results.md` (one row per `(IBO, noise, carrier)`
-   with BER, Eb/N0, and implementation loss).
+4. If any carriers have `sweep_demod = true`, write `report.md` — one flat
+   table, one row per `(IBO, noise, carrier)` with BER, Eb/N0, and
+   implementation loss.
 
 ### Step 4 — Use the GUI
 
@@ -237,7 +237,7 @@ signal-processing-simulation/
 | `sim/sweep.py` | 2-D sweep over IBO × noise; honours `sweep_demod` per carrier. |
 | `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/MSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
 | `sim/coding/` | Four FEC codecs: `ConvolutionalCode` (rate-1/2, K=7, soft Viterbi), `ConcatenatedCode` (RS + convolutional, random interleaver), `TurboCode` (rate-1/3 PCCC, max-log-MAP BCJR), `LDPCCode` (normalized min-sum BP). `build_code(cfg)` factory, `encode_frames` / `decode_frames` helpers. |
-| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, `write_sweep_report` (markdown), `write_detector_results` (markdown table of BER/Eb/N0/implementation loss per carrier). |
+| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, and `write_report` (flat markdown table of BER/Eb/N0/implementation loss per `(carrier, IBO, noise)`). |
 
 ---
 
@@ -264,7 +264,7 @@ simulated end-to-end. Each list must contain at least one value.
 | `noise_density_dbfs` | float list (dBFS/Hz) | One-sided AWGN PSD values added **after** the amplifier. Total noise power per point = 10^(N₀/10) × sample_rate. |
 
 The first `(ibo_db[0], noise_density_dbfs[0])` point's wideband composite feeds
-the PSD plot; the full grid feeds the sweep table and `detector_results.md`.
+the PSD plot; the full grid feeds `report.md`.
 
 ### `[amplifier.am_am]` and `[amplifier.am_pm]`
 
@@ -289,8 +289,7 @@ the PSD plot; the full grid feeds the sweep table and `detector_results.md`.
 | `wideband` | Filename for the wideband PSD figure. |
 | `nl_tables` | Filename for the AM-AM/AM-PM plot. |
 | `sweep` | Filename for the sweep results PNG. |
-| `sweep_table` | Filename for the sweep markdown report. |
-| `detector_results` | Filename for the detector-model results table (BER, Eb/N0, implementation loss). Defaults to `detector_results.md` if omitted. |
+| `report` | Filename for the per-`(carrier, IBO, noise)` results table (BER, Eb/N0, implementation loss, CNR/CIR/CNIR, EVM). Defaults to `report.md` if omitted. |
 
 ### `[[carrier]]` (repeated block, one per carrier)
 
@@ -340,8 +339,7 @@ When `[carrier.coding]` is present, the transmit chain FEC-encodes random data f
 | `output/amplifier_nl.png` | AM-AM and AM-PM curves with peak operating point (red marker). |
 | `output/channel_<name>.png` | Amplitude ripple and phase nonlinearity across each carrier's passband. |
 | `output/sweep_results.png` | Per-carrier rows: BER vs IBO, EVM vs IBO, CNR/CIR/CNIR vs IBO. Multiple noise levels colour-coded. |
-| `output/sweep_table.md` | Markdown report: configuration summary, performance summary (min/max ranges), full IBO × noise grid table. |
-| `output/detector_results.md` | Per-carrier detector-model results: BER, effective Eb/N0, theory Eb/N0, implementation loss, CNR/CIR/CNIR, EVM. Written whenever any carrier has `sweep_demod = true`. |
+| `output/report.md` | One flat table, one row per `(carrier, IBO, noise)`: BER, effective Eb/N0, theory Eb/N0, implementation loss, CNR/CIR/CNIR, EVM. Written whenever any carrier has `sweep_demod = true`. |
 
 ---
 
@@ -387,10 +385,11 @@ product of the two lists in `[sweep]`. Only carriers with `sweep_demod = true`
 have demodulation performed at each sweep point; others contribute to the wideband
 IM environment but their BER/EVM are not computed, saving significant time.
 
-**Markdown report** (`sweep_table.md`) contains:
-- Configuration summary (IBO range, noise range, carrier list)
-- Performance summary (min/max BER, EVM, CNIR across the grid)
-- Full table of every IBO × noise combination
+**Markdown report** (`report.md`) is a single flat table — one row per
+`(carrier, IBO, noise)` with columns for BER, effective Eb/N0, theory Eb/N0,
+implementation loss, CNR, CIR, CNIR, and EVM. Configuration metadata is not
+duplicated here; the source TOML is the canonical record of how the run was
+configured.
 
 ---
 
@@ -428,14 +427,14 @@ theory predicts to achieve the same BER.
 Implementation loss is `None` for 16APSK and 32APSK because no closed-form BER
 formula exists for those modulations.
 
-### Detector results table
+### Results table
 
-Results are written to `output/detector_results.md` whenever any carrier has
-`sweep_demod = true`. Each row covers one carrier:
+Results are written to `output/report.md` whenever any carrier has
+`sweep_demod = true`. Each row covers one `(carrier, IBO, noise)` measurement:
 
-| Carrier | Mode | Noise (dBFS/Hz) | BER | BER CI | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) | Bits |
-|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| slow | fixed | -160.00 | 0 | — | 62.3 | — | — | 65.8 | 40.8 | 40.8 | 3.3 | — |
+| Carrier | IBO (dB) | Noise (dBFS/Hz) | BER | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| slow | 3.0 | -160.0 | 0 | 62.3 | — | — | 65.8 | 40.8 | 40.8 | 3.3 |
 
 - **Impl Loss = —** — BER was zero or the modulation has no closed-form theory (APSK).
 
@@ -529,9 +528,9 @@ it reads and writes `.toml` files directly and launches `main.py` as a subproces
 
 | Tab | Contents |
 |---|---|
-| **General** | Simulation seed, wideband sample rate and noise density, OLA filter span and block size |
-| **Amplifier** | Input backoff (dB), AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
-| **Sweep & Output** | IBO sweep list, noise sweep list, output directory (with Browse button), filenames for all output files including `detector_results` |
+| **General** | Simulation seed, OLA filter span and block size |
+| **Amplifier** | AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
+| **Sweep & Output** | Sample rate, IBO sweep list, noise sweep list, output directory (with Browse button), filenames for all output files including `report` |
 | **Carriers** | One scrollable labeled frame per carrier (see below); view-filter dropdown at the top |
 
 ### Carriers tab controls
@@ -724,8 +723,8 @@ The execution model is unified: `[sweep]` (with `sample_rate`, `ibo_db`, and
 simulation; larger grids fan out the full chunk pipeline at each combination.
 The first grid point's wideband composite feeds the PSD plot. Carriers with
 `sweep_demod = true` are demodulated at every grid point, producing one row
-per `(IBO, noise, carrier)` in `detector_results.md` with BER, effective Eb/N0,
-and implementation loss.
+per `(carrier, IBO, noise)` in `report.md` with BER, effective Eb/N0, and
+implementation loss.
 
 The document closes with a concise output-file table and worked example TOML
 snippets covering single-point, fixed-noise, and full sweep configurations.

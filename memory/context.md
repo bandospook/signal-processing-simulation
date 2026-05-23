@@ -118,8 +118,10 @@ Important schema notes:
 - The old `[amplifier].input_backoff_db` field is **gone**; IBO is per-sweep-point.
 - The sweep is the only sim path; a 1×1 sweep is the way to do a single-point run.
 - The first sweep point's wideband composite feeds `wideband.png`.
-- `detector_results.md` has one row per `(IBO, noise, carrier)` when carriers
-  have `sweep_demod=true`.
+- `report.md` is a single flat table — one row per `(carrier, IBO, noise)` —
+  written when any carrier has `sweep_demod=true`.  Includes BER, Eff Eb/N0,
+  Theory Eb/N0, Impl Loss, CNR/CIR/CNIR, EVM.  Configuration is *not* duplicated
+  in the report; the source TOML is the canonical record of how the run was set.
 
 ---
 

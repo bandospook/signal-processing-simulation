@@ -74,21 +74,21 @@ def test_main_progress_callback(tmp_path):
     assert all(0.0 <= f <= 1.0 for f in fracs)
 
 
-def test_main_fixed_demod_writes_detector_results(tmp_path):
-    """A carrier with sweep_demod=True is demodulated and writes detector_results.md."""
+def test_main_demod_writes_report(tmp_path):
+    """A carrier with sweep_demod=True is demodulated and writes report.md."""
     fixed_carrier = dict(
         name="fd", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
         num_symbols=200, power_db=0.0, freq=0.0,
         modulation="BPSK", sweep_demod=True,
     )
     cfg = _make_cfg(tmp_path, extra_carriers=[fixed_carrier])
-    cfg["output"]["detector_results"] = "detector_results.md"
+    cfg["output"]["report"] = "report.md"
 
     with patch("main.load_config", return_value=cfg), \
          patch("matplotlib.pyplot.show"):
         main_module.main()
 
-    assert (tmp_path / "detector_results.md").exists()
+    assert (tmp_path / "report.md").exists()
 
 
 def test_main_raises_on_empty_sweep(tmp_path):

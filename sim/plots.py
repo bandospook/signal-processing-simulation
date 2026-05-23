@@ -278,140 +278,13 @@ def _fmt_metric(key: str, val) -> str:
     return "∞" if not np.isfinite(val) else f"{val:.1f}"
 
 
-def write_sweep_report(sweep_results: list[dict], cfg: dict,
-                       save_path: str | None = None) -> None:
-    """
-    Write sweep results as a Markdown report containing a config summary,
-    a per-carrier performance summary, and a full IBO × noise results table.
-    Nothing is written if save_path is None.
-    """
-    if not sweep_results or save_path is None:
-        return
-
-    from pathlib import Path
-
-    ibo_vals      = sorted(set(r["ibo_db"] for r in sweep_results))
-    noise_vals    = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
-    carrier_names = _enabled_carrier_names(sweep_results)
-
-    L = []
-    def ln(s=""): L.append(s)
-
-    # ── Config summary ────────────────────────────────────────────────────────
-    ln("# Simulation Sweep Report")
-    ln()
-    ln("## Configuration")
-    ln()
-
-    sw  = cfg.get("sweep",      {})
-    ola = cfg.get("ola",        {})
-    sim = cfg.get("simulation", {})
-
-    ln("| Parameter | Value |")
-    ln("|---|---|")
-    ln(f"| Seed | {sim.get('seed', '—')} |")
-    sr = sw.get("sample_rate", 0)
-    ln(f"| Sample Rate | {sr / 1e9:.4g} GHz |")
-    ln(f"| OLA Filter Span | {ola.get('filter_span', '—')} |")
-    ln(f"| OLA Block Size | {ola.get('block_size', '—')} |")
-    ln()
-
-    ln("### Carriers")
-    ln()
-    ln("| Name | Symbol Rate | SPS | Num Symbols | Sweep Demod |")
-    ln("|---|---|---|---|---|")
-    for c in cfg.get("carrier", []):
-        sym_rate = c.get("symbol_rate", 0)
-        sym_str  = f"{sym_rate / 1e6:.4g} MHz"
-        demod    = "Yes" if c.get("sweep_demod", True) else "No"
-        ln(f"| {c['name']} | {sym_str} | {c.get('sps', '—')} | {c.get('num_symbols', '—')} | {demod} |")
-    ln()
-
-    ln("### Sweep Grid")
-    ln()
-    ln(f"- **IBO values (dB):** {', '.join(f'{x:g}' for x in ibo_vals)}")
-    ln(f"- **Noise values (dBFS/Hz):** {', '.join(f'{x:g}' for x in noise_vals)}")
-    ln(f"- **Total points:** {len(ibo_vals) * len(noise_vals)}")
-    ln()
-
-    # ── Performance summary ───────────────────────────────────────────────────
-    if carrier_names:
-        ln("## Performance Summary")
-        ln()
-        SUMMARY_METRICS = [
-            ("cnr_db",  "CNR",  "dB"),
-            ("cir_db",  "CIR",  "dB"),
-            ("cnir_db", "CNIR", "dB"),
-            ("evm_rms", "EVM",  "%"),
-            ("ber",     "BER",  ""),
-        ]
-        for cname in carrier_names:
-            ln(f"### {cname}")
-            ln()
-            for key, label, unit in SUMMARY_METRICS:
-                vals = []
-                for r in sweep_results:
-                    cr = next((c for c in r["carriers"] if c["name"] == cname), None)
-                    if cr is None:
-                        continue
-                    v = cr.get(key)
-                    if v is not None and isinstance(v, (int, float)):
-                        if key == "ber" and v == 0:
-                            vals.append(0.0)
-                        elif np.isfinite(float(v)):
-                            vals.append(float(v))
-                if not vals:
-                    ln(f"- **{label}:** no data")
-                elif key == "ber":
-                    lo = "0" if min(vals) == 0 else f"{min(vals):.2e}"
-                    hi = "0" if max(vals) == 0 else f"{max(vals):.2e}"
-                    ln(f"- **{label}:** {lo} – {hi}")
-                else:
-                    suffix = f" {unit}" if unit else ""
-                    ln(f"- **{label}:** {min(vals):.2f} – {max(vals):.2f}{suffix}")
-            ln()
-
-    # ── Sweep results tables ──────────────────────────────────────────────────
-    ln("## Sweep Results")
-    ln()
-
-    sorted_results = sorted(sweep_results,
-                            key=lambda r: (r["ibo_db"], r["noise_density_dbfs"]))
-
-    for cname in carrier_names:
-        if len(carrier_names) > 1:
-            ln(f"### {cname}")
-            ln()
-
-        ln("| IBO (dB) | Noise (dBFS/Hz) | BER | EVM (%) | CNR (dB) | CIR (dB) | CNIR (dB) |")
-        ln("|---:|---:|---:|---:|---:|---:|---:|")
-
-        for r in sorted_results:
-            cr = next((c for c in r["carriers"] if c["name"] == cname), None)
-            if cr is None:
-                continue
-            row = (
-                f"| {r['ibo_db']:g}"
-                f" | {r['noise_density_dbfs']:g}"
-                f" | {_fmt_metric('ber',     cr.get('ber'))}"
-                f" | {_fmt_metric('evm_rms', cr.get('evm_rms'))}"
-                f" | {_fmt_metric('cnr_db',  cr.get('cnr_db'))}"
-                f" | {_fmt_metric('cir_db',  cr.get('cir_db'))}"
-                f" | {_fmt_metric('cnir_db', cr.get('cnir_db'))} |"
-            )
-            ln(row)
-        ln()
-
-    Path(save_path).write_text("\n".join(L), encoding="utf-8")
-
-
-def write_detector_results(
+def write_report(
     rows: list[dict],
     save_path: str | None,
     append: bool = False,
 ) -> None:
     """
-    Write a Markdown table of per-(IBO, noise) detector-model results.
+    Write a single flat Markdown table of per-(carrier, IBO, noise) results.
 
     Each entry in `rows` is a dict for one (carrier, ibo_db, noise_density_dbfs)
     measurement and contains:
@@ -442,7 +315,7 @@ def write_detector_results(
     L = []
     def ln(s=""): L.append(s)
 
-    ln("## Detector Results")
+    ln("## Results")
     ln()
     ln("| Carrier | IBO (dB) | Noise (dBFS/Hz) | BER | Eff Eb/N0 (dB) "
        "| Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) "

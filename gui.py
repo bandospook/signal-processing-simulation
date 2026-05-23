@@ -60,7 +60,7 @@ def build_toml(cfg: dict) -> str:
 
     o = cfg.get("output", {})
     ln("[output]");  kv("output_dir", o.get("output_dir", "."), 10)
-    for k in ("wideband", "nl_tables", "sweep", "sweep_table", "detector_results"):
+    for k in ("wideband", "nl_tables", "sweep", "report"):
         if o.get(k): kv(k, o[k], 18)
     ln()
 
@@ -554,10 +554,8 @@ class App:
              "PNG filename for the AM-AM / AM-PM nonlinearity table plots."),
             ("Sweep plot:",      "out.sweep",
              "PNG filename for the 2D IBO × noise BER sweep heatmap."),
-            ("Sweep table:",     "out.sweep_table",
-             "Markdown filename for the numeric sweep results table."),
-            ("Detector results:", "out.detector_results",
-             "Markdown filename for per-carrier BER / EVM / IL report."),
+            ("Report:",          "out.report",
+             "Markdown filename for the flat (carrier, IBO, noise) results table."),
         ):
             _lf(f, label, r, 0)
             _ent(f, self._sv(key), r, 1, tip=tip);  r += 1
@@ -659,8 +657,7 @@ class App:
         self._vars["out.wideband"].set(o.get("wideband", ""))
         self._vars["out.nl_tables"].set(o.get("nl_tables", ""))
         self._vars["out.sweep"].set(o.get("sweep", ""))
-        self._vars["out.sweep_table"].set(o.get("sweep_table", ""))
-        self._vars["out.detector_results"].set(o.get("detector_results", ""))
+        self._vars["out.report"].set(o.get("report", ""))
 
         for cf in self._carriers: cf.destroy()
         self._carriers.clear()
@@ -688,11 +685,10 @@ class App:
             "output": {"output_dir": sv("out.dir") or "."},
         }
 
-        for k, vk in (("wideband",          "out.wideband"),
-                      ("nl_tables",          "out.nl_tables"),
-                      ("sweep",              "out.sweep"),
-                      ("sweep_table",        "out.sweep_table"),
-                      ("detector_results",   "out.detector_results")):
+        for k, vk in (("wideband",   "out.wideband"),
+                      ("nl_tables",  "out.nl_tables"),
+                      ("sweep",      "out.sweep"),
+                      ("report",     "out.report")):
             val = sv(vk)
             if val: cfg["output"][k] = val
 

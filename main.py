@@ -13,8 +13,7 @@ from sim.config import load_config
 from sim.modulation import bits_per_symbol
 from sim.theory import ebn0_for_ber
 from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
-                       print_metrics_table, plot_sweep_results, write_sweep_report,
-                       write_detector_results)
+                       print_metrics_table, plot_sweep_results, write_report)
 from sim.sweep import parameter_sweep
 
 _ProgressCB = Callable[[float, str], None] | None
@@ -119,13 +118,11 @@ def main(config_path: str = "simulation.toml",
             )
 
     plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
-    write_sweep_report(sweep_results, cfg=cfg,
-                       save_path=out_path(out.get("sweep_table")))
 
-    # ── Per-point detector results ────────────────────────────────────────────
+    # ── Per-point report rows ─────────────────────────────────────────────────
     # Each (ibo, noise) point becomes a row per demodulated carrier; effective
     # Eb/N0 and theoretical Eb/N0 are derived from the measured CNIR and BER.
-    detector_rows: list[dict] = []
+    report_rows: list[dict] = []
     for r in sweep_results:
         ibo  = r["ibo_db"]
         nd   = r["noise_density_dbfs"]
@@ -144,7 +141,7 @@ def main(config_path: str = "simulation.toml",
             ber_val  = cr.get("ber")
             theory   = ebn0_for_ber(mod, ber_val) if (ber_val is not None and ber_val > 0) else None
             impl_loss = (eff_ebn0 - theory) if theory is not None else None
-            detector_rows.append(dict(
+            report_rows.append(dict(
                 name=carr["name"],
                 ibo_db=ibo,
                 noise_density_dbfs=nd,
@@ -158,10 +155,10 @@ def main(config_path: str = "simulation.toml",
                 evm_rms=cr.get("evm_rms"),
             ))
 
-    if detector_rows:
-        det_path = out_path(out.get("detector_results", "detector_results.md"))
-        write_detector_results(detector_rows, det_path)
-        _prog(0.99, f"Detector results written -> {det_path}")
+    if report_rows:
+        report_path = out_path(out.get("report", "report.md"))
+        write_report(report_rows, report_path)
+        _prog(0.99, f"Report written -> {report_path}")
 
     _prog(1.00, "Done.")
 

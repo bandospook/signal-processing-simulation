@@ -15,7 +15,7 @@ flowchart LR
     FIRST["First point<br/>wideband PSD + console metrics"]
     GRID["All points<br/>per-carrier BER · EVM · CNR/CIR/CNIR"]
     FOUTS["wideband.png · amplifier_nl.png<br/>channel_name.png"]
-    GOUTS["sweep_results.png · sweep_table.md<br/>detector_results.md"]
+    GOUTS["sweep_results.png · report.md"]
 
     CFG --> SWEEP
     SWEEP --> FIRST --> FOUTS
@@ -164,7 +164,7 @@ For BPSK (bps = 1) Eff Eb/N0 is identical to CNIR.
 
 This is compared to the theoretical Eb/N0 required to achieve the measured BER
 in pure AWGN, giving the **implementation loss** (IL = Eff Eb/N0 − Theory Eb/N0).
-Every grid point becomes one row per demodulated carrier in `detector_results.md`.
+Every grid point becomes one row per demodulated carrier in `report.md`.
 
 ---
 
@@ -177,8 +177,7 @@ Every grid point becomes one row per demodulated carrier in `detector_results.md
 | `channel_<name>.png` | Per-carrier with `[carrier.channel]` | If carrier has a channel block with `plot` key |
 | Console metrics table | First sweep point's demod results | Yes — for all demodulated carriers |
 | `sweep_results.png` | Full sweep | If `output.sweep` is set and at least one carrier was demodulated |
-| `sweep_table.md` | Full sweep | If `output.sweep_table` is set |
-| `detector_results.md` | Full sweep | If at least one carrier has `sweep_demod = true` and `output.detector_results` is set |
+| `report.md` | Full sweep | If at least one carrier has `sweep_demod = true` and `output.report` is set (defaults to `report.md` if omitted) |
 
 ---
 
@@ -216,7 +215,7 @@ sweep_demod = true
 ```
 
 Runs one simulation.  Produces `wideband.png`, `amplifier_nl.png`, and
-`detector_results.md` (one row for `link`).
+`report.md` (one row for `link`).
 
 ---
 
@@ -234,5 +233,4 @@ sweep_demod = true
 ```
 
 Runs 9 grid points.  Produces `wideband.png` (from the first point),
-`amplifier_nl.png`, `sweep_results.png`, `sweep_table.md`, and a 9-row
-`detector_results.md`.
+`amplifier_nl.png`, `sweep_results.png`, and a 9-row `report.md`.

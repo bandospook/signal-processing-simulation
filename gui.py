@@ -296,7 +296,8 @@ class CarrierFrame(ttk.LabelFrame):
         lm_var = tk.StringVar(value=cod.get("matrix", ""))
         self._coding_vars["matrix"] = lm_var
         _ent(self._coding_frame, lm_var, 1, 3, width=24,
-             tip="Path to .alist file for LDPC code (e.g. data/ldpc/mackay_13298.alist).")
+             tip="Path to .alist file for LDPC code. "
+                 "Leave blank to use the bundled default (data/ldpc/mackay_13298.alist).")
 
     def _toggle_ch(self):
         if self._has_ch.get():

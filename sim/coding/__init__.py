@@ -2,6 +2,8 @@
 
 See docs/coding_design.md for the design rationale and staging plan.
 """
+from pathlib import Path
+
 import numpy as np
 
 from .concatenated import ConcatenatedCode
@@ -10,7 +12,13 @@ from .ldpc import LDPCCode
 from .turbo import TurboCode
 
 __all__ = ["ConcatenatedCode", "ConvolutionalCode", "LDPCCode", "TurboCode",
-           "build_code", "encode_frames", "decode_frames"]
+           "build_code", "encode_frames", "decode_frames",
+           "DEFAULT_LDPC_MATRIX"]
+
+# Repo-root-relative path to the bundled LDPC parity-check matrix.  Used as
+# the fallback when [carrier.coding].matrix is not set for an ldpc carrier.
+DEFAULT_LDPC_MATRIX = (Path(__file__).resolve().parents[2]
+                       / "data" / "ldpc" / "mackay_13298.alist")
 
 
 def build_code(coding_cfg: dict) -> ConvolutionalCode | ConcatenatedCode | LDPCCode | TurboCode:
@@ -28,7 +36,8 @@ def build_code(coding_cfg: dict) -> ConvolutionalCode | ConcatenatedCode | LDPCC
     if scheme == "turbo":
         return TurboCode(int(coding_cfg["block_length"]))
     if scheme == "ldpc":
-        return LDPCCode(coding_cfg["matrix"])
+        matrix = str(coding_cfg.get("matrix", "")).strip() or str(DEFAULT_LDPC_MATRIX)
+        return LDPCCode(matrix)
     raise ValueError(f"Unknown coding scheme '{scheme}'")
 
 

@@ -293,6 +293,14 @@ def test_build_code_unknown_scheme():
         build_code({"scheme": "polar"})
 
 
+def test_build_code_ldpc_default_matrix():
+    """ldpc scheme uses the bundled default alist when matrix is missing or blank."""
+    from sim.coding import DEFAULT_LDPC_MATRIX
+    assert DEFAULT_LDPC_MATRIX.exists()
+    assert isinstance(build_code({"scheme": "ldpc"}), LDPCCode)
+    assert isinstance(build_code({"scheme": "ldpc", "matrix": ""}), LDPCCode)
+
+
 def test_encode_decode_frames(ldpc_with_generator):
     """encode_frames / decode_frames round-trip multi-frame data, LDPC and otherwise."""
     rng = np.random.default_rng(30)

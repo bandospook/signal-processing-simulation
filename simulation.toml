@@ -2,9 +2,9 @@
 seed = 42
 
 [sweep]
-sample_rate        = 8
-ibo_db             = [0]
-noise_density_dbfs = [-75, -70, -65]
+sample_rate        = 800
+ibo_db             = [0, 1, 2, 3, 4, 5]
+noise_density_dbfs = [-65]
 
 [amplifier.am_am]
 input  = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -20,19 +20,16 @@ block_size   = 4_096
 
 [output]
 output_dir = "output"
-wideband           = "wideband.png"
-nl_tables          = "amplifier_nl.png"
-sweep              = "sweep_results.png"
-report             = "report.md"
+plots      = true
 
 [[carrier]]
 name         = "simple carrier"
 modulation   = "BPSK"
-symbol_rate  = 1
+symbol_rate  = 100
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
-num_symbols  = 2_000
+num_symbols  = 10_000
 power_db     = 0
 freq         = 0
 enabled      = true
@@ -43,4 +40,3 @@ ripple_db              = 0.5
 ripple_cycles          = 2
 max_phase_dev_deg      = 5
 phase_poly_order       = 2
-plot                   = ""

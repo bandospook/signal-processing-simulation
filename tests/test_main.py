@@ -15,13 +15,12 @@ _AM_PM = {
 }
 
 
-def _make_cfg(tmp_path, extra_carriers=None):
+def _make_cfg(tmp_path, extra_carriers=None, plots=True):
     carriers = [
         dict(name="c1", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
              num_symbols=100, power_db=0.0, freq=-3e6, sweep_demod=True,
              channel=dict(enabled=True, ripple_db=0.5, ripple_cycles=2.0,
-                          max_phase_dev_deg=5.0, phase_poly_order=2,
-                          plot="channel_c1.png")),
+                          max_phase_dev_deg=5.0, phase_poly_order=2)),
         # c2 has sweep_demod=False (default): contributes to the composite but is
         # not demodulated, exercising the skip branches in main.py and simulation.py.
         dict(name="c2", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
@@ -41,23 +40,47 @@ def _make_cfg(tmp_path, extra_carriers=None):
         "simulation": {"seed": 42},
         "output": {
             "output_dir": str(tmp_path),
-            "wideband":  "wideband.png",
-            "nl_tables": "nl.png",
-            "sweep":     "sweep.png",
+            "plots":      plots,
         },
     }
 
 
 def test_main_runs(tmp_path):
-    """End-to-end: main runs, all four plot files are written to disk."""
+    """End-to-end: main runs and writes fixed-named plot files."""
     with patch("main.load_config", return_value=_make_cfg(tmp_path)), \
          patch("matplotlib.pyplot.show"):
         main_module.main()
 
     assert (tmp_path / "wideband.png").exists()
-    assert (tmp_path / "nl.png").exists()
-    assert (tmp_path / "sweep.png").exists()
-    assert (tmp_path / "channel_c1.png").exists()
+    assert (tmp_path / "amplifier.png").exists()
+    assert (tmp_path / "c1_detector.png").exists()
+    assert (tmp_path / "c1_channel.png").exists()
+
+
+def test_main_plots_disabled(tmp_path):
+    """plots=false skips image files; report.md is still written."""
+    with patch("main.load_config", return_value=_make_cfg(tmp_path, plots=False)), \
+         patch("matplotlib.pyplot.show"):
+        main_module.main()
+
+    assert not (tmp_path / "wideband.png").exists()
+    assert not (tmp_path / "amplifier.png").exists()
+    assert not (tmp_path / "c1_detector.png").exists()
+    assert not (tmp_path / "c1_channel.png").exists()
+    assert (tmp_path / "report.md").exists()
+
+
+def test_main_carrier_name_slug(tmp_path):
+    """Spaces in carrier names are replaced with underscores in plot filenames."""
+    spaced = dict(name="my carrier", symbol_rate=1e6, sps=4, rolloff=0.35,
+                  filter_span=8, num_symbols=100, power_db=0.0, freq=0.0,
+                  modulation="BPSK", sweep_demod=True)
+    cfg = _make_cfg(tmp_path, extra_carriers=[spaced])
+    with patch("main.load_config", return_value=cfg), \
+         patch("matplotlib.pyplot.show"):
+        main_module.main()
+
+    assert (tmp_path / "my_carrier_detector.png").exists()
 
 
 def test_main_progress_callback(tmp_path):

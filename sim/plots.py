@@ -145,87 +145,84 @@ def _enabled_carrier_names(sweep_results: list[dict]) -> list[str]:
     return [n for n in all_names if has_data(n)]
 
 
-def plot_sweep_results(sweep_results: list[dict],
-                       save_path: str | None = None) -> None:
+def plot_carrier_detector(sweep_results: list[dict],
+                          carrier_name: str,
+                          save_path: str | None = None) -> None:
     """
-    Plot BER, EVM, and CNR/CIR/CNIR vs IBO for each carrier.
+    Plot BER, EVM, and CNR/CIR/CNIR vs IBO for a single carrier across the sweep.
 
     Sweep results are a flat list of {ibo_db, noise_density_dbfs, carriers}.
     Noise density is used as a colour parameter; line style distinguishes
     CNR (solid), CIR (dashed), and CNIR (dotted) on the third panel.
+
+    Returns silently if the named carrier has no finite metrics in the sweep
+    (e.g. sweep_demod=False).
     """
-    ibo_vals      = sorted(set(r["ibo_db"] for r in sweep_results))
-    noise_vals    = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
-    carrier_names = _enabled_carrier_names(sweep_results)
-    if not carrier_names:
+    if carrier_name not in _enabled_carrier_names(sweep_results):
         return
-    n_carriers = len(carrier_names)
-    n_noise       = len(noise_vals)
+    ibo_vals   = sorted(set(r["ibo_db"] for r in sweep_results))
+    noise_vals = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
+    n_noise    = len(noise_vals)
 
     colours = plt.colormaps["viridis"](np.linspace(0.15, 0.85, n_noise))
 
-    fig, axes = plt.subplots(n_carriers, 3,
-                             figsize=(15, 4.5 * n_carriers),
-                             squeeze=False)
-    fig.suptitle("Parameter Sweep: Performance vs Input Backoff (IBO)")
+    fig, (ax_ber, ax_evm, ax_db) = plt.subplots(1, 3, figsize=(15, 4.5))
+    fig.suptitle(f"Detector Sweep: {carrier_name} — Performance vs Input Backoff (IBO)")
+    ax_ber.set_title(f"{carrier_name}  —  BER")
+    ax_evm.set_title(f"{carrier_name}  —  EVM (%)")
+    ax_db.set_title(f"{carrier_name}  —  CNR / CIR / CNIR (dB)")
 
-    for row, cname in enumerate(carrier_names):
-        ax_ber, ax_evm, ax_db = axes[row]
-        ax_ber.set_title(f"{cname}  —  BER")
-        ax_evm.set_title(f"{cname}  —  EVM (%)")
-        ax_db.set_title(f"{cname}  —  CNR / CIR / CNIR (dB)")
+    for ni, noise in enumerate(noise_vals):
+        pts = sorted(
+            [r for r in sweep_results if r["noise_density_dbfs"] == noise],
+            key=lambda r: r["ibo_db"])
+        ibos = [p["ibo_db"] for p in pts]
+        cdata = [[cr for cr in p["carriers"] if cr["name"] == carrier_name][0]
+                 for p in pts]
 
-        for ni, noise in enumerate(noise_vals):
-            pts = sorted(
-                [r for r in sweep_results if r["noise_density_dbfs"] == noise],
-                key=lambda r: r["ibo_db"])
-            ibos = [p["ibo_db"] for p in pts]
-            cdata = [[cr for cr in p["carriers"] if cr["name"] == cname][0]
-                     for p in pts]
+        # BER — use NaN for zero so semilogy skips those points cleanly
+        bers = [cd["ber"] if (cd["ber"] is not None and cd["ber"] > 0)
+                else np.nan for cd in cdata]
 
-            # BER — use NaN for zero so semilogy skips those points cleanly
-            bers = [cd["ber"] if (cd["ber"] is not None and cd["ber"] > 0)
-                    else np.nan for cd in cdata]
+        evms  = [cd["evm_rms"] for cd in cdata]
+        cnrs  = [cd["cnr_db"]  if np.isfinite(cd["cnr_db"])  else np.nan for cd in cdata]
+        cirs  = [cd["cir_db"]  if np.isfinite(cd["cir_db"])  else np.nan for cd in cdata]
+        cnirs = [cd["cnir_db"] if np.isfinite(cd["cnir_db"]) else np.nan for cd in cdata]
 
-            evms  = [cd["evm_rms"] for cd in cdata]
-            cnrs  = [cd["cnr_db"]  if np.isfinite(cd["cnr_db"])  else np.nan for cd in cdata]
-            cirs  = [cd["cir_db"]  if np.isfinite(cd["cir_db"])  else np.nan for cd in cdata]
-            cnirs = [cd["cnir_db"] if np.isfinite(cd["cnir_db"]) else np.nan for cd in cdata]
+        col   = colours[ni]
+        label = f"{noise:.0f} dBFS/Hz"
+        kw    = dict(marker="o", ms=4, color=col)
 
-            col   = colours[ni]
-            label = f"{noise:.0f} dBFS/Hz"
-            kw    = dict(marker="o", ms=4, color=col)
+        ax_ber.semilogy(ibos, bers, label=label, **kw)
+        ax_evm.plot(ibos, evms, label=label, **kw)
+        ax_db.plot(ibos, cnrs,  ls="-",  label=f"CNR  {label}", **kw)
+        ax_db.plot(ibos, cirs,  ls="--", label=f"CIR  {label}",
+                   marker="s", ms=4, color=col)
+        ax_db.plot(ibos, cnirs, ls=":",  label=f"CNIR {label}",
+                   marker="^", ms=4, color=col)
 
-            ax_ber.semilogy(ibos, bers, label=label, **kw)
-            ax_evm.plot(ibos, evms, label=label, **kw)
-            ax_db.plot(ibos, cnrs,  ls="-",  label=f"CNR  {label}", **kw)
-            ax_db.plot(ibos, cirs,  ls="--", label=f"CIR  {label}",
-                       marker="s", ms=4, color=col)
-            ax_db.plot(ibos, cnirs, ls=":",  label=f"CNIR {label}",
-                       marker="^", ms=4, color=col)
+    ax_ber.set_ylabel("BER")
+    ax_evm.set_ylabel("EVM (%)")
+    ax_db.set_ylabel("dB")
+    for ax in (ax_ber, ax_evm, ax_db):
+        ax.set_xlabel("IBO (dB)")
+        if min(ibo_vals) < max(ibo_vals):
+            ax.set_xlim(min(ibo_vals), max(ibo_vals))
+        ax.grid(True, which="both", alpha=0.4)
+        ax.legend(fontsize=7)
 
-        ax_ber.set_ylabel("BER")
-        ax_evm.set_ylabel("EVM (%)")
-        ax_db.set_ylabel("dB")
-        for ax in (ax_ber, ax_evm, ax_db):
-            ax.set_xlabel("IBO (dB)")
-            if min(ibo_vals) < max(ibo_vals):
-                ax.set_xlim(min(ibo_vals), max(ibo_vals))
-            ax.grid(True, which="both", alpha=0.4)
-            ax.legend(fontsize=7)
-
-        # Annotate zero-BER points with a downward arrow at the plot bottom
-        for ni, noise in enumerate(noise_vals):
-            pts = sorted(
-                [r for r in sweep_results if r["noise_density_dbfs"] == noise],
-                key=lambda r: r["ibo_db"])
-            for p in pts:
-                cdata_pt = next(cr for cr in p["carriers"] if cr["name"] == cname)
-                if cdata_pt["ber"] == 0 or cdata_pt["ber"] is None:
-                    ax_ber.annotate("", xy=(p["ibo_db"], ax_ber.get_ylim()[0]),
-                                    xytext=(p["ibo_db"], ax_ber.get_ylim()[0] * 3),
-                                    arrowprops=dict(arrowstyle="->",
-                                                    color=colours[ni], lw=1.2))
+    # Annotate zero-BER points with a downward arrow at the plot bottom
+    for ni, noise in enumerate(noise_vals):
+        pts = sorted(
+            [r for r in sweep_results if r["noise_density_dbfs"] == noise],
+            key=lambda r: r["ibo_db"])
+        for p in pts:
+            cdata_pt = next(cr for cr in p["carriers"] if cr["name"] == carrier_name)
+            if cdata_pt["ber"] == 0 or cdata_pt["ber"] is None:
+                ax_ber.annotate("", xy=(p["ibo_db"], ax_ber.get_ylim()[0]),
+                                xytext=(p["ibo_db"], ax_ber.get_ylim()[0] * 3),
+                                arrowprops=dict(arrowstyle="->",
+                                                color=colours[ni], lw=1.2))
 
     plt.tight_layout()
     if save_path is not None:

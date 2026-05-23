@@ -1,7 +1,7 @@
 """Tests for sim.plots text-output and helper functions.
 
 Covers: psd_db, _fmt_metric, _enabled_carrier_names, write_report,
-        plot_sweep_results.
+        plot_carrier_detector.
 Rendering functions (plot_*) are mostly exercised indirectly through
 test_main.py; here we add the targeted no-data / single-IBO paths.
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sim.plots import (
     psd_db,
-    plot_sweep_results,
+    plot_carrier_detector,
     write_report,
     _fmt_metric,
     _enabled_carrier_names,
@@ -80,19 +80,25 @@ def test_enabled_carrier_names_no_finite_data():
     assert _enabled_carrier_names(_SWEEP_NAN) == []
 
 
-def test_plot_sweep_results_empty_carriers_early_return():
-    """plot_sweep_results returns before creating any figure when all carriers
-    have non-finite metrics (carrier_names is empty)."""
-    plot_sweep_results(_SWEEP_NAN, save_path=None)
+def test_plot_carrier_detector_no_data_early_return():
+    """plot_carrier_detector returns before creating any figure when the named
+    carrier has non-finite metrics across the sweep."""
+    plot_carrier_detector(_SWEEP_NAN, "c1", save_path=None)
 
 
-def test_plot_sweep_results_single_ibo():
-    """plot_sweep_results with a single IBO value skips set_xlim rather than
+def test_plot_carrier_detector_unknown_carrier_early_return():
+    """plot_carrier_detector returns silently when asked for a carrier that is
+    not in the sweep results at all."""
+    plot_carrier_detector(_SWEEP_FINITE, "missing", save_path=None)
+
+
+def test_plot_carrier_detector_single_ibo():
+    """plot_carrier_detector with a single IBO value skips set_xlim rather than
     triggering the 'identical low and high xlims' UserWarning."""
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        plot_sweep_results(_SWEEP_FINITE, save_path=None)
+        plot_carrier_detector(_SWEEP_FINITE, "c1", save_path=None)
 
 
 # ── write_report ──────────────────────────────────────────────────────────────

@@ -59,9 +59,9 @@ def build_toml(cfg: dict) -> str:
     ln()
 
     o = cfg.get("output", {})
-    ln("[output]");  kv("output_dir", o.get("output_dir", "."), 10)
-    for k in ("wideband", "nl_tables", "sweep", "report"):
-        if o.get(k): kv(k, o[k], 18)
+    ln("[output]")
+    kv("output_dir", o.get("output_dir", "."), 10)
+    kv("plots     ", bool(o.get("plots", True)))
     ln()
 
     for carr in cfg.get("carrier", []):
@@ -186,8 +186,6 @@ class CarrierFrame(ttk.LabelFrame):
          "Maximum deviation from linear phase across the carrier bandwidth (degrees)."),
         ("phase_poly_order",  "Phase Poly Order", "int",   "2",
          "Order of the polynomial used to model the phase-vs-frequency distortion."),
-        ("plot",              "Plot Filename",    "str",   "",
-         "Filename for the channel response plot. Leave blank to skip."),
     ]
 
     def __init__(self, parent, on_remove, data: dict, **kw):
@@ -366,7 +364,7 @@ class App:
         self.root      = root
         self.path      = path
         self._carriers: list[CarrierFrame] = []
-        self._vars:     dict[str, tk.StringVar] = {}
+        self._vars:     dict[str, tk.Variable] = {}
         self._texts:    dict[str, tk.Text] = {}
         self._proc     = None
         self._log_file = None
@@ -540,25 +538,23 @@ class App:
              tip="Comma-separated noise density values to sweep (dBFS/Hz).\n"
                  "Example: -140.0, -130.0, -120.0"); r += 1
 
-        r = self._section(f, "Output Files", r)
+        r = self._section(f, "Output", r)
         _lf(f, "Output Directory:", r, 0)
         row_frame = ttk.Frame(f)
         row_frame.grid(row=r, column=1, sticky="w");  r += 1
         _ent(row_frame, self._sv("out.dir"), 0, 0, width=28)
         ttk.Button(row_frame, text="Browse…", command=self._browse_out_dir,
                    width=8).grid(row=0, column=1, padx=4)
-        for label, key, tip in (
-            ("Wideband plot:",    "out.wideband",
-             "PNG filename for the wideband composite PSD plot."),
-            ("NL tables plot:",  "out.nl_tables",
-             "PNG filename for the AM-AM / AM-PM nonlinearity table plots."),
-            ("Sweep plot:",      "out.sweep",
-             "PNG filename for the 2D IBO × noise BER sweep heatmap."),
-            ("Report:",          "out.report",
-             "Markdown filename for the flat (carrier, IBO, noise) results table."),
-        ):
-            _lf(f, label, r, 0)
-            _ent(f, self._sv(key), r, 1, tip=tip);  r += 1
+
+        plots_var = tk.BooleanVar(value=True)
+        self._vars["out.plots"] = plots_var
+        cb = ttk.Checkbutton(f, text="Generate plots", variable=plots_var)
+        cb.grid(row=r, column=0, columnspan=2, sticky="w", pady=(6, 0));  r += 1
+        _Tip(cb,
+             "When checked, the simulation writes wideband.png, amplifier.png,\n"
+             "<carrier>_detector.png for each detector carrier, and\n"
+             "<carrier>_channel.png for each carrier with channel impairments.\n"
+             "report.md is always written.")
         f.columnconfigure(1, weight=1)
 
     def _build_carriers_tab(self, nb):
@@ -654,10 +650,7 @@ class App:
 
         o = cfg.get("output", {})
         self._vars["out.dir"].set(o.get("output_dir", "."))
-        self._vars["out.wideband"].set(o.get("wideband", ""))
-        self._vars["out.nl_tables"].set(o.get("nl_tables", ""))
-        self._vars["out.sweep"].set(o.get("sweep", ""))
-        self._vars["out.report"].set(o.get("report", ""))
+        self._vars["out.plots"].set(bool(o.get("plots", True)))
 
         for cf in self._carriers: cf.destroy()
         self._carriers.clear()
@@ -665,7 +658,7 @@ class App:
             self._add_carrier(carr)
 
     def _collect(self) -> dict:
-        def sv(key): return self._vars[key].get().strip()
+        def sv(key): return str(self._vars[key].get()).strip()
         def fv(key): return float(sv(key))
         def iv(key): return int(float(sv(key)))
         def tv(key): return _parse_float_list(self._texts[key].get("1.0", "end"))
@@ -682,15 +675,11 @@ class App:
                 "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
             },
             "ola":    {"filter_span": iv("ola.filter_span"), "block_size": iv("ola.block_size")},
-            "output": {"output_dir": sv("out.dir") or "."},
+            "output": {
+                "output_dir": sv("out.dir") or ".",
+                "plots":      bool(self._vars["out.plots"].get()),
+            },
         }
-
-        for k, vk in (("wideband",   "out.wideband"),
-                      ("nl_tables",  "out.nl_tables"),
-                      ("sweep",      "out.sweep"),
-                      ("report",     "out.report")):
-            val = sv(vk)
-            if val: cfg["output"][k] = val
 
         cfg["carrier"] = [cf.to_dict() for cf in self._carriers]
         return cfg

@@ -1,15 +1,15 @@
 # Project State
 
-Last updated: 2026-05-22, commit d7ae2b8
+Last updated: 2026-05-23, after UI streamlining (fixed plot filenames + single plots toggle)
 
 ---
 
 ## Current code quality
 
-- **Tests:** 180 passing, 0 failing
+- **Tests:** 182 passing, 0 failing
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
-- **Coverage:** 100% across all modules (1253 statements, 0 missed)
+- **Coverage:** 100% across all modules (1163 statements, 0 missed)
 - **Branch:** master, up to date with origin/master
 
 ---
@@ -50,6 +50,25 @@ Wiring in simulation.py:
 Config: [carrier.coding] block with scheme, block_length (conv/turbo), matrix (ldpc), num_frames
 
 BER seeker (sim/targeter.py) removed. Implementation loss now computed from single fixed-noise run.
+
+---
+
+## Output files (fixed names; no longer configurable)
+
+Written to `[output].output_dir`. The `[output].plots` boolean (default true)
+gates all image outputs; `report.md` is always written when any carrier has
+`sweep_demod = true`.
+
+- `wideband.png` — composite wideband PSD
+- `amplifier.png` — AM-AM / AM-PM table plot (formerly `amplifier_nl.png`)
+- `<name>_detector.png` — per-carrier BER / EVM / CNR sweep, one per `sweep_demod=true` carrier
+- `<name>_channel.png` — per-carrier channel impairment response, one per carrier with `[carrier.channel]`
+- `report.md` — flat (carrier, IBO, noise) results table
+
+`<name>` is the carrier name with spaces replaced by underscores.
+
+The GUI's "Sweep & Output" tab has a single "Generate plots" checkbox controlling
+all images. There are no longer per-file filename entries.
 
 ---
 

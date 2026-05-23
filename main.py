@@ -13,7 +13,7 @@ from sim.config import load_config
 from sim.modulation import bits_per_symbol
 from sim.theory import ebn0_for_ber
 from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
-                       print_metrics_table, plot_sweep_results, write_report)
+                       print_metrics_table, plot_carrier_detector, write_report)
 from sim.sweep import parameter_sweep
 
 _ProgressCB = Callable[[float, str], None] | None
@@ -48,9 +48,13 @@ def main(config_path: str = "simulation.toml",
 
     out_dir = Path(out.get("output_dir", "."))
     out_dir.mkdir(exist_ok=True)
+    plots_enabled = out.get("plots", True)
 
-    def out_path(name: str | None) -> str | None:
-        return str(out_dir / name) if name else None
+    def plot_path(name: str) -> str | None:
+        return str(out_dir / name) if plots_enabled else None
+
+    def carrier_slug(name: str) -> str:
+        return name.replace(" ", "_")
 
     sample_rate = sweep_cfg["sample_rate"]
     ibo_sweep   = sweep_cfg["ibo_db"]
@@ -97,27 +101,32 @@ def main(config_path: str = "simulation.toml",
     print_metrics_table(first_sim["carriers"])
 
     # ── Plots / reports ───────────────────────────────────────────────────────
-    _prog(_P_sweep_end + _PLOT_FRAC * 0.2, "Saving wideband PSD plot "
-          f"(IBO={ibo_sweep[0]:.1f} dB, noise={noise_sweep[0]:.1f} dBFS/Hz)...")
-    plot_wideband_results(first_sim, sample_rate=sample_rate,
-                          save_path=out_path(out.get("wideband")))
+    if plots_enabled:
+        _prog(_P_sweep_end + _PLOT_FRAC * 0.2, "Saving wideband PSD plot "
+              f"(IBO={ibo_sweep[0]:.1f} dB, noise={noise_sweep[0]:.1f} dBFS/Hz)...")
+        plot_wideband_results(first_sim, sample_rate=sample_rate,
+                              save_path=plot_path("wideband.png"))
 
-    plot_nl_tables(amp["am_am"], amp["am_pm"],
-                   input_backoff_db=ibo_sweep[0],
-                   save_path=out_path(out.get("nl_tables")))
+        plot_nl_tables(amp["am_am"], amp["am_pm"],
+                       input_backoff_db=ibo_sweep[0],
+                       save_path=plot_path("amplifier.png"))
 
-    for carr in active_carriers:
-        ch_cfg = carr.get("channel")
-        if ch_cfg and ch_cfg.get("enabled", True):
-            native_rate = carr["sps"] * carr["symbol_rate"]
-            signal_bw   = (1 + carr["rolloff"]) * carr["symbol_rate"]
-            plot_channel_response(
-                native_rate, signal_bw, ch_cfg,
-                title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
-                save_path=out_path(ch_cfg.get("plot")),
+        for carr in active_carriers:
+            ch_cfg = carr.get("channel")
+            if ch_cfg and ch_cfg.get("enabled", True):
+                native_rate = carr["sps"] * carr["symbol_rate"]
+                signal_bw   = (1 + carr["rolloff"]) * carr["symbol_rate"]
+                plot_channel_response(
+                    native_rate, signal_bw, ch_cfg,
+                    title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
+                    save_path=plot_path(f"{carrier_slug(carr['name'])}_channel.png"),
+                )
+
+        for cname in demod_names:
+            plot_carrier_detector(
+                sweep_results, cname,
+                save_path=plot_path(f"{carrier_slug(cname)}_detector.png"),
             )
-
-    plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
 
     # ── Per-point report rows ─────────────────────────────────────────────────
     # Each (ibo, noise) point becomes a row per demodulated carrier; effective
@@ -156,7 +165,7 @@ def main(config_path: str = "simulation.toml",
             ))
 
     if report_rows:
-        report_path = out_path(out.get("report", "report.md"))
+        report_path = str(out_dir / "report.md")
         write_report(report_rows, report_path)
         _prog(0.99, f"Report written -> {report_path}")
 

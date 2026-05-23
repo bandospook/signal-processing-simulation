@@ -209,7 +209,8 @@ def plot_sweep_results(sweep_results: list[dict],
         ax_db.set_ylabel("dB")
         for ax in (ax_ber, ax_evm, ax_db):
             ax.set_xlabel("IBO (dB)")
-            ax.set_xlim(min(ibo_vals), max(ibo_vals))
+            if min(ibo_vals) < max(ibo_vals):
+                ax.set_xlim(min(ibo_vals), max(ibo_vals))
             ax.grid(True, which="both", alpha=0.4)
             ax.legend(fontsize=7)
 

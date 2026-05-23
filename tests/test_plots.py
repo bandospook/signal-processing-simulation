@@ -87,6 +87,15 @@ def test_plot_sweep_results_empty_carriers_early_return():
     plot_sweep_results(_SWEEP_NAN, save_path=None)
 
 
+def test_plot_sweep_results_single_ibo():
+    """plot_sweep_results with a single IBO value skips set_xlim rather than
+    triggering the 'identical low and high xlims' UserWarning."""
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        plot_sweep_results(_SWEEP_FINITE, save_path=None)
+
+
 # ── write_sweep_report ────────────────────────────────────────────────────────
 
 _CFG = {

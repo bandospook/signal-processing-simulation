@@ -100,8 +100,8 @@ def test_plot_sweep_results_single_ibo():
 
 _CFG = {
     "simulation": {"seed": 42},
-    "wideband": {"sample_rate": 16e6, "noise_density_dbfs": -160.0},
-    "amplifier": {"input_backoff_db": 3.0},
+    "sweep": {"sample_rate": 16e6, "ibo_db": [3.0], "noise_density_dbfs": [-160.0]},
+    "amplifier": {},
     "ola": {"filter_span": 8, "block_size": 1024},
     "carrier": [
         {"name": "c1", "symbol_rate": 1e6, "sps": 4,
@@ -134,57 +134,57 @@ def test_write_sweep_report_no_finite_carriers(tmp_path):
 
 # ── write_detector_results ────────────────────────────────────────────────────
 
-_FIXED = {
-    "c1": dict(mode="fixed", noise_density_dbfs=-160.0, ber=0.0,
-               ber_ci_lo=None, ber_ci_hi=None, effective_ebn0_db=12.0,
-               theory_ebn0_db=None, implementation_loss_db=None,
-               cnr_db=80.0, cir_db=40.0, cnir_db=40.0, evm_rms=3.0,
-               n_bits_total=None, n_iter=None),
-}
+_ROWS_NO_THEORY = [
+    dict(name="c1", ibo_db=3.0, noise_density_dbfs=-160.0, ber=0.0,
+         effective_ebn0_db=12.0, theory_ebn0_db=None,
+         implementation_loss_db=None, cnr_db=80.0, cir_db=40.0, cnir_db=40.0,
+         evm_rms=3.0),
+]
 
-_WITH_CI = {
-    "c1": dict(mode="fixed", noise_density_dbfs=-120.0, ber=0.01,
-               ber_ci_lo=0.008, ber_ci_hi=0.012, effective_ebn0_db=9.5,
-               theory_ebn0_db=9.4, implementation_loss_db=0.1,
-               cnr_db=60.0, cir_db=40.0, cnir_db=39.9, evm_rms=5.0,
-               n_bits_total=1500, n_iter=None),
-}
+_ROWS_WITH_THEORY = [
+    dict(name="c1", ibo_db=3.0, noise_density_dbfs=-120.0, ber=0.01,
+         effective_ebn0_db=9.5, theory_ebn0_db=9.4,
+         implementation_loss_db=0.1, cnr_db=60.0, cir_db=40.0, cnir_db=39.9,
+         evm_rms=5.0),
+]
 
 
 def test_write_detector_results_no_path():
     """save_path=None → early return."""
-    write_detector_results(_FIXED, save_path=None)
+    write_detector_results(_ROWS_NO_THEORY, save_path=None)
 
 
 def test_write_detector_results_empty():
-    """Empty results dict → early return."""
-    write_detector_results({}, save_path="irrelevant.md")
+    """Empty rows list → early return."""
+    write_detector_results([], save_path="irrelevant.md")
 
 
-def test_write_detector_results_fixed(tmp_path):
-    """Fixed-noise result: theory=None formats as em-dash."""
+def test_write_detector_results_basic(tmp_path):
+    """Row with theory=None formats those columns as em-dash; IBO column included."""
     path = str(tmp_path / "det.md")
-    write_detector_results(_FIXED, save_path=path)
+    write_detector_results(_ROWS_NO_THEORY, save_path=path)
     text = Path(path).read_text(encoding="utf-8")
     assert "Detector Results" in text
-    assert "fixed" in text
-    assert "—" in text          # theory_ebn0_db is None
+    assert "IBO (dB)" in text     # new column header
+    assert "| 3.0" in text        # ibo_db value formatted
+    assert "—" in text            # theory_ebn0_db is None
 
 
-def test_write_detector_results_with_ci(tmp_path):
-    """CI bounds and bit count format correctly in output."""
+def test_write_detector_results_with_theory(tmp_path):
+    """Row with theory and impl-loss values formats them as floats."""
     path = str(tmp_path / "det.md")
-    write_detector_results(_WITH_CI, save_path=path)
+    write_detector_results(_ROWS_WITH_THEORY, save_path=path)
     text = Path(path).read_text(encoding="utf-8")
-    assert "8.00e-03" in text   # ber_ci_lo
-    assert "1,500" in text      # n_bits_total formatted with comma
+    assert "1.00e-02" in text     # BER scientific notation
+    assert "9.40" in text         # theory_ebn0_db
+    assert "0.10" in text         # implementation_loss_db
 
 
 def test_write_detector_results_inf_cnr(tmp_path):
     """Infinite CNR value is formatted as ∞."""
-    results = {"c1": dict(_FIXED["c1"], cnr_db=float("inf"))}
+    rows = [dict(_ROWS_NO_THEORY[0], cnr_db=float("inf"))]
     path = str(tmp_path / "det.md")
-    write_detector_results(results, save_path=path)
+    write_detector_results(rows, save_path=path)
     assert "∞" in Path(path).read_text(encoding="utf-8")
 
 
@@ -192,7 +192,7 @@ def test_write_detector_results_append(tmp_path):
     """append=True adds content after existing file text."""
     path = str(tmp_path / "det.md")
     Path(path).write_text("existing\n", encoding="utf-8")
-    write_detector_results(_FIXED, save_path=path, append=True)
+    write_detector_results(_ROWS_NO_THEORY, save_path=path, append=True)
     text = Path(path).read_text(encoding="utf-8")
     assert text.startswith("existing")
     assert "Detector Results" in text
@@ -201,9 +201,9 @@ def test_write_detector_results_append(tmp_path):
 # ── write_sweep_report: multi-carrier and missing-carrier paths ───────────────
 
 # Two-carrier sweep where:
-#   - c2 is absent from the second result  →  cr=None continue (lines 359, 395)
-#   - c1 has evm_rms=None everywhere       →  "no data" line (line 367)
-#   - two carriers in carrier_names        →  per-carrier sub-headers (lines 386-387)
+#   - c2 is absent from the second result  →  cr=None continue paths
+#   - c1 has evm_rms=None everywhere       →  "no data" line
+#   - two carriers in carrier_names        →  per-carrier sub-headers
 _SWEEP_MULTI = [
     {"ibo_db": 3.0, "noise_density_dbfs": -160.0,
      "carriers": [
@@ -222,8 +222,8 @@ _SWEEP_MULTI = [
 
 _CFG_MULTI = {
     "simulation": {"seed": 42},
-    "wideband": {"sample_rate": 16e6, "noise_density_dbfs": -160.0},
-    "amplifier": {"input_backoff_db": 3.0},
+    "sweep": {"sample_rate": 16e6, "ibo_db": [3.0, 6.0], "noise_density_dbfs": [-160.0]},
+    "amplifier": {},
     "ola": {"filter_span": 8, "block_size": 1024},
     "carrier": [
         {"name": "c1", "symbol_rate": 1e6, "sps": 4,
@@ -240,6 +240,6 @@ def test_write_sweep_report_multi_carrier(tmp_path):
     path = str(tmp_path / "report.md")
     write_sweep_report(_SWEEP_MULTI, _CFG_MULTI, save_path=path)
     text = Path(path).read_text(encoding="utf-8")
-    assert "### c1" in text          # per-carrier sub-header (line 386)
+    assert "### c1" in text
     assert "### c2" in text
-    assert "no data" in text         # EVM has no values for c1 (line 367)
+    assert "no data" in text         # EVM has no values for c1

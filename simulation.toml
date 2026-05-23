@@ -1,12 +1,10 @@
 [simulation]
 seed = 42
 
-[wideband]
+[sweep]
 sample_rate        = 500
-noise_density_dbfs = -80
-
-[amplifier]
-input_backoff_db = 3
+ibo_db             = [0]
+noise_density_dbfs = [-85, -83, -81, -79]
 
 [amplifier.am_am]
 input  = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -21,16 +19,12 @@ filter_span  = 16
 block_size   = 4_096
 
 [output]
-output_dir = "output"
+output_dir         = "output"
 wideband           = "wideband.png"
 nl_tables          = "amplifier_nl.png"
 sweep              = "sweep_results.png"
 sweep_table        = "sweep_table.md"
 detector_results   = "detector_table.md"
-
-[sweep]
-ibo_db             = [0]
-noise_density_dbfs = [-85, -83, -81, -79]
 
 [[carrier]]
 name         = "slow"
@@ -44,7 +38,6 @@ power_db     = 0
 freq         = -200
 enabled      = false
 sweep_demod  = false
-use_seeker   = false
 
 [[carrier]]
 name         = "fast"

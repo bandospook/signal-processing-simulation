@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 
 from sim.config import load_config
 from sim.modulation import bits_per_symbol
-from sim.simulation import wideband_bpsk_simulation
 from sim.theory import ebn0_for_ber
 from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
                        print_metrics_table, plot_sweep_results, write_sweep_report,
@@ -23,7 +22,13 @@ _ProgressCB = Callable[[float, str], None] | None
 
 def main(config_path: str = "simulation.toml",
          progress_callback: _ProgressCB = None) -> None:
-    """Load config, run wideband simulation, and save results."""
+    """Load config, run the parameter sweep, and save plots/reports.
+
+    The sweep is the sole simulation driver: every (IBO, noise) point runs the
+    full chunk pipeline (including per-carrier demod for `sweep_demod` carriers).
+    The first sweep point's wideband result feeds the PSD plot; subsequent
+    points contribute rows to the sweep table and detector_results.
+    """
     plt.close("all")
 
     def _prog(frac: float, msg: str) -> None:
@@ -36,7 +41,7 @@ def main(config_path: str = "simulation.toml",
     cfg = load_config(config_path)
 
     active_carriers = [c for c in cfg["carrier"] if c.get("enabled", True)]
-    wb  = cfg["wideband"]
+    sweep_cfg = cfg["sweep"]
     amp = cfg["amplifier"]
     ola = cfg["ola"]
     sim = cfg["simulation"]
@@ -48,52 +53,58 @@ def main(config_path: str = "simulation.toml",
     def out_path(name: str | None) -> str | None:
         return str(out_dir / name) if name else None
 
-    # Only carriers with sweep_demod=True are downsampled and analyzed.
-    # Others contribute to the composite NL environment but skip the costly demod step.
+    sample_rate = sweep_cfg["sample_rate"]
+    ibo_sweep   = sweep_cfg["ibo_db"]
+    noise_sweep = sweep_cfg["noise_density_dbfs"]
+    if not ibo_sweep or not noise_sweep:
+        raise ValueError("[sweep].ibo_db and [sweep].noise_density_dbfs must each "
+                         "contain at least one value.")
+
+    n_sweep   = len(ibo_sweep) * len(noise_sweep)
     demod_names = {c["name"] for c in active_carriers if c.get("sweep_demod", False)}
 
     # ── Progress fractions ────────────────────────────────────────────────────
-    # Assumption: each sweep point costs ~1 wideband simulation.
-    # Budget from SIM_START to the seeker boundary (or near-end if no seeker).
-    sweep_cfg   = cfg.get("sweep", {})
-    ibo_sweep   = sweep_cfg.get("ibo_db", [])
-    noise_sweep = sweep_cfg.get("noise_density_dbfs", [])
-    n_sweep     = len(ibo_sweep) * len(noise_sweep) if (ibo_sweep and noise_sweep) else 0
-
-    _SIM_START  = 0.05
-    _PLOT_FRAC  = 0.03
-    _unit       = (0.94 - _SIM_START - _PLOT_FRAC) / (1 + n_sweep)
-    _P_sim_done   = _SIM_START + _unit
-    _P_plots_done = _P_sim_done + _PLOT_FRAC
+    _SWEEP_START = 0.05
+    _PLOT_FRAC   = 0.05
+    _unit        = (0.95 - _SWEEP_START - _PLOT_FRAC) / n_sweep
+    _P_sweep_end = _SWEEP_START + _unit * n_sweep
 
     def _chunk_print(msg: str) -> None:
         print(f"        {msg}", flush=True)
 
-    _prog(0.05, f"Running wideband simulation ({len(active_carriers)} carriers, "
-          f"{len(demod_names)} demodulated)...")
-    results = wideband_bpsk_simulation(
-        carriers           = active_carriers,
-        sample_rate        = wb["sample_rate"],
-        am_am_cfg          = amp["am_am"],
-        am_pm_cfg          = amp["am_pm"],
-        input_backoff_db   = amp["input_backoff_db"],
-        noise_density_dbfs = wb.get("noise_density_dbfs"),
-        ola_filter_span    = ola["filter_span"],
-        ola_block_size     = ola["block_size"],
-        seed               = sim["seed"],
-        demod_carriers     = demod_names if demod_names else None,
-        chunk_print        = _chunk_print,
+    _prog(_SWEEP_START, f"Running parameter sweep: {len(ibo_sweep)} IBO x "
+          f"{len(noise_sweep)} noise = {n_sweep} points "
+          f"({len(active_carriers)} carriers, {len(demod_names)} demodulated)...")
+
+    def _sweep_pt_cb(done: int, total: int) -> None:
+        _prog(_SWEEP_START + _unit * done,
+              f"Sweep: {done}/{total} points complete")
+
+    first_sim, sweep_results = parameter_sweep(
+        carriers                  = active_carriers,
+        sample_rate               = sample_rate,
+        am_am_cfg                 = amp["am_am"],
+        am_pm_cfg                 = amp["am_pm"],
+        ibo_db_values             = ibo_sweep,
+        noise_density_dbfs_values = noise_sweep,
+        ola_filter_span           = ola["filter_span"],
+        ola_block_size            = ola["block_size"],
+        seed                      = sim["seed"],
+        chunk_print               = _chunk_print,
+        point_cb                  = _sweep_pt_cb,
     )
 
-    _prog(_P_sim_done, "Wideband simulation complete.")
-    print_metrics_table(results["carriers"])
+    _prog(_P_sweep_end, "Sweep complete.")
+    print_metrics_table(first_sim["carriers"])
 
-    _prog(_P_sim_done + _PLOT_FRAC * 0.4, "Saving wideband PSD plot...")
-    plot_wideband_results(results, sample_rate=wb["sample_rate"],
+    # ── Plots / reports ───────────────────────────────────────────────────────
+    _prog(_P_sweep_end + _PLOT_FRAC * 0.2, "Saving wideband PSD plot "
+          f"(IBO={ibo_sweep[0]:.1f} dB, noise={noise_sweep[0]:.1f} dBFS/Hz)...")
+    plot_wideband_results(first_sim, sample_rate=sample_rate,
                           save_path=out_path(out.get("wideband")))
 
     plot_nl_tables(amp["am_am"], amp["am_pm"],
-                   input_backoff_db=amp["input_backoff_db"],
+                   input_backoff_db=ibo_sweep[0],
                    save_path=out_path(out.get("nl_tables")))
 
     for carr in active_carriers:
@@ -107,75 +118,48 @@ def main(config_path: str = "simulation.toml",
                 save_path=out_path(ch_cfg.get("plot")),
             )
 
-    _prog(_P_plots_done, "Plots saved.")
+    plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
+    write_sweep_report(sweep_results, cfg=cfg,
+                       save_path=out_path(out.get("sweep_table")))
 
-    if ibo_sweep and noise_sweep:
-        n_pts = len(ibo_sweep) * len(noise_sweep)
-        _prog(_P_plots_done, f"Running parameter sweep: {len(ibo_sweep)} IBO x "
-              f"{len(noise_sweep)} noise = {n_pts} points...")
+    # ── Per-point detector results ────────────────────────────────────────────
+    # Each (ibo, noise) point becomes a row per demodulated carrier; effective
+    # Eb/N0 and theoretical Eb/N0 are derived from the measured CNIR and BER.
+    detector_rows: list[dict] = []
+    for r in sweep_results:
+        ibo  = r["ibo_db"]
+        nd   = r["noise_density_dbfs"]
+        for carr in active_carriers:
+            if not carr.get("sweep_demod", False):
+                continue
+            cr = next((c for c in r["carriers"] if c["name"] == carr["name"]), None)
+            if cr is None:  # pragma: no cover  — sweep always returns every demod carrier
+                continue
+            mod = carr.get("modulation", "BPSK").upper()
+            bps = bits_per_symbol(mod)
+            sps = int(carr.get("sps", 4))
+            cnir_db  = cr["cnir_db"]
+            eff_ebn0 = cnir_db + 10.0 * math.log10(sps / bps)
+            ber_val  = cr.get("ber")
+            theory   = ebn0_for_ber(mod, ber_val) if (ber_val is not None and ber_val > 0) else None
+            impl_loss = (eff_ebn0 - theory) if theory is not None else None
+            detector_rows.append(dict(
+                name=carr["name"],
+                ibo_db=ibo,
+                noise_density_dbfs=nd,
+                ber=ber_val,
+                effective_ebn0_db=eff_ebn0,
+                theory_ebn0_db=theory,
+                implementation_loss_db=impl_loss,
+                cnr_db=cr["cnr_db"],
+                cir_db=cr["cir_db"],
+                cnir_db=cnir_db,
+                evm_rms=cr.get("evm_rms"),
+            ))
 
-        def _sweep_pt_cb(done: int, total: int) -> None:
-            _prog(_P_plots_done + _unit * done,
-                  f"Sweep: {done}/{total} points complete")
-
-        sweep_results = parameter_sweep(
-            carriers                  = active_carriers,
-            sample_rate               = wb["sample_rate"],
-            am_am_cfg                 = amp["am_am"],
-            am_pm_cfg                 = amp["am_pm"],
-            ibo_db_values             = ibo_sweep,
-            noise_density_dbfs_values = noise_sweep,
-            ola_filter_span           = ola["filter_span"],
-            ola_block_size            = ola["block_size"],
-            seed                      = sim["seed"],
-            chunk_print               = _chunk_print,
-            point_cb                  = _sweep_pt_cb,
-        )
-        plot_sweep_results(sweep_results, save_path=out_path(out.get("sweep")))
-        write_sweep_report(sweep_results, cfg=cfg,
-                           save_path=out_path(out.get("sweep_table")))
-        _prog(_P_plots_done + _unit * n_sweep, "Sweep complete.")
-
-    # ── Fixed-noise demod carriers ──────────────────────────────────────────
-    # Carriers with sweep_demod=True were demodulated in the main wideband run.
-    # Extract their stats and compute effective Eb/N0 from the CNIR measurement.
-    noise_dbfs = wb.get("noise_density_dbfs")
-    fixed_demod = [c for c in active_carriers if c.get("sweep_demod", False)]
-    fixed_results: dict[str, dict] = {}
-    for carr in fixed_demod:
-        cr = next((r for r in results["carriers"] if r["name"] == carr["name"]), None)
-        if cr is None:  # pragma: no cover  — simulation always returns every active carrier
-            continue
-        mod = carr.get("modulation", "BPSK").upper()
-        bps = bits_per_symbol(mod)
-        sps = int(carr.get("sps", 4))
-        cnir_db = cr["cnir_db"]
-        eff_ebn0 = cnir_db + 10.0 * math.log10(sps / bps)
-        ber_val  = cr.get("ber")
-        theory   = ebn0_for_ber(mod, ber_val) if (ber_val is not None and ber_val > 0) else None
-        impl_loss = (eff_ebn0 - theory) if theory is not None else None
-        fixed_results[carr["name"]] = dict(
-            mode="fixed",
-            noise_density_dbfs=noise_dbfs,
-            ber=ber_val,
-            ber_ci_lo=None,
-            ber_ci_hi=None,
-            effective_ebn0_db=eff_ebn0,
-            theory_ebn0_db=theory,
-            implementation_loss_db=impl_loss,
-            cnr_db=cr["cnr_db"],
-            cir_db=cr["cir_db"],
-            cnir_db=cnir_db,
-            evm_rms=cr.get("evm_rms"),
-            n_bits_total=None,
-            n_iter=None,
-        )
-
-    # ── Write detector results ───────────────────────────────────────────────
-    all_detector: dict[str, dict] = {**fixed_results}
-    if all_detector:
+    if detector_rows:
         det_path = out_path(out.get("detector_results", "detector_results.md"))
-        write_detector_results(all_detector, det_path)
+        write_detector_results(detector_rows, det_path)
         _prog(0.99, f"Detector results written -> {det_path}")
 
     _prog(1.00, "Done.")

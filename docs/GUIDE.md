@@ -157,15 +157,15 @@ python main.py
 ```
 
 This will:
-1. Print a per-carrier metrics table to the console, with progress indicators.
-2. Save PNG files into the `output/` directory (wideband PSD, amplifier curves,
-   channel responses).
-3. If `[sweep]` is configured, run the full IBO × noise grid and save
-   `sweep_results.png` and `sweep_table.md`.
-4. If any carriers have `sweep_demod = true`, write a `detector_results.md` with
-   BER, Eb/N0, and implementation loss. If `use_seeker = true`, the noise level is
-   found automatically by bisection; otherwise the globally configured noise level is
-   used.
+1. Run the full IBO × noise sweep configured in `[sweep]` (one or more points).
+2. Print a per-carrier metrics table to the console for the first sweep point,
+   with progress indicators throughout.
+3. Save PNG files into the `output/` directory: `wideband.png` from the first
+   sweep point, `amplifier_nl.png`, optional per-carrier channel responses, and
+   `sweep_results.png` (BER/EVM/CNR vs IBO across all noise values).
+4. Write `sweep_table.md` (config + per-point grid) and, if any carriers have
+   `sweep_demod = true`, `detector_results.md` (one row per `(IBO, noise, carrier)`
+   with BER, Eb/N0, and implementation loss).
 
 ### Step 4 — Use the GUI
 
@@ -252,18 +252,19 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 |---|---|---|
 | `seed` | int | Global random seed for reproducible symbol sequences and noise. |
 
-### `[wideband]`
+### `[sweep]`
+
+The sweep is the sole simulation driver: every (IBO, noise) combination is
+simulated end-to-end. Each list must contain at least one value.
 
 | Key | Type | Description |
 |---|---|---|
-| `sample_rate` | int (Hz) | Common sample rate for the composite signal. Must be an integer multiple of every carrier's native rate (`sps × symbol_rate`). |
-| `noise_density_dbfs` | float (dBFS/Hz) | One-sided AWGN PSD added **after** the amplifier. Total noise power = 10^(N₀/10) × sample_rate. Remove to disable noise. Used as the fixed noise level for carriers with `sweep_demod=true`. |
+| `sample_rate` | int (MHz in TOML → Hz internally) | Common sample rate for the composite signal. Must be ≥ every carrier's native rate (`sps × symbol_rate`). |
+| `ibo_db` | float list (dB) | IBO values to sweep. Drive level relative to amplifier saturation; 0 dB = full saturation. |
+| `noise_density_dbfs` | float list (dBFS/Hz) | One-sided AWGN PSD values added **after** the amplifier. Total noise power per point = 10^(N₀/10) × sample_rate. |
 
-### `[amplifier]`
-
-| Key | Type | Description |
-|---|---|---|
-| `input_backoff_db` | float (dB) | Peak drive level relative to saturation. 0 dB = full saturation; 3 dB = peak at 0.71 of saturation (typical). Higher = more linear, less efficient. |
+The first `(ibo_db[0], noise_density_dbfs[0])` point's wideband composite feeds
+the PSD plot; the full grid feeds the sweep table and `detector_results.md`.
 
 ### `[amplifier.am_am]` and `[amplifier.am_pm]`
 
@@ -290,15 +291,6 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 | `sweep` | Filename for the sweep results PNG. |
 | `sweep_table` | Filename for the sweep markdown report. |
 | `detector_results` | Filename for the detector-model results table (BER, Eb/N0, implementation loss). Defaults to `detector_results.md` if omitted. |
-
-### `[sweep]`
-
-Remove this section to disable the sweep. Both keys required to trigger a run.
-
-| Key | Description |
-|---|---|
-| `ibo_db` | List of IBO values (dB) to sweep. |
-| `noise_density_dbfs` | List of noise densities (dBFS/Hz) to sweep. |
 
 ### `[[carrier]]` (repeated block, one per carrier)
 
@@ -725,22 +717,16 @@ optional channel impairment, OLA upsampling, frequency shifting, composite forma
 nonlinear amplification, noise injection, and per-carrier extraction — before
 explaining how the C/N/I decomposition separates distortion from noise.
 
-The three execution paths are each documented in their own section:
+The execution model is unified: `[sweep]` (with `sample_rate`, `ibo_db`, and
+`noise_density_dbfs` lists) drives every run. A 1×1 sweep is a single-point
+simulation; larger grids fan out the full chunk pipeline at each combination.
+The first grid point's wideband composite feeds the PSD plot. Carriers with
+`sweep_demod = true` are demodulated at every grid point, producing one row
+per `(IBO, noise, carrier)` in `detector_results.md` with BER, effective Eb/N0,
+and implementation loss.
 
-- **Path A — fixed-noise demodulation** (`sweep_demod = true`): demodulates the
-  target carrier at the globally configured noise level from the main wideband run,
-  then computes effective Eb/N0 and implementation loss. Activates with no extra
-  configuration beyond enabling demodulation on a carrier.
-
-- **Path B — parameter sweep** (`[sweep]` section present with both `ibo_db` and
-  `noise_density_dbfs` arrays): re-runs the full wideband simulation at every point on
-  the IBO × noise grid and collects per-carrier BER, EVM, CNR, CIR, and CNIR.
-  Completely independent of the fixed-noise path.
-
-The document closes with a concise output-file table cross-referencing each file to
-the path that generates it, and worked example TOML snippets covering common
-scenarios from a minimal wideband-PSD-only run through a combined sweep + demod
-configuration.
+The document closes with a concise output-file table and worked example TOML
+snippets covering single-point, fixed-noise, and full sweep configurations.
 
 ---
 

@@ -18,10 +18,12 @@ _AM_PM = {
 def _make_cfg(tmp_path, extra_carriers=None):
     carriers = [
         dict(name="c1", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-             num_symbols=100, power_db=0.0, freq=-3e6,
+             num_symbols=100, power_db=0.0, freq=-3e6, sweep_demod=True,
              channel=dict(enabled=True, ripple_db=0.5, ripple_cycles=2.0,
                           max_phase_dev_deg=5.0, phase_poly_order=2,
                           plot="channel_c1.png")),
+        # c2 has sweep_demod=False (default): contributes to the composite but is
+        # not demodulated, exercising the skip branches in main.py and simulation.py.
         dict(name="c2", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
              num_symbols=100, power_db=0.0, freq=+3e6),
     ]
@@ -29,8 +31,12 @@ def _make_cfg(tmp_path, extra_carriers=None):
         carriers.extend(extra_carriers)
     return {
         "carrier": carriers,
-        "wideband": {"sample_rate": 16e6, "noise_density_dbfs": -160.0},
-        "amplifier": {"input_backoff_db": 3.0, "am_am": _AM_AM, "am_pm": _AM_PM},
+        "sweep": {
+            "sample_rate":        16e6,
+            "ibo_db":             [3.0, 6.0],
+            "noise_density_dbfs": [-160.0, -150.0],
+        },
+        "amplifier": {"am_am": _AM_AM, "am_pm": _AM_PM},
         "ola": {"filter_span": 8, "block_size": 1024},
         "simulation": {"seed": 42},
         "output": {
@@ -38,10 +44,6 @@ def _make_cfg(tmp_path, extra_carriers=None):
             "wideband":  "wideband.png",
             "nl_tables": "nl.png",
             "sweep":     "sweep.png",
-        },
-        "sweep": {
-            "ibo_db":             [3.0, 6.0],
-            "noise_density_dbfs": [-160.0, -150.0],
         },
     }
 
@@ -89,16 +91,28 @@ def test_main_fixed_demod_writes_detector_results(tmp_path):
     assert (tmp_path / "detector_results.md").exists()
 
 
+def test_main_raises_on_empty_sweep(tmp_path):
+    """main() rejects a config with no sweep points configured."""
+    cfg = _make_cfg(tmp_path)
+    cfg["sweep"]["ibo_db"] = []
+    with patch("main.load_config", return_value=cfg), \
+         patch("matplotlib.pyplot.show"):
+        try:
+            main_module.main()
+        except ValueError as e:
+            assert "sweep" in str(e).lower()
+            return
+        raise AssertionError("Expected ValueError for empty sweep")
+
 
 _MINIMAL_TOML = """\
 [simulation]
 seed = 99
 
-[wideband]
-sample_rate = 16
-
-[amplifier]
-input_backoff_db = 6.0
+[sweep]
+sample_rate        = 16
+ibo_db             = [6.0]
+noise_density_dbfs = [-160.0]
 
 [amplifier.am_am]
 input  = [0.0, 1.0]
@@ -135,8 +149,9 @@ def test_load_config(tmp_path):
     cfg = load_config(path)
 
     assert cfg["simulation"]["seed"] == 99
-    assert cfg["wideband"]["sample_rate"] == 16_000_000   # 16 MHz -> Hz
-    assert cfg["amplifier"]["input_backoff_db"] == 6.0
+    assert cfg["sweep"]["sample_rate"] == 16_000_000  # 16 MHz -> Hz
+    assert cfg["sweep"]["ibo_db"] == [6.0]
+    assert cfg["sweep"]["noise_density_dbfs"] == [-160.0]
     assert cfg["amplifier"]["am_am"]["input"] == [0.0, 1.0]
     assert cfg["amplifier"]["am_pm"]["phase_deg"] == [0.0, 5.0]
     assert cfg["ola"]["filter_span"] == 8

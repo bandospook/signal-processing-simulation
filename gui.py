@@ -40,14 +40,14 @@ def build_toml(cfg: dict) -> str:
 
     ln("[simulation]");  kv("seed", cfg["simulation"]["seed"]);  ln()
 
-    wb = cfg["wideband"]
-    ln("[wideband]");  kv("sample_rate       ", wb["sample_rate"])
-    if wb.get("noise_density_dbfs") is not None:
-        kv("noise_density_dbfs", wb["noise_density_dbfs"])
+    sw = cfg["sweep"]
+    ln("[sweep]")
+    kv("sample_rate       ", sw["sample_rate"])
+    kva("ibo_db            ", sw.get("ibo_db", []))
+    kva("noise_density_dbfs", sw.get("noise_density_dbfs", []))
     ln()
 
     amp = cfg["amplifier"]
-    ln("[amplifier]");  kv("input_backoff_db", amp["input_backoff_db"]);  ln()
     ln("[amplifier.am_am]")
     kva("input ", amp["am_am"]["input"]);  kva("output", amp["am_am"]["output"]);  ln()
     ln("[amplifier.am_pm]")
@@ -63,14 +63,6 @@ def build_toml(cfg: dict) -> str:
     for k in ("wideband", "nl_tables", "sweep", "sweep_table", "detector_results"):
         if o.get(k): kv(k, o[k], 18)
     ln()
-
-    sw = cfg.get("sweep", {})
-    ibo, nsw = sw.get("ibo_db", []), sw.get("noise_density_dbfs", [])
-    if ibo or nsw:
-        ln("[sweep]")
-        if ibo: kva("ibo_db            ", ibo)
-        if nsw: kva("noise_density_dbfs", nsw)
-        ln()
 
     for carr in cfg.get("carrier", []):
         ln("[[carrier]]")
@@ -495,18 +487,6 @@ class App:
         _ent(f, self._sv("sim.seed"), r, 1,
              tip="Random seed for reproducible simulations (integer)."); r += 1
 
-        r = self._section(f, "Wideband", r)
-        _lf(f, "Sample Rate (MHz):", r, 0)
-        _ent(f, self._sv("wb.sample_rate"), r, 1, width=20,
-             tip="Composite wideband sample rate in MHz.\n"
-                 "Must be at least 2x the highest carrier edge frequency."); r += 1
-        _lf(f, "Noise Density (dBFS/Hz):", r, 0)
-        _ent(f, self._sv("wb.noise"), r, 1,
-             tip="AWGN noise power spectral density added after the amplifier (dBFS/Hz).\n"
-                 "Leave blank to disable noise entirely."); r += 1
-        ttk.Label(f, text="Leave blank to disable AWGN noise.",
-                  foreground="gray").grid(row=r, column=1, sticky="w");  r += 1
-
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
         _lf(f, "Filter Span:", r, 0)
         _ent(f, self._sv("ola.filter_span"), r, 1,
@@ -522,12 +502,6 @@ class App:
         tab = ttk.Frame(nb);  nb.add(tab, text="Amplifier")
         f = _scrollable(tab)
         r = 0
-        _lf(f, "Input Backoff (dB):", r, 0)
-        _ent(f, self._sv("amp.ibo"), r, 1,
-             tip="Input back-off relative to amplifier saturation (dB).\n"
-                 "Higher IBO = more linear operation, lower output power.\n"
-                 "0 dB = driven to saturation."); r += 2
-
         for title, ik, ok, olabel in (
             ("AM-AM Table", "amp.am_am.in", "amp.am_am.out", "Output"),
             ("AM-PM Table", "amp.am_pm.in", "amp.am_pm.phase", "Phase (°)"),
@@ -546,8 +520,17 @@ class App:
         tab = ttk.Frame(nb);  nb.add(tab, text="Sweep & Output")
         f = _scrollable(tab)
         r = self._section(f, "Parameter Sweep", 0)
-        ttk.Label(f, text="Leave both fields blank to skip the sweep.",
-                  foreground="gray").grid(row=r, column=0, columnspan=3, sticky="w");  r += 1
+        ttk.Label(f,
+                  text="The sweep runs at every (IBO, noise) combination. Each list "
+                       "must contain at least one value;\n"
+                       "a list of one value pins that axis. The first point feeds "
+                       "the wideband PSD plot.",
+                  foreground="gray", justify="left").grid(
+            row=r, column=0, columnspan=3, sticky="w");  r += 1
+        _lf(f, "Sample Rate (MHz):", r, 0)
+        _ent(f, self._sv("sweep.sample_rate"), r, 1, width=20,
+             tip="Composite wideband sample rate in MHz.\n"
+                 "Must be at least 2x the highest carrier edge frequency."); r += 1
         _lf(f, "IBO values (dB):", r, 0)
         _ent(f, self._sv("sweep.ibo"), r, 1, width=44,
              tip="Comma-separated IBO values to sweep (dB).\n"
@@ -556,8 +539,6 @@ class App:
         _ent(f, self._sv("sweep.noise"), r, 1, width=44,
              tip="Comma-separated noise density values to sweep (dBFS/Hz).\n"
                  "Example: -140.0, -130.0, -120.0"); r += 1
-        ttk.Label(f, text="Example: 0.0, 1.5, 3.0, 4.5, 6.0",
-                  foreground="gray").grid(row=r, column=1, sticky="w");  r += 1
 
         r = self._section(f, "Output Files", r)
         _lf(f, "Output Directory:", r, 0)
@@ -650,17 +631,11 @@ class App:
         sim = cfg.get("simulation", {})
         self._vars["sim.seed"].set(str(sim.get("seed", 42)))
 
-        wb = cfg.get("wideband", {})
-        self._vars["wb.sample_rate"].set(_fmt(wb.get("sample_rate", 16)))
-        nd = wb.get("noise_density_dbfs")
-        self._vars["wb.noise"].set(_fmt(nd) if nd is not None else "")
-
         ola = cfg.get("ola", {})
         self._vars["ola.filter_span"].set(str(ola.get("filter_span", 16)))
         self._vars["ola.block_size"].set(str(ola.get("block_size", 4096)))
 
         amp = cfg.get("amplifier", {})
-        self._vars["amp.ibo"].set(_fmt(amp.get("input_backoff_db", 3.0)))
 
         def set_text(key, lst):
             t = self._texts[key]
@@ -675,6 +650,7 @@ class App:
         set_text("amp.am_pm.phase", am_pm.get("phase_deg", []))
 
         sw = cfg.get("sweep", {})
+        self._vars["sweep.sample_rate"].set(_fmt(sw.get("sample_rate", 16)))
         self._vars["sweep.ibo"].set(  ", ".join(_fmt(x) for x in sw.get("ibo_db", [])))
         self._vars["sweep.noise"].set(", ".join(_fmt(x) for x in sw.get("noise_density_dbfs", [])))
 
@@ -699,19 +675,18 @@ class App:
 
         cfg: dict = {
             "simulation": {"seed": iv("sim.seed")},
-            "wideband":   {"sample_rate": fv("wb.sample_rate")},
+            "sweep": {
+                "sample_rate":        fv("sweep.sample_rate"),
+                "ibo_db":             _parse_float_list(sv("sweep.ibo")),
+                "noise_density_dbfs": _parse_float_list(sv("sweep.noise")),
+            },
             "amplifier": {
-                "input_backoff_db": fv("amp.ibo"),
                 "am_am": {"input": tv("amp.am_am.in"), "output": tv("amp.am_am.out")},
                 "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
             },
             "ola":    {"filter_span": iv("ola.filter_span"), "block_size": iv("ola.block_size")},
             "output": {"output_dir": sv("out.dir") or "."},
         }
-
-        noise_raw = sv("wb.noise")
-        if noise_raw:
-            cfg["wideband"]["noise_density_dbfs"] = float(noise_raw)
 
         for k, vk in (("wideband",          "out.wideband"),
                       ("nl_tables",          "out.nl_tables"),
@@ -720,11 +695,6 @@ class App:
                       ("detector_results",   "out.detector_results")):
             val = sv(vk)
             if val: cfg["output"][k] = val
-
-        ibo_list = _parse_float_list(sv("sweep.ibo"))
-        nsw_list = _parse_float_list(sv("sweep.noise"))
-        if ibo_list or nsw_list:
-            cfg["sweep"] = {"ibo_db": ibo_list, "noise_density_dbfs": nsw_list}
 
         cfg["carrier"] = [cf.to_dict() for cf in self._carriers]
         return cfg

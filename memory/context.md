@@ -1,5 +1,5 @@
 # SO-WAT — Session Context
-**Last updated: 2026-05-22**
+**Last updated: 2026-05-22 (sweep unified as sole sim driver)**
 
 ---
 
@@ -76,6 +76,17 @@ memory/
 ## Key config fields
 
 ```toml
+[simulation]
+seed = 42
+
+[sweep]                      # sole sim driver — every (ibo, noise) point runs the pipeline
+sample_rate        = 16      # MHz (converted to Hz by config loader)
+ibo_db             = [3.0]   # list ≥1; degenerate (one value) == single-point sim
+noise_density_dbfs = [-160]  # list ≥1; per-point AWGN PSD
+
+[amplifier.am_am]            # AM-AM table (no input_backoff_db here — it's per-sweep-point)
+[amplifier.am_pm]            # AM-PM table
+
 [[carrier]]
 name = "c1"
 modulation = "BPSK"          # BPSK DBPSK MSK QPSK OQPSK 8PSK 16QAM 16APSK 32APSK
@@ -87,7 +98,7 @@ num_symbols = 10000          # set to 0 when using FEC (derived from num_frames)
 power_db = 0.0
 freq = -3_000_000
 enabled = true               # include in wideband composite
-sweep_demod = true           # demodulate and measure BER
+sweep_demod = true           # demodulate and measure BER at every sweep point
 num_frames = 5               # for FEC-coded carriers (optional)
 
 [carrier.coding]             # optional — omit section for uncoded
@@ -101,6 +112,14 @@ ripple_cycles = 2.0
 max_phase_dev_deg = 5.0
 phase_poly_order = 2
 ```
+
+Important schema notes:
+- The old `[wideband]` block is **gone**; `sample_rate` lives under `[sweep]`.
+- The old `[amplifier].input_backoff_db` field is **gone**; IBO is per-sweep-point.
+- The sweep is the only sim path; a 1×1 sweep is the way to do a single-point run.
+- The first sweep point's wideband composite feeds `wideband.png`.
+- `detector_results.md` has one row per `(IBO, noise, carrier)` when carriers
+  have `sweep_demod=true`.
 
 ---
 

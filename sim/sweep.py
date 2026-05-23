@@ -18,22 +18,26 @@ def parameter_sweep(carriers: list[dict],
                     ola_block_size: int = 4096,
                     seed: int | None = None,
                     chunk_print: _PrintCB = None,
-                    point_cb: _PointCB = None) -> list[dict]:
+                    point_cb: _PointCB = None) -> tuple[dict, list[dict]]:
     """
     Run the simulation on a 2-D grid of IBO × noise density values.
 
-    Returns a list of point dicts (one per grid cell), each containing:
+    Returns (first_sim, results) where `first_sim` is the full
+    wideband_bpsk_simulation return dict for the first grid point (used by the
+    caller to draw the wideband PSD plot), and `results` is a list of compact
+    per-point dicts:
         ibo_db              float
         noise_density_dbfs  float
         carriers            list of {name, cnr_db, cir_db, cnir_db, evm_rms, ber}
     """
     n_total = len(ibo_db_values) * len(noise_density_dbfs_values)
     n_done  = 0
-    results = []
+    results: list[dict] = []
+    first_sim: dict | None = None
 
     # Carriers with sweep_demod=False contribute to the wideband composite but
     # their per-carrier demod (BER/EVM/CNR/CIR/CNIR) is skipped each grid point.
-    demod_carriers = {c["name"] for c in carriers if c.get("sweep_demod", True)}
+    demod_carriers = {c["name"] for c in carriers if c.get("sweep_demod", False)}
 
     for ibo in ibo_db_values:
         for noise in noise_density_dbfs_values:
@@ -50,6 +54,8 @@ def parameter_sweep(carriers: list[dict],
                 demod_carriers=demod_carriers,
                 chunk_print=chunk_print,
             )
+            if first_sim is None:
+                first_sim = sim
             results.append(dict(
                 ibo_db=ibo,
                 noise_density_dbfs=noise,
@@ -71,4 +77,5 @@ def parameter_sweep(carriers: list[dict],
             print(f"  [{n_done:>{len(str(n_total))}}/{n_total}] "
                   f"IBO={ibo:.1f} dB  noise={noise:.1f} dBFS/Hz  done")
 
-    return results
+    assert first_sim is not None  # n_total >= 1 guaranteed by caller
+    return first_sim, results

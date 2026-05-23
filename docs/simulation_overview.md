@@ -11,37 +11,31 @@ output files produced by each path.
 ```mermaid
 flowchart LR
     CFG[/"simulation.toml"/]
-    CORE["Core wideband simulation<br/>NL amplifier · optional AWGN<br/>per-carrier demodulation"]
-    COUTS["wideband.png · amplifier_nl.png<br/>channel_name.png · console metrics"]
-    PA["Path A — Fixed-noise demod<br/>sweep_demod=true"]
-    PB["Path B — Parameter sweep<br/>ibo_db + noise_density_dbfs arrays"]
-    DA["detector_results.md"]
-    DB["sweep_results.png<br/>sweep_table.md"]
+    SWEEP["Parameter sweep<br/>every (ibo_db, noise_density_dbfs) point<br/>runs the full chunk pipeline"]
+    FIRST["First point<br/>wideband PSD + console metrics"]
+    GRID["All points<br/>per-carrier BER · EVM · CNR/CIR/CNIR"]
+    FOUTS["wideband.png · amplifier_nl.png<br/>channel_name.png"]
+    GOUTS["sweep_results.png · sweep_table.md<br/>detector_results.md"]
 
-    CFG --> CORE
-    CORE --> COUTS
-    CORE --> PA --> DA
-    CORE --> PB --> DB
+    CFG --> SWEEP
+    SWEEP --> FIRST --> FOUTS
+    SWEEP --> GRID --> GOUTS
 
-    classDef cfg  fill:#f1f5f9,stroke:#94a3b8,color:#334155
-    classDef core fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
-    classDef always fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
-    classDef pathA fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
-    classDef pathB fill:#fef3c7,stroke:#f59e0b,color:#78350f
-    classDef outA  fill:#bfdbfe,stroke:#2563eb,color:#1e3a8a
-    classDef outB  fill:#fde68a,stroke:#d97706,color:#78350f
+    classDef cfg    fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    classDef sweep  fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef stage  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef outs   fill:#bfdbfe,stroke:#2563eb,color:#1e3a8a
 
     class CFG cfg
-    class CORE core
-    class COUTS always
-    class PA pathA
-    class PB pathB
-    class DA outA
-    class DB outB
+    class SWEEP sweep
+    class FIRST stage
+    class GRID stage
+    class FOUTS outs
+    class GOUTS outs
 ```
 
-The two optional paths are **fully independent** of each other.  You can enable either,
-both, or neither.
+The sweep is the sole simulation driver.  A 1×1 sweep is a single-point run; a
+larger grid fans the full chunk pipeline out across every (IBO, noise) combination.
 
 ---
 
@@ -77,17 +71,16 @@ For each **enabled** carrier (`enabled = true`):
 
 ### 2c. Nonlinear amplifier
 
-8. **Normalise** — the composite is normalised so its peak amplitude is 1.0, then
-   the input-backoff level (`10^(-input_backoff_db/20)`) is applied as a drive factor.
+8. **Normalise** — the composite is scaled by its analytical RMS, then the
+   per-point input-backoff level (`10^(-ibo_db/20)`) is applied as a drive factor.
 9. **AM-AM / AM-PM** — the driven composite passes through the nonlinear amplifier
    model, which performs table interpolation to apply amplitude compression (AM-AM)
    and phase rotation (AM-PM) as a function of instantaneous envelope amplitude.
 
 ### 2d. Noise injection (optional)
 
-10. **AWGN** — if `noise_density_dbfs` is set in `[wideband]`, complex Gaussian
-    noise is added to the amplifier output.  Noise power = `10^(N₀/10) × sample_rate`.
-    If not set, the noisy signal is identical to the post-NL signal.
+10. **AWGN** — complex Gaussian noise is added to the amplifier output at the
+    per-point `noise_density_dbfs` value.  Noise power = `10^(N₀/10) × sample_rate`.
 
 ### 2e. Per-carrier extraction and demodulation
 
@@ -143,45 +136,32 @@ NL loading (interference, adjacent channels, etc.).
 
 ---
 
-## 4. Execution Paths
+## 4. Execution model
 
-### Path A — Fixed-noise demodulation
+The sweep is the sole simulation driver. Every (IBO, noise) point listed in
+`[sweep]` is simulated end-to-end via the chunk pipeline above (Steps 2a–2e).
+A single-point "config" is simply a 1×1 sweep — there is no separate fixed-noise
+mode.
 
-**Activates when:** `sweep_demod = true` on one or more carriers.
+- **IBO axis** — `[sweep].ibo_db` (list, ≥1 value).  Each value sets the drive
+  level at that grid point.
+- **Noise axis** — `[sweep].noise_density_dbfs` (list, ≥1 value).  Each value
+  sets the AWGN PSD at that grid point.
+- **Demodulated carriers** — all carriers with `sweep_demod = true`.
+- **PSD plot point** — the first grid point
+  `(ibo_db[0], noise_density_dbfs[0])` provides the wideband composite for
+  `wideband.png`.
 
-The demodulation results from the core run (Step 2e above) are used directly.  The
-noise level is whatever is set in `[wideband] noise_density_dbfs`.  After the run,
-effective Eb/N0 is computed from the CNIR measurement:
+For each demodulated carrier at each grid point, effective Eb/N0 is computed
+from the CNIR measurement:
 
 ```
 Eff Eb/N0 = CNIR_dB + 10·log10(sps / bits_per_symbol)
 ```
 
-This is compared to the theoretical Eb/N0 required to achieve the measured BER in
-pure AWGN, giving the **implementation loss** (IL = Eff Eb/N0 − Theory Eb/N0).
-
-**Output:** one row per carrier written to `detector_results.md` with `mode = fixed`.
-
----
-
-### Path B — Parameter sweep
-
-**Activates when:** `[sweep]` contains both `ibo_db` and `noise_density_dbfs` arrays.
-
-The full wideband simulation (Steps 2a–2e) is re-run at every point on the
-IBO × noise grid.  Each grid point is an independent simulation; the results are not
-related to the core run or to each other.
-
-- **IBO axis** — overrides `[amplifier] input_backoff_db` at each point.
-- **Noise axis** — overrides `[wideband] noise_density_dbfs` at each point.
-- **Which carriers are demodulated** — all carriers with `sweep_demod = true`.
-
-**Outputs:**
-
-| File | Content |
-|---|---|
-| `sweep_results.png` | BER, EVM (%), and CNR/CIR/CNIR (dB) vs IBO; one column per metric, one row per demodulated carrier; noise level shown as a colour gradient |
-| `sweep_table.md` | Markdown report: config summary, per-carrier performance ranges, and the full IBO × noise results table |
+This is compared to the theoretical Eb/N0 required to achieve the measured BER
+in pure AWGN, giving the **implementation loss** (IL = Eff Eb/N0 − Theory Eb/N0).
+Every grid point becomes one row per demodulated carrier in `detector_results.md`.
 
 ---
 
@@ -189,44 +169,51 @@ related to the core run or to each other.
 
 | File (under `output_dir`) | Produced by | Always? |
 |---|---|---|
-| `wideband.png` | Core run | Yes — if `output.wideband` is set |
+| `wideband.png` | First sweep point's full pipeline | Yes — if `output.wideband` is set |
 | `amplifier_nl.png` | Config tables (no sim needed) | Yes — if `output.nl_tables` is set |
 | `channel_<name>.png` | Per-carrier with `[carrier.channel]` | If carrier has a channel block with `plot` key |
-| Console metrics table | Core run | Yes — for all demodulated carriers |
-| `sweep_results.png` | Path B (sweep) | Only if both `ibo_db` and `noise_density_dbfs` sweep arrays are present |
-| `sweep_table.md` | Path B (sweep) | Only if sweep is active and `output.sweep_table` is set |
-| `detector_results.md` | Path A | Only if at least one carrier has `sweep_demod = true` |
+| Console metrics table | First sweep point's demod results | Yes — for all demodulated carriers |
+| `sweep_results.png` | Full sweep | If `output.sweep` is set and at least one carrier was demodulated |
+| `sweep_table.md` | Full sweep | If `output.sweep_table` is set |
+| `detector_results.md` | Full sweep | If at least one carrier has `sweep_demod = true` and `output.detector_results` is set |
 
 ---
 
 ## 6. Example Configurations
 
-### Minimal — wideband PSD and amplifier plots only
+### Single point — PSD and amplifier plots, no BER
 
 ```toml
+[sweep]
+sample_rate        = 16
+ibo_db             = [3]
+noise_density_dbfs = [-160]
+
 [[carrier]]
 name = "beacon"
 sweep_demod = false   # default; included in composite, not decoded
 ```
 
-No sweep arrays, no `sweep_demod = true` carriers → only `wideband.png` and
-`amplifier_nl.png` are produced.
+A 1×1 sweep with no demod carriers → only `wideband.png` and `amplifier_nl.png`
+are produced (the sweep grid is degenerate so no useful sweep plot is drawn).
 
 ---
 
-### Fixed-noise BER measurement
+### Single-point BER measurement
 
 ```toml
-[wideband]
-noise_density_dbfs = -160
+[sweep]
+sample_rate        = 16
+ibo_db             = [3]
+noise_density_dbfs = [-160]
 
 [[carrier]]
 name = "link"
 sweep_demod = true
 ```
 
-Runs the core simulation once at the configured noise level.  Produces
-`wideband.png`, `amplifier_nl.png`, and `detector_results.md`.
+Runs one simulation.  Produces `wideband.png`, `amplifier_nl.png`, and
+`detector_results.md` (one row for `link`).
 
 ---
 
@@ -234,6 +221,7 @@ Runs the core simulation once at the configured noise level.  Produces
 
 ```toml
 [sweep]
+sample_rate        = 16
 ibo_db             = [0, 3, 6]
 noise_density_dbfs = [-100, -90, -80]
 
@@ -242,29 +230,6 @@ name = "link"
 sweep_demod = true
 ```
 
-Runs 9 grid points.  Produces `wideband.png`, `amplifier_nl.png`,
-`sweep_results.png`, and `sweep_table.md`.
-
----
-
-### Fixed-noise demod and sweep together
-
-```toml
-[wideband]
-noise_density_dbfs = -160
-
-[sweep]
-ibo_db             = [0, 3, 6]
-noise_density_dbfs = [-100, -90, -80]
-
-[[carrier]]
-name = "interferer"
-sweep_demod = true
-
-[[carrier]]
-name = "link"
-sweep_demod = true
-```
-
-Both paths run independently.  `sweep_results.png` / `sweep_table.md` cover the full
-grid; `detector_results.md` records BER/IL at the global `noise_density_dbfs`.
+Runs 9 grid points.  Produces `wideband.png` (from the first point),
+`amplifier_nl.png`, `sweep_results.png`, `sweep_table.md`, and a 9-row
+`detector_results.md`.

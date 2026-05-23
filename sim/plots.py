@@ -303,19 +303,15 @@ def write_sweep_report(sweep_results: list[dict], cfg: dict,
     ln("## Configuration")
     ln()
 
-    wb  = cfg.get("wideband",   {})
-    amp = cfg.get("amplifier",  {})
+    sw  = cfg.get("sweep",      {})
     ola = cfg.get("ola",        {})
     sim = cfg.get("simulation", {})
 
     ln("| Parameter | Value |")
     ln("|---|---|")
     ln(f"| Seed | {sim.get('seed', '—')} |")
-    sr = wb.get("sample_rate", 0)
+    sr = sw.get("sample_rate", 0)
     ln(f"| Sample Rate | {sr / 1e9:.4g} GHz |")
-    nd = wb.get("noise_density_dbfs")
-    ln(f"| Noise Density | {nd:.1f} dBFS/Hz |" if nd is not None else "| Noise Density | disabled |")
-    ln(f"| Input Backoff | {amp.get('input_backoff_db', '—')} dB |")
     ln(f"| OLA Filter Span | {ola.get('filter_span', '—')} |")
     ln(f"| OLA Block Size | {ola.get('block_size', '—')} |")
     ln()
@@ -410,29 +406,28 @@ def write_sweep_report(sweep_results: list[dict], cfg: dict,
 
 
 def write_detector_results(
-    results: dict[str, dict],
+    rows: list[dict],
     save_path: str | None,
     append: bool = False,
 ) -> None:
     """
-    Write a Markdown table of detector-model results to save_path.
+    Write a Markdown table of per-(IBO, noise) detector-model results.
 
-    Each entry in results is keyed by carrier name and contains:
-        mode              — "seeker" or "fixed"
+    Each entry in `rows` is a dict for one (carrier, ibo_db, noise_density_dbfs)
+    measurement and contains:
+        name              — carrier name
+        ibo_db            — input back-off (dB)
         noise_density_dbfs — noise level used (dBFS/Hz)
         ber               — measured BER
-        ber_ci_lo/hi      — 95% CI bounds (None for fixed-noise runs)
         effective_ebn0_db — C/(N+I)*sps/bps in dB (None if not computed)
         theory_ebn0_db    — theory Eb/N0 at measured BER (None if no formula)
         implementation_loss_db — effective − theory (None if not available)
         cnr_db, cir_db, cnir_db
         evm_rms           — EVM % (None if not computed)
-        n_bits_total      — bits used in final measurement (None for fixed)
-        n_iter            — bisection iterations (None for fixed)
 
     append=True opens the file for appending rather than overwriting.
     """
-    if not results or save_path is None:
+    if not rows or save_path is None:
         return
 
     from pathlib import Path
@@ -449,39 +444,27 @@ def write_detector_results(
 
     ln("## Detector Results")
     ln()
-    ln("| Carrier | Mode | Noise (dBFS/Hz) | BER | BER CI | Eff Eb/N0 (dB) "
+    ln("| Carrier | IBO (dB) | Noise (dBFS/Hz) | BER | Eff Eb/N0 (dB) "
        "| Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) "
-       "| EVM (%) | Bits |")
-    ln("|---|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+       "| EVM (%) |")
+    ln("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
-    for name, r in results.items():
+    for r in rows:
         ber = r.get("ber")
         ber_str = "0" if ber == 0 else (_f(ber, ".2e") if ber is not None else "—")
 
-        ci_lo = r.get("ber_ci_lo")
-        ci_hi = r.get("ber_ci_hi")
-        if ci_lo is not None and ci_hi is not None:
-            ci_str = f"[{_f(ci_lo, '.2e')}, {_f(ci_hi, '.2e')}]"
-        else:
-            ci_str = "—"
-
-        n_bits = r.get("n_bits_total")
-        bits_str = f"{n_bits:,}" if n_bits is not None else "—"
-
         ln(
-            f"| {name}"
-            f" | {r.get('mode', '—')}"
+            f"| {r.get('name', '—')}"
+            f" | {_f(r.get('ibo_db'), '.1f')}"
             f" | {_f(r.get('noise_density_dbfs'), '.1f')}"
             f" | {ber_str}"
-            f" | {ci_str}"
             f" | {_f(r.get('effective_ebn0_db'), '.2f')}"
             f" | {_f(r.get('theory_ebn0_db'), '.2f')}"
             f" | {_f(r.get('implementation_loss_db'), '.2f')}"
             f" | {_f(r.get('cnr_db'), '.1f')}"
             f" | {_f(r.get('cir_db'), '.1f')}"
             f" | {_f(r.get('cnir_db'), '.1f')}"
-            f" | {_f(r.get('evm_rms'), '.2f')}"
-            f" | {bits_str} |"
+            f" | {_f(r.get('evm_rms'), '.2f')} |"
         )
 
     ln()

@@ -163,13 +163,6 @@ Coverage is reported alongside the test run (no separate invocation needed — t
 threshold enforced at commit time; instead, review the `term-missing` output and
 investigate any new uncovered lines in `sim/` modules. The established baseline is:
 
-| Module group | Coverage |
-|---|---|
-| `sim/` core (baseband, filters, modulation, nonlinear\_amplifier, receiver, simulation, targeter, theory) | 95–100% |
-| `sim/plots.py` | ~66% (rendering and file-write paths; expected lower) |
-| `main.py` | varies with test scope |
-| Overall | ~86% |
-
 The established baseline is **100% coverage (0 missed statements)**. Any drop below
 100% requires either a new test covering the new code, or an explicit
 `# pragma: no cover` comment on the line with a justification for why it is

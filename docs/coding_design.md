@@ -161,15 +161,6 @@ No change to the project's Python version is required.
 
 ## Knock-on effects
 
-- **BER seeker (`targeter.py`)** — extended to coded carriers, bisecting noise
-  density to hit a target coded BER/FER. Coded curves waterfall steeply, so
-  convergence is fast, but two things must be added: (a) the per-evaluation frame
-  count scales with the target — a rarer target needs more frames for a
-  confident estimate; (b) a **feasibility guard** — if the requested target is
-  too low to reach within the configured frame budget (or lies below the code's
-  error floor), the seeker raises a clear error telling the user the target is
-  infeasible, rather than running indefinitely. This mirrors the existing
-  invalid-bracket `ValueError`s.
 - **`theory.py`** — turbo and LDPC have no closed-form BER. Comparison shifts to
   the uncoded curve plus a coding-gain annotation, or to published reference
   curves; only the convolutional inner code has tractable bounds.
@@ -232,9 +223,7 @@ tractable and should be built in from the start:
 
 Recommended policy: a routine sweep floor of **1e-5** (overnight-feasible), an
 opt-in long-run mode for **1e-6**, and sub-1e-7 floor characterization treated as
-a separate dedicated campaign rather than a sweep point. If the BER seeker is
-extended to coded carriers it should target ~1e-3–1e-4, since it evaluates the
-rate many times per bisection.
+a separate dedicated campaign rather than a sweep point.
 
 ---
 

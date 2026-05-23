@@ -9,9 +9,8 @@ Key implementation decisions -- the non-obvious stuff that isn't in the code com
 sim/simulation.py adds AWGN after the nonlinear amplifier. This models a single-hop
 satellite downlink where thermal noise is primarily at the receiver.
 
-Why it matters: If noise is placed before the amp, C/I shifts with noise level,
-breaking the "C/I constant" assumption the BER seeker depends on. Noise after amp means
-C/I is determined solely by IBO and signal statistics.
+Why it matters: If noise is placed before the amp, C/I shifts with noise level.
+Noise after amp means C/I is determined solely by IBO and signal statistics.
 
 ---
 
@@ -47,26 +46,6 @@ Forgetting this produces a systematic -6 dB implementation loss on a linear ampl
     IL_dB = effective_Eb/N0_dB - theory_Eb/N0_dB(at_measured_BER)
 
 Uses C/(N+I) not C/N so that with no nonlinearity (I=0) the loss is zero.
-
----
-
-## BER seeker algorithm (sim/targeter.py)
-
-Bisects noise_density_dbfs to achieve a target BER for a named carrier.
-Higher noise_dbfs -> higher BER. Raises ValueError if bracket is invalid.
-
-Steps:
-  1. Bracket check -- 1 seed, n_bits_initial = max(500, n_bits_final // 32)
-  2. Bisection -- n_bits doubles every 2 steps; stop when hi - lo < 0.05 dB
-  3. Final measurement -- pool n_final_seeds at converged noise; normal-approx CI
-
-N_bits formula: N = ceil((z / accuracy)^2 * p * (1-p))
-  where z = sqrt(2) * erfinv(confidence).
-
-Note: math.erfinv not in stdlib (even Python 3.14); _erfinv() bisects math.erf.
-
-seek_all_carriers filters: enabled=True AND sweep_demod=True AND use_seeker=True.
-Non-seekable carriers still contribute to wideband IM.
 
 ---
 

@@ -152,7 +152,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
         coding_cfg = carr.get("coding")
         if coding_cfg is not None:
             code = build_code(coding_cfg)
-            n_frames = int(carr["num_frames"])
+            n_frames = int(carr.get("num_frames", 1))
             data_bits, coded_bits = encode_frames(
                 code, n_frames, np.random.default_rng(int(per_carrier_seeds[i])))
             bb, t, bits, symbols = rrc_baseband(

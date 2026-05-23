@@ -1,5 +1,5 @@
 # SO-WAT — Session Context
-**Last updated: 2026-05-17**
+**Last updated: 2026-05-22**
 
 ---
 
@@ -8,8 +8,8 @@
 SO-WAT (Simulation Orchestrator – Waveform Analysis Tool) is a Python satellite
 communications link simulator. It models a wideband downlink: multiple carriers through a
 shared nonlinear amplifier (AM-AM/AM-PM), OLA-based resampling, optional per-carrier
-channel impairments, AWGN (added after the amp — see TECHNICAL_NOTES.md), and a BER
-seeker that bisects noise_density_dbfs to find the operating point for a target BER.
+channel impairments, AWGN (added after the amp — see TECHNICAL_NOTES.md), and optional
+FEC coding (convolutional, concatenated, turbo, LDPC).
 
 ---
 
@@ -22,17 +22,18 @@ sim/            Core simulation library
   nonlinear_amplifier.py  AM-AM / AM-PM memoryless model
   simulation.py     N-carrier wideband simulation (returns CNR/CIR/CNIR)
   sweep.py          2D IBO × noise density sweep
-  receiver.py       Matched filter, hard decisions, BER, EVM
+  receiver.py       Matched filter, hard decisions, BER, EVM, soft_demap
   modulation.py     Constellations, Gray coding, APSK ratios
   plots.py          All figure generation + markdown reports
   config.py         TOML loader (tomllib)
   theory.py         Closed-form BER curves + numerical inverse
-  targeter.py       Adaptive BER seeker (bisection on noise_density_dbfs)
+  coding/           FEC: ConvolutionalCode, ConcatenatedCode, TurboCode, LDPCCode
+                    build_code(), encode_frames(), decode_frames()
 
-main.py         CLI entry point — runs full sim + seeker + writes outputs
+main.py         CLI entry point — runs full sim + optional sweep + writes outputs
 gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI)
 simulation.toml Example / default configuration
-tests/          162 tests, all passing, 100% coverage
+tests/          180 tests, all passing, 100% coverage
 misc/
   __init__.py   Makes misc a package (importable by gui.py)
   gen_icon.py   build_icon() generates the app icon PNG; imported by gui.py at startup.
@@ -48,12 +49,12 @@ memory/
 
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed — intentional compact GUI style)
-- **Tests:** 112 passing, 0 failing
-- **Coverage:** 86% overall; sim/ core modules 95–100%
+- **Tests:** 180 passing, 0 failing
+- **Coverage:** 100% (1253 statements, 0 missed)
 - Tools installed in venv: `pyright`, `ruff`, `pytest-cov`
-- Run quality checks: `python -m pyright gui.py main.py sim/ tests/`
-  and `python -m ruff check gui.py main.py sim/ tests/`
-- Run tests with coverage: `python -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing`
+- Run quality checks: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
+  and `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
+- Run tests with coverage: `.venv\Scripts\python.exe -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing`
 
 ---
 
@@ -64,12 +65,11 @@ memory/
   runtime via `misc.gen_icon.build_icon()` — no embedded blob in gui.py. Run
   `python misc/gen_icon.py --preview` to save icon_preview.png for inspection.
 - **Channel impairments:** single checkbox only — checked = include channel dict in
-  config; unchecked = omit entirely. There is NO inner "Enabled" checkbox anymore
-  (removed as redundant; sim treats absent channel key same as enabled=false)
+  config; unchecked = omit entirely. No inner "Enabled" checkbox.
 - **Carrier enable vs detector enable:** two separate checkboxes —
   "Include in wideband" and "Enable detector model" (sweep_demod)
-- **Seeker mode:** shown only when both enables are on; radio between
-  "Fixed noise level" and "BER seeker"; seeker params hidden unless seeker selected
+- **FEC coding:** "FEC coding" checkbox expands a parameters panel with
+  scheme (combobox), num_frames, block_length, and LDPC matrix path.
 
 ---
 
@@ -83,19 +83,17 @@ symbol_rate = 1_000_000
 sps = 4
 rolloff = 0.35
 filter_span = 8              # half-span in symbols
-num_symbols = 10000
+num_symbols = 10000          # set to 0 when using FEC (derived from num_frames)
 power_db = 0.0
 freq = -3_000_000
 enabled = true               # include in wideband composite
 sweep_demod = true           # demodulate and measure BER
-use_seeker = false           # false = fixed noise level; true = BER seeker
+num_frames = 5               # for FEC-coded carriers (optional)
 
-[carrier.seeker]             # only used when use_seeker = true
-target_ber = 0.01
-confidence = 0.95
-ber_accuracy = 0.005
-noise_lo_dbfs = -160.0
-noise_hi_dbfs = -80.0
+[carrier.coding]             # optional — omit section for uncoded
+scheme = "convolutional"     # convolutional | concatenated | turbo | ldpc
+block_length = 1024          # data bits/frame (conv/turbo)
+# matrix = "data/ldpc/mackay_13298.alist"  # ldpc only
 
 [carrier.channel]            # optional — omit section to disable
 ripple_db = 0.5
@@ -108,19 +106,10 @@ phase_poly_order = 2
 
 ## Open work items
 
-1. **Chunk pipeline refactor** — highest priority active item. The wideband signal
-   is currently materialized in RAM in full before any processing. Plan agreed:
-   - NLA normalization: analytical RMS (`sqrt(sum of 10^(power_db/10))`), not empirical peak
-   - PSD estimate: Welch averaging over all chunks, not a single snapshot
-   - Current `plots.psd_db()` takes a single centre segment (up to 16384 samples, Hann window);
-     this will be replaced by incremental segment accumulation in the chunk pipeline
-   - Current `sim/simulation.py` line 121 still uses `np.max()` — this is the thing to change
-   - See `memory/technical_notes.md` § "NLA input normalization" for full rationale
-
-2. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers;
+1. **Carrier plan visualisation** — frequency-domain spectrum view of all carriers;
    click to select/edit. Deferred, no code started.
 
 ---
 
 *See also: `memory/technical_notes.md` for AWGN placement rationale, DBPSK formula,
-CNIR→Eb/N0 conversion, NLA normalization decision, and seeker algorithm details.*
+CNIR→Eb/N0 conversion, and NLA normalization decision.*

@@ -485,6 +485,10 @@ class App:
         _lf(f, "Seed:", r, 0)
         _ent(f, self._sv("sim.seed"), r, 1,
              tip="Random seed for reproducible simulations (integer)."); r += 1
+        _lf(f, "Sample Rate (MHz):", r, 0)
+        _ent(f, self._sv("sweep.sample_rate"), r, 1, width=20,
+             tip="Composite wideband sample rate in MHz.\n"
+                 "Must be at least 2x the highest carrier edge frequency."); r += 1
 
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
         _lf(f, "Filter Span:", r, 0)
@@ -526,10 +530,6 @@ class App:
                        "the wideband PSD plot.",
                   foreground="gray", justify="left").grid(
             row=r, column=0, columnspan=3, sticky="w");  r += 1
-        _lf(f, "Sample Rate (MHz):", r, 0)
-        _ent(f, self._sv("sweep.sample_rate"), r, 1, width=20,
-             tip="Composite wideband sample rate in MHz.\n"
-                 "Must be at least 2x the highest carrier edge frequency."); r += 1
         _lf(f, "IBO values (dB):", r, 0)
         _ent(f, self._sv("sweep.ibo"), r, 1, width=44,
              tip="Comma-separated IBO values to sweep (dB).\n"

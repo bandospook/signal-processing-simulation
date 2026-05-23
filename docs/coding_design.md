@@ -1,19 +1,23 @@
-# Forward Error Correction — Design Proposal
+# Forward Error Correction — Design Record
 
-**Status:** design proposal — not yet implemented. Open decisions for the
-project owner are listed at the end; nothing here is committed until those are
-resolved.
+**Status:** implemented (commit `d7ae2b8`). This document is the design record
+behind the choices that shipped. Decisions sections are preserved as the rationale
+for current code; sections that proposed unimplemented mechanisms are annotated
+where the project chose a different path.
 
 ## Goal
 
-Add three forward-error-correction (FEC) families to the per-carrier signal
-chain and measure coded BER / frame-error-rate (FER) and coding gain against the
-existing uncoded theory curves:
+Four FEC families are wired into the per-carrier signal chain, with coded
+BER / frame-error-rate (FER) measurement against the existing uncoded theory
+curves:
 
-- **Concatenated** — convolutional inner code + Reed-Solomon outer code (classic
-  CCSDS-style), with an interleaver between them.
-- **Turbo** — parallel-concatenated convolutional codes, iteratively decoded.
-- **LDPC** — DVB-S2X parity-check codes, decoded with belief propagation.
+- **Convolutional** — rate-1/2, K=7 mother code, soft-decision Viterbi decoder.
+- **Concatenated** — convolutional inner code + Reed-Solomon outer code
+  (CCSDS-style), with a random interleaver between them.
+- **Turbo** — rate-1/3 parallel-concatenated convolutional codes, iteratively
+  decoded with max-log-MAP BCJR.
+- **LDPC** — parity-check codes (bundled MacKay 13298 matrix by default),
+  decoded with normalised min-sum belief propagation.
 
 ---
 
@@ -61,21 +65,29 @@ performance hot spot — so the exact form's extra cost is immaterial.
 
 ## Module structure
 
-A new `sim/coding/` subpackage, each codec exposing a uniform interface
-(`encode(data_bits) -> coded_bits`, `decode(llrs) -> data_bits`):
+The `sim/coding/` subpackage ships with these modules and a uniform
+interface across codecs (`encode(data_bits) -> coded_bits`,
+`decode_data(llr_frames) -> data_bits`):
 
 ```
 sim/coding/
-  __init__.py        scheme registry + factory
-  interleaver.py     block / random / turbo interleavers
-  convolutional.py   convolutional encoder + soft-decision Viterbi
-  reed_solomon.py    Reed-Solomon outer code (see speed section: galois-backed)
-  turbo.py           PCCC encoder + iterative BCJR/max-log-MAP decoder
-  ldpc.py            parity-check matrices + belief-propagation decoder
+  __init__.py        build_code() factory, encode_frames / decode_frames helpers,
+                     DEFAULT_LDPC_MATRIX path constant
+  convolutional.py   ConvolutionalCode: rate-1/2 K=7 (171,133) octal, soft Viterbi
+                     with Numba @njit(parallel=True) batch decode
+  concatenated.py    ConcatenatedCode: RS(255,223) outer (galois) + convolutional
+                     inner + random interleaver
+  turbo.py           TurboCode: rate-1/3 PCCC, two RSC encoders, max-log-MAP BCJR,
+                     Numba @njit(parallel=True)
+  ldpc.py            LDPCCode: normalized min-sum belief propagation, GF(2)
+                     systematic generator, Numba @njit(parallel=True)
 ```
 
-A new optional `[carrier.coding]` config block: `scheme`, `code_rate`,
-`block_length`, decoder `iterations`. Absent block ⇒ uncoded (current behaviour).
+The optional `[carrier.coding]` config block has `scheme`, `block_length`
+(convolutional / turbo data bits per frame), and `matrix` (LDPC alist path;
+falls back to the bundled `data/ldpc/mackay_13298.alist` when omitted). The
+number of frames per simulation iteration is derived automatically from
+`[simulation].max_block_size_samples`. Absent block ⇒ uncoded.
 
 ---
 
@@ -166,8 +178,10 @@ No change to the project's Python version is required.
   curves; only the convolutional inner code has tractable bounds.
 - **Eb/N0 bookkeeping** — Eb becomes energy per *information* bit, so the
   Es/N0 ↔ Eb/N0 conversion must include the code rate.
-- **Runtime budget** — coded low-BER sweeps are a significant new runtime
-  pressure point; see *Runtime budget and BER floor* below.
+- **Runtime budget** — coded low-BER sweeps are a significant runtime
+  pressure point; see *Runtime budget and BER floor* below. This is addressed
+  at the sweep layer by the adaptive Wilson-CI iteration (see
+  [GUIDE.md §8](GUIDE.md) and [memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md)).
 
 ---
 
@@ -210,77 +224,84 @@ runtime ≈ (frames needed) / (decoder throughput) × (SNR points) × (MODCODs)
 
 A 64,800-bit LDPC frame under iterative belief propagation is heavy; throughput
 depends on code rate, frame size, and iteration count. Three techniques keep it
-tractable and should be built in from the start:
+tractable, all of them now in place:
 
-- **Early termination** — stop belief propagation once the parity check is
-  satisfied. At high SNR most frames decode in a few iterations rather than the
-  50-iteration cap. Biggest single win, and it accelerates exactly the low-BER
-  region.
-- **Adaptive stop-on-errors** — end an SNR point once enough frame errors are
-  collected, instead of running a fixed `N`.
-- **Multicore** — frames are independent; Numba `prange` parallelises across
-  cores (~8–16× on a typical desktop).
+- **Early termination** — `LDPCCode` stops belief propagation once the parity
+  check is satisfied. At high SNR most frames decode in a few iterations rather
+  than the 50-iteration cap. The single biggest win, accelerating exactly the
+  low-BER region.
+- **Adaptive stop-on-errors** — `sim/sweep.py` implements this at the sweep
+  layer rather than per codec: iterations accumulate at each `(IBO, noise)`
+  point until the Wilson 95% CI half-width on BER hits the configured target
+  with at least `min_errors` observed (or the iteration cap is reached). See
+  [memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md).
+- **Multicore** — `ConvolutionalCode`, `TurboCode`, and `LDPCCode` use
+  `@njit(parallel=True)` so independent frames are decoded in parallel across
+  CPU cores.
 
-Recommended policy: a routine sweep floor of **1e-5** (overnight-feasible), an
-opt-in long-run mode for **1e-6**, and sub-1e-7 floor characterization treated as
-a separate dedicated campaign rather than a sweep point.
+Routine practice: target a Wilson CI half-width of `2e-3` at 95% confidence
+(the default `[simulation].target_ci_half_width`), which is enough resolution
+to draw meaningful BER vs Eb/N0 curves. Sub-1e-7 floor characterization is
+treated as a separate dedicated campaign by raising `max_iterations`.
 
 ---
 
 ## Testing strategy
 
-Coded-decoder tests follow the existing `_N_BITS_PLOT` pattern in
-`test_awgn_performance.py`: a module-level frame-count constant kept small enough
-that the suite still runs in seconds, raised by hand for a thorough validation
-run.
+Coded-decoder tests live in `tests/test_coding.py` (unit, noiseless round-trip)
+and `tests/test_coding_performance.py` (waterfall plots, coding-gain validation).
 
-- **Default (routine `pytest`)** — a few hundred to a few thousand frames per
-  point, in the *shallow* waterfall (FER ~1e-1…1e-2). Confirms the decoder runs,
-  converges, and lands on roughly the right curve. Adds seconds to the suite,
-  not minutes.
-- **Thorough (on demand)** — raise the constant to push down to FER 1e-5–1e-6
-  and compare against published reference curves. This is the deep validation
-  gate from *Runtime budget and BER floor* — run deliberately, not on every
-  invocation.
+- **Unit (`test_coding.py`)** — noiseless encode/decode round-trip for each
+  codec, factory test for `build_code(cfg)`, `decode_data` output shape check.
+  Runs in seconds.
+- **Performance (`test_coding_performance.py`)** — generates BER-vs-Eb/N0
+  waterfall plots and asserts that all four coded curves beat uncoded BPSK at
+  6 dB Eb/N0, that convolutional BER tracks the Viterbi union bound within
+  2×, and that turbo / LDPC / concatenated each achieve BER < 1% at their
+  design SNR. Adds seconds to the suite.
 
-The fast default catches gross breakage — a decoder that fails to converge, or
+The fast suite catches gross breakage — a decoder that fails to converge, or
 sits at FER ≈ 1. Subtle correctness bugs (message-passing scaling,
-early-termination, interleaver off-by-one) hide in the deep region, so the
-thorough run against reference curves is the real correctness gate.
+early-termination, interleaver off-by-one) hide in the deep region; for that
+regime the sweep layer's adaptive iteration (see above) lets long-running
+campaigns push to low BER without changing test code.
 
 ---
 
-## Recommended staging
+## Implementation staging (as built)
 
-Each stage is independently testable against known reference curves:
+The codecs landed in the staged order proposed, each validated against known
+reference curves before the next was started:
 
-1. **Soft demapper** — the enabler; self-contained, validated on its own.
-2. **Convolutional + soft Viterbi** — exercises the full
+1. **Soft demapper** (`receiver.py::soft_demap`) — exact LLR per bit; the
+   enabler.
+2. **Convolutional + soft Viterbi** — full
    encode → modulate → channel → soft-demap → decode loop with a code that has
    well-known curves.
-3. **LDPC + min-sum belief propagation** — highest value/effort ratio; LDPC is
-   what modern satcom (DVB-S2) actually uses.
+3. **LDPC + min-sum belief propagation** — highest value/effort ratio; what
+   modern satcom (DVB-S2) actually uses.
 4. **Turbo + BCJR** — most intricate; last.
 
-Concatenated coding then falls out as plumbing: convolutional (stage 2) +
+Concatenated coding falls out as plumbing: convolutional (stage 2) +
 Reed-Solomon (`galois`) + interleaver, chained.
 
 ---
 
-## Decisions
+## Decisions as built
 
-All settled with the project owner:
-
-- **Dependencies / approach** — `numba` and `galois` approved; decoders written
-  from scratch and JIT-compiled with Numba, rather than a compiled library
-  (Python-3.14 compatibility verified above).
-- **Codes** — DVB-S2X LDPC; plus turbo and convolutional codes as selectable
-  options. The specific turbo/convolutional parameterisation (CCSDS is the
-  natural satcom choice) to be fixed at implementation time.
+- **Dependencies / approach** — `numba` and `galois` shipped; decoders written
+  from scratch and JIT-compiled with Numba rather than relying on a compiled
+  library. Python 3.14 compatibility verified before commit.
+- **Codes** — Convolutional (171,133) octal K=7; concatenated RS(255,223) +
+  convolutional; rate-1/3 PCCC turbo; LDPC with the MacKay 13298 matrix bundled
+  at `data/ldpc/mackay_13298.alist` as the default. User can supply any `.alist`.
 - **Soft demapper** — exact LLR, not the max-log approximation.
-- **Test runtime** — coded tests default to a small frame count so the suite
-  still runs in seconds, with a constant to raise for thorough deep validation;
-  see *Testing strategy*.
-- **Seeker** — extended to coded carriers, with a feasibility guard that reports
-  an infeasible (too-low) target rather than running indefinitely; see the
-  seeker bullet under *Knock-on effects*.
+- **Adaptive low-BER measurement** — implemented at the sweep layer via Wilson
+  CI iteration (see *Runtime budget and BER floor* above and
+  [memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md)),
+  rather than as a per-codec stop-on-errors feature. This generalises across
+  uncoded and coded carriers uniformly.
+- **Seeker (rejected)** — the original draft proposed extending a BER seeker
+  to coded carriers. The seeker (`sim/targeter.py`) was removed entirely when
+  fixed-noise single runs replaced it, and the adaptive-CI sweep covers the
+  same need without the seeker's bisection complexity.

@@ -115,7 +115,8 @@ scipy was added as a dependency.
 ### When rational resampling is invoked
 
 `rational_resample` (or `resample_poly`) is called **twice per non-integer-L
-carrier per simulation run**: once before the OLA chunk pipeline and once after.
-It is never called inside the hot chunk loop.  The performance difference (seconds
-vs. milliseconds) is only material for very long records (millions of symbols) or
-when the seeker calls the simulation dozens of times.
+carrier per simulation iteration**: once before the OLA chunk pipeline and once
+after.  It is never called inside the hot chunk loop.  The performance difference
+(seconds vs. milliseconds) is material when the sweep layer's adaptive
+iteration runs many iterations per `(IBO, noise)` point, since the cost
+multiplies by iteration count.

@@ -2,7 +2,15 @@
 
 ## Overview
 
-This report analyses how memory consumption scales with the symbol rate ratio and number of symbols in the wideband simulation. It verifies the claim that chunk (OLA) processing makes per-block FFT memory independent of the number of symbols, and quantifies where real scaling costs come from.
+This report analyses how memory consumption scales with the symbol-rate ratio
+and per-iteration buffer budget in the wideband simulation. It verifies the
+claim that chunk (OLA) processing makes per-block FFT memory independent of
+total simulation length, and quantifies where real scaling costs come from.
+
+Per-iteration symbol or frame counts are no longer user-set: they are derived
+from `[simulation].max_block_size_samples` so the largest per-carrier
+native-rate buffer stays within budget. Total simulation length scales with
+`max_iterations × max_block_size_samples`, not with a hard-coded `num_symbols`.
 
 ---
 
@@ -10,11 +18,11 @@ This report analyses how memory consumption scales with the symbol rate ratio an
 
 | Symbol | Meaning |
 |--------|---------|
-| SR | Wideband sample rate (2 GHz default) |
+| SR | Wideband sample rate (configured under `[sweep].sample_rate`) |
 | f_s | Carrier native sample rate = `sps × symbol_rate` |
 | L | Upsampling ratio = SR / f_s |
-| T | Simulation duration = num_symbols / symbol_rate |
-| N_wb | Total wideband samples = T × SR = num_symbols × L |
+| B_native | Per-carrier native-rate buffer per iteration = derived from `max_block_size_samples` |
+| N_iter | Wideband samples processed per iteration = B_native × L |
 | F | OLA filter half-span (`ola_filter_span`, default 16) |
 | B | OLA block size (`ola_block_size`, default 4096) |
 
@@ -77,32 +85,32 @@ For wideband input (N = N_wb), this is ≈ N_wb × 16 bytes.
 
 ## Current Configuration (Worked Example)
 
-Default config: SR = 2 GHz, F = 16, B = 4096, T ≈ 0.5 ms (slow carrier governs)
+Default `simulation.toml`: SR = 800 MHz, F = 16, B = 4096,
+`max_block_size_samples = 4_194_304` (≈ 4M samples per native-rate buffer).
+One BPSK carrier at `symbol_rate = 100 kHz`, `sps = 4`.
 
-| Parameter | Slow carrier | Fast carrier |
-|-----------|-------------|-------------|
-| symbol_rate | 1 MHz | 20 MHz |
-| sps | 10 | 10 |
-| native rate f_s | 10 MHz | 200 MHz |
-| L = SR / f_s | **200** | **10** |
-| num_symbols | 500 | 10,000 |
-| N_wb = num_symbols × L | 100,000 | 100,000 |
-| filter_taps = 2×16×L+1 | **6,401** | **321** |
-| N_fft = next_pow2(4096 + taps) | 16,384 | 8,192 |
-| FFT buffer | **256 KB** | **128 KB** |
-| OLA efficiency = B / N_fft | 25% | 50% |
+| Parameter | Value |
+|-----------|------|
+| symbol_rate | 100 kHz |
+| sps | 4 |
+| native rate f_s | 400 kHz |
+| L = SR / f_s | **2,000** |
+| B_native (derived) | `max_block_size_samples = 4,194,304` samples |
+| num_symbols per iteration | B_native / sps = **1,048,576** |
+| filter_taps = 2×16×L+1 | **64,001** |
+| N_fft = next_pow2(4096 + taps) | 131,072 |
+| FFT buffer | **2 MB** (reused per chunk) |
+| OLA efficiency = B / N_fft | 3.1% |
 
-Both carriers produce the same N_wb = 100,000 samples because they share the same simulation duration T.
+Under the chunk pipeline, the wideband signal is never materialised in full.
+Per-iteration peak memory is bounded by the OLA state arrays and the
+native-rate carrier output (see "Post-refactor" section below for the full
+breakdown). With the configuration above, peak working memory is around 12 MB
+regardless of the iteration count.
 
-**Peak persistent memory** (all wideband arrays simultaneously live):
-
-```
-≈ 7 × N_wb × 16 bytes
-= 7 × 100,000 × 16
-= 11.2 MB
-```
-
-This is very modest. The dominant cost is the upsampling ratio L, not num_symbols.
+The dominant variable cost is the **upsampling ratio L**, which sets the OLA
+filter length. Doubling `max_block_size_samples` doubles the per-carrier
+native-rate output buffer but does not change L-driven costs.
 
 ---
 
@@ -128,34 +136,41 @@ The table below holds SR = 2 GHz, F = 16, B = 4096 fixed and varies the carrier 
 
 > "chunk processing makes memory independent of the number of symbols (except at the native sample rate for the narrowband signal)"
 
-**Verdict: TRUE for FFT working memory; requires a nuance for persistent arrays.**
+**Verdict: TRUE for FFT working memory and (post-refactor) wideband memory; the
+binding scaling constraint is the per-carrier native-rate output buffer.**
 
-| Memory type | Scales with num_symbols? | Scales with L? |
-|-------------|--------------------------|----------------|
-| FFT working buffer (`N_fft × 16 B`) | **No** — reused per block | Yes (via filter_taps) |
+| Memory type | Scales with B_native? | Scales with L? |
+|-------------|----------------------|----------------|
+| FFT working buffer (`N_fft × 16 B`) | **No** — reused per chunk | Yes (via filter_taps) |
 | Filter coefficients (`filter_taps × 16 B`) | No | Yes (linearly) |
-| Wideband persistent arrays (N_wb) | Only if T changes | No — fixed by T × SR |
-| Native-rate baseband arrays (N_wb / L) | **Yes** — proportional to num_symbols | No |
+| Wideband composite (post-refactor) | **No** — chunked, never materialised | No |
+| Per-carrier native-rate output (`B_native × 16 B`) | **Yes** — linear | No |
 
 The most precise statement:
 
-> For a **fixed simulation duration T**, all wideband memory is determined by `T × SR` regardless of individual carrier parameters. The per-block FFT buffer is independent of both T and num_symbols — it depends only on the filter length (i.e. L). The native-rate carrier arrays (downsampled output) do scale with num_symbols, but at native rate: `num_symbols × sps × 16 bytes`, which is always ≤ N_wb / L.
+> The per-block FFT buffer depends only on the filter length (i.e. L) and is
+> reused per chunk. The wideband composite is never held in memory in full —
+> only one chunk at a time plus OLA state. The per-carrier native-rate output
+> arrays (downsampled, used for BER/EVM) do scale with `B_native`, but at the
+> narrow native rate.
 
-### Concrete check: doubling num_symbols vs doubling T
+`[simulation].max_block_size_samples` directly caps `B_native` for every carrier.
+Iterations are independent of one another — the buffers are reused across
+iterations within a sweep point — so total simulation length scales with
+**iteration count**, not buffer size.
 
-**Case A**: double `num_symbols` from 500 → 1000 for the slow carrier, keeping fast carrier the same.
+### Concrete check: doubling max_block_size_samples
 
-- Both carriers now have different T (0.5 ms vs 0.05 ms). The simulation must use the longer one.
-- N_wb grows from 100,000 → 200,000 — persistent arrays double.
-- FFT buffer: unchanged (still 256 KB for slow, 128 KB for fast).
+Doubling `max_block_size_samples` from 4,194,304 → 8,388,608:
 
-**Case B**: double the fast carrier's num_symbols from 10,000 → 20,000 (T_fast = 1 ms).
+- B_native doubles for every carrier.
+- Per-carrier native-rate output buffer doubles (16 → 32 MB per carrier for
+  the example BPSK case above).
+- FFT buffer: **unchanged** (still 2 MB, sized by L and the filter length).
+- Wideband chunk size: **unchanged** (set by `[ola].block_size`).
 
-- T is now governed by the fast carrier: N_wb = 1 ms × 2 GHz = 2,000,000.
-- All wideband persistent arrays grow 20×.
-- FFT buffer: unchanged.
-
-In both cases the OLA working memory (FFT buffer) is unaffected; only the persistent arrays reflect the new simulation duration.
+To grow total simulation length without growing memory, raise `max_iterations`
+(or rely on the CI-driven convergence to do that automatically when needed).
 
 ---
 
@@ -183,7 +198,8 @@ For a carrier at 1 kHz: N_fft exceeds 8 M points and the coefficient array is 96
 |---------|---------------|
 | Many carriers, all within 10× of wideband rate | Default `block_size = 4096` is fine |
 | One carrier ≥ 100× narrower than wideband | Increase `block_size` to 65536 or more to recover OLA efficiency |
-| Very long simulation (large num_symbols) | Memory grows with T × SR; consider reducing `num_symbols` or SR |
+| Need longer total simulation at fixed memory | Raise `[simulation].max_iterations`; each iteration reuses the same buffers |
+| Need more bits per iteration | Raise `max_block_size_samples`; native-rate output buffer grows linearly with it |
 | Extremely narrowband carrier (L > 10,000) | Consider a staged decimation (intermediate sample rate) rather than direct L-fold decimation |
 
 ### Effect of increasing `block_size`
@@ -200,10 +216,10 @@ Raising `block_size` to 65,536 recovers 50% efficiency with no increase in N_fft
 
 ---
 
-## Post-refactor: Chunk Pipeline Memory Model
+## Chunk Pipeline Memory Model (current)
 
-The persistent wideband arrays in §3 are the motivation for the chunk pipeline refactor.
-After the refactor, they are eliminated:
+The persistent wideband arrays described in §3 were the motivation for the
+chunk pipeline refactor. They are now eliminated:
 
 **What goes away:**
 
@@ -225,7 +241,7 @@ These are replaced by chunk-local buffers that are allocated once and reused:
 | Per-carrier upsample state | `N_fft × 16 B` per carrier | OLA overlap tail, one per carrier |
 | Per-carrier downsample state × 3 | `N_fft × 16 B` per carrier | One per (carrier × 3 passes) |
 | Welch accumulator | `N_fft_welch × 8 B` × 3 | One per wideband signal (pre/post-NL/noisy) |
-| Per-carrier native-rate output | `num_symbols × sps × 16 B` | Still needed for BER/EVM; at native rate |
+| Per-carrier native-rate output | `B_native × 16 B` | BER/EVM; at native rate. Capped by `max_block_size_samples`. |
 
 **Peak memory after refactor** (example: 100 kHz carrier, L=2000, `block_size=65536`):
 
@@ -234,19 +250,21 @@ Chunk buffer:             65,536 × 16 =    1.0 MB   (wideband, reused)
 Upsample OLA state:      131,072 × 16 =    2.0 MB   (per carrier)
 Downsample OLA state × 3: 131,072 × 16 × 3 = 6.0 MB (per carrier)
 Welch accumulators:      131,072 × 8  × 3 =  3.0 MB  (all 3 wideband PSDs)
-Native-rate output:      num_symbols × sps × 16       (scales with symbols)
+Native-rate output:      B_native × 16              (capped by max_block_size_samples)
 ```
 
-Total wideband overhead ≈ 12 MB regardless of simulation duration or N_wb.
-The native-rate per-carrier arrays are the only thing that still scales with
-`num_symbols`, and they do so at the native (narrow) rate — at most N_wb / L bytes.
+Total wideband overhead ≈ 12 MB regardless of iteration count or total bits
+processed. The native-rate per-carrier arrays are the only thing that scales
+with `max_block_size_samples`, and they do so at the native (narrow) rate.
 
-**The critical case** — 100k symbols of a 100 kHz carrier in an 800 MHz wideband system:
+**The critical case** — 100k symbols (one iteration's worth at sps=4 with
+`max_block_size_samples = 400_000`) of a 100 kHz carrier in an 800 MHz
+wideband system:
 
 | Approach | Wideband memory |
 |----------|----------------|
 | Pre-refactor (full arrays) | 100,000 × 2,000 × 16 × 5 arrays ≈ **16 GB** |
-| Post-refactor (chunk pipeline) | ≈ **12 MB** regardless of num_symbols |
+| Post-refactor (chunk pipeline) | ≈ **12 MB** regardless of B_native |
 
 **Return values change:** The simulation no longer returns `wideband`, `wideband_nl`,
 or `wideband_noisy` as arrays. It returns their Welch PSD estimates instead —

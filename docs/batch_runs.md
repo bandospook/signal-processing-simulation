@@ -3,6 +3,12 @@
 **Status:** design proposal — not yet implemented. Decisions captured here are
 the project owner's; open questions are listed at the end.
 
+This document predates the adaptive-iteration sweep refactor but the batch
+proposal is unaffected: each scenario is still one full `main.main()` call,
+and the sweep layer inside it now iterates to a Wilson-CI target (see
+[GUIDE.md §8](GUIDE.md)). Runtime per scenario is variable instead of
+predictable, which has consequences noted under *Concurrency shape*.
+
 ## Goal
 
 Run a group of independent `.toml` configurations together — overnight studies,
@@ -136,6 +142,15 @@ One worker process per scenario via `ProcessPoolExecutor`. Each worker calls
 `main.main(config_path, progress_callback=None)` after rewriting the loaded
 config's `output.output_dir` to its assigned subdirectory.
 
+Note on per-scenario runtime variability: because each scenario's sweep now
+iterates adaptively until its CI target is met, scenario duration is no longer
+predictable from the config alone. Two scenarios with identical sweep grids
+but different operating points can take very different times (low-BER points
+need more iterations to satisfy `target_ci_half_width`). The batch layer
+should therefore tolerate large variance in completion times — `as_completed`
+is the right primitive — and report each scenario's actual iteration counts
+in `batch_summary.md` (e.g. read them out of the scenario's `report.md`).
+
 Pseudocode:
 
 ```python
@@ -237,8 +252,14 @@ overrides. The GUI keeps calling `main.main(path)` as today.
   also be written by `batch.py`? Probably yes; cheap and useful for
   post-mortem when the summary says FAIL. Default on.
 - **Progress reporting.** Coarse only — one line per scenario completion.
-  No per-chunk progress (workers are silent). Trade-off acceptable for
-  overnight use.
+  No per-chunk or per-iteration progress (workers are silent). Trade-off
+  acceptable for overnight use.
 - **Shared random seed across the batch.** Each TOML carries its own seed;
   no cross-scenario coordination needed. If a manifest study wants varied
-  seeds, that goes in the override block.
+  seeds, that goes in the override block. Within a scenario the sweep layer
+  derives per-iteration seeds as `base_seed + grid_index × stride + iter_index`,
+  so scenarios with the same base seed and same grid produce identical
+  iteration streams.
+- **Adaptive iteration is sweep-internal.** No flag is needed on the batch
+  layer to enable or tune it; each scenario inherits its own `[simulation]`
+  settings (`max_iterations`, `target_ci_half_width`, etc.) from its TOML.

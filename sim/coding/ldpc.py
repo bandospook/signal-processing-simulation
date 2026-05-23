@@ -150,6 +150,7 @@ class LDPCCode:
         check_vars, n, m = _parse_alist(alist_path)
         self.n = n
         self.m = m
+        self.coded_bits = n
         self.design_rate = (n - m) / n
         cn_deg = np.array([len(cv) for cv in check_vars], dtype=np.int64)
         self._cn_ptr = np.concatenate([np.zeros(1, np.int64), np.cumsum(cn_deg)])

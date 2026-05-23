@@ -142,6 +142,7 @@ class TurboCode:
         self.k = k
         self.n_states = 8
         self.rate = 1.0 / 3.0
+        self.coded_bits = 3 * k
         self._next, self._parity = _rsc_trellis()
         perm = np.random.default_rng(interleaver_seed).permutation(k)
         self._perm = perm.astype(np.int64)

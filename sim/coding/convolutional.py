@@ -76,6 +76,7 @@ class ConvolutionalCode:
         self.rate = 1.0 / self.n
         self.n_states = 1 << (K - 1)
         self.k = block_length                    # data bits per frame (framed use)
+        self.coded_bits = (self.k + self.K - 1) * self.n  # coded bits per frame
         self._build_trellis()
 
     def _build_trellis(self) -> None:

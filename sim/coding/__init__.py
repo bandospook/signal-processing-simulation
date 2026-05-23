@@ -48,8 +48,17 @@ def encode_frames(code, n_frames: int,
 
 
 def decode_frames(code, llrs: np.ndarray, n_frames: int) -> np.ndarray:
-    """Decode flat channel LLRs (n_frames concatenated frames) to flat data bits."""
+    """Decode flat channel LLRs (n_frames concatenated frames) to flat data bits.
+
+    The received LLR count may be slightly shorter than n_frames * code.coded_bits
+    because the simulation strips transient samples from both ends of the received
+    signal.  When code.coded_bits is available, pad with zeros (neutral LLRs) so
+    each frame is always exactly coded_bits long.
+    """
     llrs = np.asarray(llrs, dtype=float)
-    per_frame = len(llrs) // n_frames
-    frames = llrs[:n_frames * per_frame].reshape(n_frames, per_frame)
+    coded_per_frame: int = getattr(code, "coded_bits", len(llrs) // n_frames)
+    total = coded_per_frame * n_frames
+    if len(llrs) < total:
+        llrs = np.pad(llrs, (0, total - len(llrs)))
+    frames = llrs[:total].reshape(n_frames, coded_per_frame)
     return code.decode_data(frames).ravel()

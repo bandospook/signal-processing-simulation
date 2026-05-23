@@ -302,3 +302,15 @@ def test_encode_decode_frames(ldpc_with_generator):
         llrs = np.where(coded == 0, 25.0, -25.0).astype(float)
         decoded = decode_frames(code, llrs, 3)
         assert np.array_equal(decoded, data)
+
+
+def test_decode_frames_pads_short_llrs():
+    """decode_frames pads with zeros when LLR count is shorter than n_frames * code.coded_bits."""
+    rng = np.random.default_rng(42)
+    code = ConvolutionalCode(block_length=200)
+    data, coded = encode_frames(code, 2, rng)
+    llrs = np.where(coded == 0, 25.0, -25.0).astype(float)
+    # Trim a few LLRs to simulate transient stripping — decode_frames should pad and succeed.
+    trimmed = llrs[:-6]
+    decoded = decode_frames(code, trimmed, 2)
+    assert decoded.shape == data.shape

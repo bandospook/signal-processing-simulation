@@ -402,15 +402,17 @@ IM products, channel ripple, and non-ideal filtering.
 
 ### Effective Eb/N0 and implementation loss
 
-CNIR is measured at the native sample rate (sps samples per symbol), *before* the
-matched filter. The matched filter provides sps-fold processing gain, so:
+CNIR is reported in the **symbol-rate (matched-filter) bandwidth** — `sim/simulation.py`
+divides the native-rate noise power by `sps` before forming the ratio. In this
+convention CNIR equals `Es/N0` directly, and the per-bit conversion is:
 
 ```
-Effective Eb/N0 (dB) = CNIR_dB + 10 · log₁₀(sps / bps)
+Effective Eb/N0 (dB) = CNIR_dB − 10 · log₁₀(bps)
 ```
 
-where `bps` is bits per symbol for the carrier's modulation. For BPSK with `sps=4`
-this adds +6 dB; for 16QAM (bps=4) with `sps=4` it adds 0 dB.
+where `bps` is bits per symbol for the carrier's modulation. For BPSK (`bps=1`)
+the conversion is a no-op (CNIR = Es/N0 = Eb/N0). For QPSK −3 dB, 8PSK −4.77 dB,
+16QAM −6 dB.
 
 Implementation loss is then:
 

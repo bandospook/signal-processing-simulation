@@ -137,9 +137,10 @@ def main(config_path: str = "simulation.toml",
                 continue
             mod = carr.get("modulation", "BPSK").upper()
             bps = bits_per_symbol(mod)
-            sps = int(carr.get("sps", 4))
             cnir_db  = cr["cnir_db"]
-            eff_ebn0 = cnir_db + 10.0 * math.log10(sps / bps)
+            # CNIR is already in symbol-rate (matched-filter) bandwidth, so CNIR = Es/N0.
+            # Eb/N0 = Es/N0 - 10*log10(bps).  For BPSK (bps=1) Eb/N0 == CNIR.
+            eff_ebn0 = cnir_db - 10.0 * math.log10(bps)
             ber_val  = cr.get("ber")
             theory   = ebn0_for_ber(mod, ber_val) if (ber_val is not None and ber_val > 0) else None
             impl_loss = (eff_ebn0 - theory) if theory is not None else None

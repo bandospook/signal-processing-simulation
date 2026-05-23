@@ -419,7 +419,7 @@ def write_detector_results(
         ibo_db            — input back-off (dB)
         noise_density_dbfs — noise level used (dBFS/Hz)
         ber               — measured BER
-        effective_ebn0_db — C/(N+I)*sps/bps in dB (None if not computed)
+        effective_ebn0_db — CNIR_dB − 10·log10(bps) in dB (None if not computed)
         theory_ebn0_db    — theory Eb/N0 at measured BER (None if no formula)
         implementation_loss_db — effective − theory (None if not available)
         cnr_db, cir_db, cnir_db

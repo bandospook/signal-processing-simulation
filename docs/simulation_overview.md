@@ -153,11 +153,14 @@ mode.
   `wideband.png`.
 
 For each demodulated carrier at each grid point, effective Eb/N0 is computed
-from the CNIR measurement:
+from the CNIR measurement.  CNIR is reported in the symbol-rate (matched-filter)
+bandwidth, so CNIR = Es/N0 directly; the per-bit conversion is:
 
 ```
-Eff Eb/N0 = CNIR_dB + 10·log10(sps / bits_per_symbol)
+Eff Eb/N0 = CNIR_dB − 10·log10(bits_per_symbol)
 ```
+
+For BPSK (bps = 1) Eff Eb/N0 is identical to CNIR.
 
 This is compared to the theoretical Eb/N0 required to achieve the measured BER
 in pure AWGN, giving the **implementation loss** (IL = Eff Eb/N0 − Theory Eb/N0).

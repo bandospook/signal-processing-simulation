@@ -27,17 +27,24 @@ differences (no matched filter) -- about 3 dB worse. Wrong formula = 3 dB offset
 
 ---
 
-## CNIR -> Eb/N0 conversion (includes sps factor -- easy to get wrong)
+## CNIR -> Eb/N0 conversion
 
-CNIR in simulation.py is measured at the native sample rate (sps samples/symbol),
-before matched filtering. Converting to Eb/N0 per bit:
+CNIR (and CNR) in simulation.py are reported in the **symbol-rate (matched-filter)
+bandwidth**: sim/simulation.py divides the native-rate noise power by sps before
+forming the ratios.  In this convention CNIR = Es / N0 directly.  Converting to
+Eb/N0 per information bit:
 
-    effective_ebn0_db = cnir_db + 10 * log10(sps / bps)
+    effective_ebn0_db = cnir_db - 10 * log10(bps)
 
-Why sps matters: noise power at native rate = `noise_density * sps * symbol_rate`.
-Theory `Eb/N0 = signal_power / (bps * symbol_rate * noise_density)`.
-Ratio = `CNIR * sps / bps`. For BPSK sps=4: +6 dB correction.
-Forgetting this produces a systematic -6 dB implementation loss on a linear amplifier.
+For BPSK (bps = 1) the conversion is a no-op: CNIR = Es/N0 = Eb/N0.
+For QPSK -3 dB, 8PSK -4.77 dB, 16QAM -6 dB.
+
+Historical note: pre-2026-05-18 (commit 5915eda), CNIR was reported in the
+native-rate bandwidth and the conversion was `cnir + 10*log10(sps/bps)`.
+Targeter.py was updated at the same time, but when targeter.py was removed with
+the seeker, main.py was carried forward with the stale formula — re-fixed when
+the discrepancy was caught.  If any code is computing eff_ebn0 with the old
+`+sps` term, it is double-counting the matched-filter gain.
 
 ---
 

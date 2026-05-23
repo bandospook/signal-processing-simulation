@@ -149,11 +149,13 @@ def plot_carrier_detector(sweep_results: list[dict],
                           carrier_name: str,
                           save_path: str | None = None) -> None:
     """
-    Plot BER, EVM, and CNR/CIR/CNIR vs IBO for a single carrier across the sweep.
+    Plot BER, EVM, and CNR/CIR/CNIR for a single carrier across the sweep.
 
-    Sweep results are a flat list of {ibo_db, noise_density_dbfs, carriers}.
-    Noise density is used as a colour parameter; line style distinguishes
-    CNR (solid), CIR (dashed), and CNIR (dotted) on the third panel.
+    Layout is a 2×3 grid:
+        Row 1 — x-axis = IBO (dB); one line per noise level.
+        Row 2 — x-axis = CNR (dB); one line per IBO (CNR varies via the noise axis).
+                CNR is reported in the symbol-rate (matched-filter) bandwidth,
+                so for BPSK it equals Eb/N0 directly.
 
     Returns silently if the named carrier has no finite metrics in the sweep
     (e.g. sweep_demod=False).
@@ -163,15 +165,23 @@ def plot_carrier_detector(sweep_results: list[dict],
     ibo_vals   = sorted(set(r["ibo_db"] for r in sweep_results))
     noise_vals = sorted(set(r["noise_density_dbfs"] for r in sweep_results))
     n_noise    = len(noise_vals)
+    n_ibo      = len(ibo_vals)
 
-    colours = plt.colormaps["viridis"](np.linspace(0.15, 0.85, n_noise))
+    noise_colours = plt.colormaps["viridis"](np.linspace(0.15, 0.85, n_noise))
+    ibo_colours   = plt.colormaps["plasma"](np.linspace(0.15, 0.85, n_ibo))
 
-    fig, (ax_ber, ax_evm, ax_db) = plt.subplots(1, 3, figsize=(15, 4.5))
-    fig.suptitle(f"Detector Sweep: {carrier_name} — Performance vs Input Backoff (IBO)")
-    ax_ber.set_title(f"{carrier_name}  —  BER")
-    ax_evm.set_title(f"{carrier_name}  —  EVM (%)")
-    ax_db.set_title(f"{carrier_name}  —  CNR / CIR / CNIR (dB)")
+    fig, axes = plt.subplots(2, 3, figsize=(15, 9))
+    (ax_ber_i, ax_evm_i, ax_db_i) = axes[0]
+    (ax_ber_e, ax_evm_e, ax_db_e) = axes[1]
+    fig.suptitle(f"Detector Sweep: {carrier_name} — vs IBO (top) and vs CNR (bottom)")
+    ax_ber_i.set_title("BER vs IBO")
+    ax_evm_i.set_title("EVM (%) vs IBO")
+    ax_db_i.set_title("CNR / CIR / CNIR (dB) vs IBO")
+    ax_ber_e.set_title("BER vs CNR")
+    ax_evm_e.set_title("EVM (%) vs CNR")
+    ax_db_e.set_title("CIR / CNIR (dB) vs CNR")
 
+    # ── Row 1: x-axis = IBO, one line per noise level ────────────────────────
     for ni, noise in enumerate(noise_vals):
         pts = sorted(
             [r for r in sweep_results if r["noise_density_dbfs"] == noise],
@@ -189,29 +199,67 @@ def plot_carrier_detector(sweep_results: list[dict],
         cirs  = [cd["cir_db"]  if np.isfinite(cd["cir_db"])  else np.nan for cd in cdata]
         cnirs = [cd["cnir_db"] if np.isfinite(cd["cnir_db"]) else np.nan for cd in cdata]
 
-        col   = colours[ni]
+        col   = noise_colours[ni]
         label = f"{noise:.0f} dBFS/Hz"
         kw    = dict(marker="o", ms=4, color=col)
 
-        ax_ber.semilogy(ibos, bers, label=label, **kw)
-        ax_evm.plot(ibos, evms, label=label, **kw)
-        ax_db.plot(ibos, cnrs,  ls="-",  label=f"CNR  {label}", **kw)
-        ax_db.plot(ibos, cirs,  ls="--", label=f"CIR  {label}",
-                   marker="s", ms=4, color=col)
-        ax_db.plot(ibos, cnirs, ls=":",  label=f"CNIR {label}",
-                   marker="^", ms=4, color=col)
+        ax_ber_i.semilogy(ibos, bers, label=label, **kw)
+        ax_evm_i.plot(ibos, evms, label=label, **kw)
+        ax_db_i.plot(ibos, cnrs,  ls="-",  label=f"CNR  {label}", **kw)
+        ax_db_i.plot(ibos, cirs,  ls="--", label=f"CIR  {label}",
+                     marker="s", ms=4, color=col)
+        ax_db_i.plot(ibos, cnirs, ls=":",  label=f"CNIR {label}",
+                     marker="^", ms=4, color=col)
 
-    ax_ber.set_ylabel("BER")
-    ax_evm.set_ylabel("EVM (%)")
-    ax_db.set_ylabel("dB")
-    for ax in (ax_ber, ax_evm, ax_db):
+    # ── Row 2: x-axis = CNR (dB), one line per IBO ───────────────────────────
+    # CNR varies with noise; CIR is fixed per IBO. The CNR panel drops CNR-vs-CNR
+    # (trivially diagonal) and plots only CIR and CNIR against CNR.
+    for ii, ibo in enumerate(ibo_vals):
+        pts = [r for r in sweep_results if r["ibo_db"] == ibo]
+        cdata = [[cr for cr in p["carriers"] if cr["name"] == carrier_name][0]
+                 for p in pts]
+        cnrs_x = [cd["cnr_db"] if np.isfinite(cd["cnr_db"]) else np.nan for cd in cdata]
+        order = sorted(range(len(pts)), key=lambda k: (np.inf if np.isnan(cnrs_x[k])
+                                                       else cnrs_x[k]))
+        cnr_s   = [cnrs_x[k] for k in order]
+        cdata_s = [cdata[k] for k in order]
+
+        bers = [cd["ber"] if (cd["ber"] is not None and cd["ber"] > 0)
+                else np.nan for cd in cdata_s]
+        evms  = [cd["evm_rms"] for cd in cdata_s]
+        cirs  = [cd["cir_db"]  if np.isfinite(cd["cir_db"])  else np.nan for cd in cdata_s]
+        cnirs = [cd["cnir_db"] if np.isfinite(cd["cnir_db"]) else np.nan for cd in cdata_s]
+
+        col   = ibo_colours[ii]
+        label = f"IBO {ibo:.1f} dB"
+        kw    = dict(marker="o", ms=4, color=col)
+
+        ax_ber_e.semilogy(cnr_s, bers, label=label, **kw)
+        ax_evm_e.plot(cnr_s, evms, label=label, **kw)
+        ax_db_e.plot(cnr_s, cirs,  ls="--", label=f"CIR  {label}",
+                     marker="s", ms=4, color=col)
+        ax_db_e.plot(cnr_s, cnirs, ls=":",  label=f"CNIR {label}",
+                     marker="^", ms=4, color=col)
+
+    for ax in (ax_ber_i, ax_ber_e):
+        ax.set_ylabel("BER")
+    for ax in (ax_evm_i, ax_evm_e):
+        ax.set_ylabel("EVM (%)")
+    for ax in (ax_db_i, ax_db_e):
+        ax.set_ylabel("dB")
+
+    for ax in (ax_ber_i, ax_evm_i, ax_db_i):
         ax.set_xlabel("IBO (dB)")
         if min(ibo_vals) < max(ibo_vals):
             ax.set_xlim(min(ibo_vals), max(ibo_vals))
         ax.grid(True, which="both", alpha=0.4)
         ax.legend(fontsize=7)
+    for ax in (ax_ber_e, ax_evm_e, ax_db_e):
+        ax.set_xlabel("CNR (dB)")
+        ax.grid(True, which="both", alpha=0.4)
+        ax.legend(fontsize=7)
 
-    # Annotate zero-BER points with a downward arrow at the plot bottom
+    # Annotate zero-BER points on the IBO panel with downward arrows
     for ni, noise in enumerate(noise_vals):
         pts = sorted(
             [r for r in sweep_results if r["noise_density_dbfs"] == noise],
@@ -219,10 +267,24 @@ def plot_carrier_detector(sweep_results: list[dict],
         for p in pts:
             cdata_pt = next(cr for cr in p["carriers"] if cr["name"] == carrier_name)
             if cdata_pt["ber"] == 0 or cdata_pt["ber"] is None:
-                ax_ber.annotate("", xy=(p["ibo_db"], ax_ber.get_ylim()[0]),
-                                xytext=(p["ibo_db"], ax_ber.get_ylim()[0] * 3),
-                                arrowprops=dict(arrowstyle="->",
-                                                color=colours[ni], lw=1.2))
+                ax_ber_i.annotate("", xy=(p["ibo_db"], ax_ber_i.get_ylim()[0]),
+                                  xytext=(p["ibo_db"], ax_ber_i.get_ylim()[0] * 3),
+                                  arrowprops=dict(arrowstyle="->",
+                                                  color=noise_colours[ni], lw=1.2))
+
+    # Same on the CNR panel (annotate at each zero-BER point's CNR)
+    for ii, ibo in enumerate(ibo_vals):
+        pts = [r for r in sweep_results if r["ibo_db"] == ibo]
+        for p in pts:
+            cdata_pt = next(cr for cr in p["carriers"] if cr["name"] == carrier_name)
+            if not np.isfinite(cdata_pt["cnr_db"]):
+                continue
+            if cdata_pt["ber"] == 0 or cdata_pt["ber"] is None:
+                cnr = cdata_pt["cnr_db"]
+                ax_ber_e.annotate("", xy=(cnr, ax_ber_e.get_ylim()[0]),
+                                  xytext=(cnr, ax_ber_e.get_ylim()[0] * 3),
+                                  arrowprops=dict(arrowstyle="->",
+                                                  color=ibo_colours[ii], lw=1.2))
 
     plt.tight_layout()
     if save_path is not None:
@@ -284,16 +346,20 @@ def write_report(
     Write a single flat Markdown table of per-(carrier, IBO, noise) results.
 
     Each entry in `rows` is a dict for one (carrier, ibo_db, noise_density_dbfs)
-    measurement and contains:
-        name              — carrier name
-        ibo_db            — input back-off (dB)
-        noise_density_dbfs — noise level used (dBFS/Hz)
-        ber               — measured BER
-        effective_ebn0_db — CNIR_dB − 10·log10(bps) in dB (None if not computed)
-        theory_ebn0_db    — theory Eb/N0 at measured BER (None if no formula)
-        implementation_loss_db — effective − theory (None if not available)
-        cnr_db, cir_db, cnir_db
-        evm_rms           — EVM % (None if not computed)
+    measurement and contains (all fields optional except name):
+        name, ibo_db, noise_density_dbfs
+        ber                     — aggregated BER across iterations
+        ber_upper_95            — rule-of-three upper bound when n_errors == 0
+        ci_half_width           — Wilson half-width at the chosen confidence
+        n_bits, n_errors        — cumulative counts across iterations
+        iterations              — iterations actually run at this point
+        converged               — bool: True if CI target met before iteration cap
+        effective_ebn0_db, theory_ebn0_db, implementation_loss_db
+        cnr_db, cir_db, cnir_db, evm_rms
+
+    A BER of 0 with a known n_bits is rendered as "< x.xe-y" using the
+    rule-of-three upper bound, not as "0".  Points that exited at the
+    iteration cap are flagged with a "*" suffix on the iteration count.
 
     append=True opens the file for appending rather than overwriting.
     """
@@ -309,25 +375,50 @@ def write_report(
             return "∞" if v > 0 else "—"
         return format(v, fmt)
 
+    def _ber_cell(r: dict) -> str:
+        ber = r.get("ber")
+        if ber is None:
+            return "—"
+        if ber == 0:
+            upper = r.get("ber_upper_95")
+            return f"< {upper:.2e}" if upper is not None else "0"
+        return f"{ber:.2e}"
+
+    def _iters_cell(r: dict) -> str:
+        n = r.get("iterations")
+        if n is None:
+            return "—"
+        return f"{n}*" if r.get("converged") is False else f"{n}"
+
     L = []
     def ln(s=""): L.append(s)
 
     ln("## Results")
     ln()
-    ln("| Carrier | IBO (dB) | Noise (dBFS/Hz) | BER | Eff Eb/N0 (dB) "
-       "| Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) "
-       "| EVM (%) |")
-    ln("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    ln("Iteration counts marked `*` exited at the iteration cap without meeting "
+       "the Wilson CI target. BER of `< x.xe-y` means zero errors observed; the "
+       "value is the rule-of-three upper 95% bound.")
+    ln()
+    ln("| Carrier | IBO (dB) | Noise (dBFS/Hz) | Iters | n_bits | n_err "
+       "| BER | CI ± | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) "
+       "| CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) |")
+    ln("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     for r in rows:
-        ber = r.get("ber")
-        ber_str = "0" if ber == 0 else (_f(ber, ".2e") if ber is not None else "—")
+        n_bits = r.get("n_bits")
+        n_bits_s = f"{int(n_bits):,}" if n_bits is not None else "—"
+        n_err = r.get("n_errors")
+        n_err_s = f"{int(n_err):,}" if n_err is not None else "—"
 
         ln(
             f"| {r.get('name', '—')}"
             f" | {_f(r.get('ibo_db'), '.1f')}"
             f" | {_f(r.get('noise_density_dbfs'), '.1f')}"
-            f" | {ber_str}"
+            f" | {_iters_cell(r)}"
+            f" | {n_bits_s}"
+            f" | {n_err_s}"
+            f" | {_ber_cell(r)}"
+            f" | {_f(r.get('ci_half_width'), '.2e')}"
             f" | {_f(r.get('effective_ebn0_db'), '.2f')}"
             f" | {_f(r.get('theory_ebn0_db'), '.2f')}"
             f" | {_f(r.get('implementation_loss_db'), '.2f')}"

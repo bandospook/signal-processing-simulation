@@ -1,4 +1,5 @@
 """System-level tests for wideband_bpsk_simulation: NL distortion vs drive level."""
+import math
 import numpy as np
 import pytest
 from sim.simulation import wideband_bpsk_simulation, _WelchState, _decimate
@@ -17,11 +18,13 @@ _AM_PM = {
 # native_rate = sps * symbol_rate = 4 * 1e6 = 4 MHz → upsample factor L=4 to 16 MHz.
 _CARRIERS = [
     dict(name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
-         rolloff=0.35, filter_span=8, num_symbols=300, power_db=0.0, freq=-3e6),
+         rolloff=0.35, filter_span=8, power_db=0.0, freq=-3e6),
     dict(name="c2", modulation="BPSK", symbol_rate=1e6, sps=4,
-         rolloff=0.35, filter_span=8, num_symbols=300, power_db=0.0, freq=+3e6),
+         rolloff=0.35, filter_span=8, power_db=0.0, freq=+3e6),
 ]
 _SAMPLE_RATE = 16e6
+# Budget chosen so each carrier's native buffer = 300 symbols × 4 sps = 1200 samples.
+_BUDGET = 1200
 
 
 def _run_no_noise(ibo_db: float) -> dict:
@@ -30,6 +33,7 @@ def _run_no_noise(ibo_db: float) -> dict:
         sample_rate=_SAMPLE_RATE,
         am_am_cfg=_AM_AM,
         am_pm_cfg=_AM_PM,
+        max_block_size_samples=_BUDGET,
         input_backoff_db=ibo_db,
         noise_density_dbfs=None,      # no noise — isolates NL distortion
         ola_filter_span=8,
@@ -77,7 +81,7 @@ def test_decimate_offset_ge_len():
 def test_simulation_raises_sample_rate_below_native():
     """Carrier with sample_rate < sps * symbol_rate must raise ValueError."""
     bad_carrier = dict(name="c1", modulation="BPSK", symbol_rate=1e6, sps=8,
-                       rolloff=0.35, filter_span=4, num_symbols=50,
+                       rolloff=0.35, filter_span=4,
                        power_db=0.0, freq=0.0)
     with pytest.raises(ValueError, match="sample_rate / native_rate"):
         wideband_bpsk_simulation(
@@ -85,18 +89,23 @@ def test_simulation_raises_sample_rate_below_native():
             sample_rate=4e6,            # 4 MHz < 8 MHz native rate
             am_am_cfg={"input": [0.0, 1.0], "output": [0.0, 1.0]},
             am_pm_cfg={"input": [0.0, 1.0], "phase_deg": [0.0, 0.0]},
+            max_block_size_samples=400,
             input_backoff_db=6.0,
         )
 
 
 def test_coded_carrier_decodes():
-    """A convolutionally-coded carrier is FEC-encoded into the chain and decoded out."""
+    """A convolutionally-coded carrier is FEC-encoded into the chain and decoded out.
+    block_length=400 → coded_bits=(400+6)*2=812 per frame; sps=4 → ~3248 samples/frame.
+    Budget of 7000 fits 2 frames."""
     coded = dict(name="cc", modulation="BPSK", symbol_rate=1e6, sps=4,
                  rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
-                 coding=dict(scheme="convolutional", block_length=400), num_frames=2)
+                 coding=dict(scheme="convolutional", block_length=400))
     result = wideband_bpsk_simulation(
         carriers=[coded], sample_rate=16e6,
-        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM, input_backoff_db=12.0,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        max_block_size_samples=7000,
+        input_backoff_db=12.0,
         noise_density_dbfs=-100.0,
         ola_filter_span=8, ola_block_size=1024, seed=1,
         demod_carriers={"cc"})
@@ -104,6 +113,30 @@ def test_coded_carrier_decodes():
     assert cr["ber"] is not None and 0.0 <= cr["ber"] <= 1.0   # post-decoder BER
     assert "uncoded_ber" in cr
     assert cr["ber"] < 0.05                                    # coded carrier decodes
+    assert cr["n_bits"] > 0 and cr["uncoded_n_bits"] > 0       # error counts exposed
+
+
+def test_derive_block_counts_uncoded():
+    """Uncoded carrier: num_symbols = budget // sps, n_frames=0, code=None."""
+    from sim.simulation import _derive_block_counts
+    carr = dict(name="x")    # no coding key
+    num_symbols, n_frames, code = _derive_block_counts(
+        carr, sps=4, bps=1, budget_samples=4000)
+    assert num_symbols == 1000
+    assert n_frames == 0
+    assert code is None
+
+
+def test_derive_block_counts_ldpc():
+    """LDPC branch builds the generator before computing frame count."""
+    from sim.simulation import _derive_block_counts
+    carr = dict(name="x", coding=dict(scheme="ldpc"))   # default matrix
+    num_symbols, n_frames, code = _derive_block_counts(
+        carr, sps=4, bps=1, budget_samples=200_000)
+    assert n_frames >= 1
+    assert code is not None
+    assert code.k > 0                       # generator was built
+    assert num_symbols == n_frames * math.ceil(code.coded_bits / 1)
 
 
 def test_distortion_increases_with_drive():

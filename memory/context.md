@@ -1,5 +1,5 @@
 # SO-WAT — Session Context
-**Last updated: 2026-05-22 (sweep unified as sole sim driver)**
+**Last updated: 2026-05-23 (adaptive CI-driven iteration replaces fixed num_symbols/num_frames)**
 
 ---
 
@@ -21,7 +21,8 @@ sim/            Core simulation library
   filters.py        FFT OLA up/downsample, channel impairments
   nonlinear_amplifier.py  AM-AM / AM-PM memoryless model
   simulation.py     N-carrier wideband simulation (returns CNR/CIR/CNIR)
-  sweep.py          2D IBO × noise density sweep
+  sweep.py          2D IBO × noise density sweep with adaptive CI-driven iteration
+  stats.py          Wilson CI half-width and rule-of-three upper bound helpers
   receiver.py       Matched filter, hard decisions, BER, EVM, soft_demap
   modulation.py     Constellations, Gray coding, APSK ratios
   plots.py          All figure generation + markdown reports
@@ -33,7 +34,7 @@ sim/            Core simulation library
 main.py         CLI entry point — runs full sim + optional sweep + writes outputs
 gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI)
 simulation.toml Example / default configuration
-tests/          180 tests, all passing, 100% coverage
+tests/          203 tests, all passing, 100% coverage
 misc/
   __init__.py   Makes misc a package (importable by gui.py)
   gen_icon.py   build_icon() generates the app icon PNG; imported by gui.py at startup.
@@ -49,8 +50,8 @@ memory/
 
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed — intentional compact GUI style)
-- **Tests:** 180 passing, 0 failing
-- **Coverage:** 100% (1253 statements, 0 missed)
+- **Tests:** 203 passing, 0 failing
+- **Coverage:** 100% (1360 statements, 0 missed)
 - Tools installed in venv: `pyright`, `ruff`, `pytest-cov`
 - Run quality checks: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
   and `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
@@ -77,7 +78,12 @@ memory/
 
 ```toml
 [simulation]
-seed = 42
+seed                   = 42
+max_block_size_samples = 16_777_216     # per-carrier native-rate buffer cap (one iter)
+target_ci_half_width   = 2e-3           # absolute half-width on BER (Wilson CI)
+confidence             = 0.95
+min_errors             = 50             # floor before convergence can be declared
+max_iterations         = 100            # safety cap on iterations per sweep point
 
 [sweep]                      # sole sim driver — every (ibo, noise) point runs the pipeline
 sample_rate        = 16      # MHz (converted to Hz by config loader)
@@ -94,12 +100,10 @@ symbol_rate = 1_000_000
 sps = 4
 rolloff = 0.35
 filter_span = 8              # half-span in symbols
-num_symbols = 10000          # set to 0 when using FEC (derived from num_frames)
 power_db = 0.0
 freq = -3_000_000
 enabled = true               # include in wideband composite
 sweep_demod = true           # demodulate and measure BER at every sweep point
-num_frames = 5               # for FEC-coded carriers (optional)
 
 [carrier.coding]             # optional — omit section for uncoded
 scheme = "convolutional"     # convolutional | concatenated | turbo | ldpc
@@ -116,12 +120,20 @@ phase_poly_order = 2
 Important schema notes:
 - The old `[wideband]` block is **gone**; `sample_rate` lives under `[sweep]`.
 - The old `[amplifier].input_backoff_db` field is **gone**; IBO is per-sweep-point.
+- `num_symbols` / `num_frames` are **gone** from carrier config — they are
+  derived per-carrier from `max_block_size_samples` (see technical_notes.md
+  § "Adaptive iteration").  Tests of the underlying `rrc_baseband()` helper
+  still take `num_symbols` as a parameter; only the **carrier config field**
+  was removed.
 - The sweep is the only sim path; a 1×1 sweep is the way to do a single-point run.
 - The first sweep point's wideband composite feeds `wideband.png`.
 - `report.md` is a single flat table — one row per `(carrier, IBO, noise)` —
-  written when any carrier has `sweep_demod=true`.  Includes BER, Eff Eb/N0,
-  Theory Eb/N0, Impl Loss, CNR/CIR/CNIR, EVM.  Configuration is *not* duplicated
-  in the report; the source TOML is the canonical record of how the run was set.
+  written when any carrier has `sweep_demod=true`.  Columns: Iters, n_bits,
+  n_err, BER (or rule-of-three upper bound when zero errors), CI half-width,
+  Eff Eb/N0, Theory Eb/N0, Impl Loss, CNR/CIR/CNIR, EVM.  Iteration counts
+  with a trailing `*` exited at the iteration cap without converging.
+  Configuration is *not* duplicated in the report; the source TOML is the
+  canonical record of how the run was set.
 
 ---
 

@@ -1,16 +1,16 @@
 # Project State
 
-Last updated: 2026-05-23, after UI streamlining (fixed plot filenames + single plots toggle)
+Last updated: 2026-05-23, after adaptive CI-driven iteration replaces fixed num_symbols/num_frames
 
 ---
 
 ## Current code quality
 
-- **Tests:** 182 passing, 0 failing
+- **Tests:** 203 passing, 0 failing
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed in pyproject.toml — intentional compact GUI style)
-- **Coverage:** 100% across all modules (1163 statements, 0 missed)
-- **Branch:** master, up to date with origin/master
+- **Coverage:** 100% across all modules (1360 statements, 0 missed)
+- **Branch:** master, ahead of origin/master with the adaptive-iteration refactor
 
 ---
 
@@ -21,7 +21,10 @@ Last updated: 2026-05-23, after UI streamlining (fixed plot filenames + single p
 - AWGN performance test suite: BER monotonicity, theory comparison, BER/EVM/eye-diagram plots
 - N-carrier wideband simulation with shared NLA, per-carrier channel impairments, CNR/CIR/CNIR
 - OLA upsample/downsample with chunk-progress callbacks (for GUI progress reporting)
-- 2D IBO × noise density sweep
+- 2D IBO × noise density sweep with adaptive Wilson-CI iteration per point
+  (num_symbols / num_frames derived from a memory budget; iterations accumulate
+  until BER half-width ≤ target or max_iterations hit — see technical_notes.md
+  § "Adaptive iteration")
 - FEC coding: convolutional (K=7, rate-1/2, soft Viterbi), concatenated (RS+convolutional),
   turbo (rate-1/3 PCCC, max-log-MAP BCJR), LDPC (normalized min-sum BP)
   — fully wired into simulation TX/RX chain via [carrier.coding] config block

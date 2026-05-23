@@ -63,6 +63,12 @@ def main(config_path: str = "simulation.toml",
         raise ValueError("[sweep].ibo_db and [sweep].noise_density_dbfs must each "
                          "contain at least one value.")
 
+    max_block_size_samples = int(sim["max_block_size_samples"])
+    target_ci_half_width   = float(sim["target_ci_half_width"])
+    confidence             = float(sim["confidence"])
+    min_errors             = int(sim["min_errors"])
+    max_iterations         = int(sim["max_iterations"])
+
     n_sweep   = len(ibo_sweep) * len(noise_sweep)
     demod_names = {c["name"] for c in active_carriers if c.get("sweep_demod", False)}
 
@@ -90,6 +96,11 @@ def main(config_path: str = "simulation.toml",
         am_pm_cfg                 = amp["am_pm"],
         ibo_db_values             = ibo_sweep,
         noise_density_dbfs_values = noise_sweep,
+        max_block_size_samples    = max_block_size_samples,
+        target_ci_half_width      = target_ci_half_width,
+        confidence                = confidence,
+        min_errors                = min_errors,
+        max_iterations            = max_iterations,
         ola_filter_span           = ola["filter_span"],
         ola_block_size            = ola["block_size"],
         seed                      = sim["seed"],
@@ -135,6 +146,8 @@ def main(config_path: str = "simulation.toml",
     for r in sweep_results:
         ibo  = r["ibo_db"]
         nd   = r["noise_density_dbfs"]
+        iters = r.get("iterations")
+        conv  = r.get("converged")
         for carr in active_carriers:
             if not carr.get("sweep_demod", False):
                 continue
@@ -155,6 +168,12 @@ def main(config_path: str = "simulation.toml",
                 ibo_db=ibo,
                 noise_density_dbfs=nd,
                 ber=ber_val,
+                ber_upper_95=cr.get("ber_upper_95"),
+                ci_half_width=cr.get("ci_half_width"),
+                n_bits=cr.get("n_bits"),
+                n_errors=cr.get("n_errors"),
+                iterations=iters,
+                converged=conv,
                 effective_ebn0_db=eff_ebn0,
                 theory_ebn0_db=theory,
                 implementation_loss_db=impl_loss,

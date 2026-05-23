@@ -18,13 +18,13 @@ _AM_PM = {
 def _make_cfg(tmp_path, extra_carriers=None, plots=True):
     carriers = [
         dict(name="c1", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-             num_symbols=100, power_db=0.0, freq=-3e6, sweep_demod=True,
+             power_db=0.0, freq=-3e6, sweep_demod=True,
              channel=dict(enabled=True, ripple_db=0.5, ripple_cycles=2.0,
                           max_phase_dev_deg=5.0, phase_poly_order=2)),
         # c2 has sweep_demod=False (default): contributes to the composite but is
         # not demodulated, exercising the skip branches in main.py and simulation.py.
         dict(name="c2", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-             num_symbols=100, power_db=0.0, freq=+3e6),
+             power_db=0.0, freq=+3e6),
     ]
     if extra_carriers:
         carriers.extend(extra_carriers)
@@ -37,7 +37,15 @@ def _make_cfg(tmp_path, extra_carriers=None, plots=True):
         },
         "amplifier": {"am_am": _AM_AM, "am_pm": _AM_PM},
         "ola": {"filter_span": 8, "block_size": 1024},
-        "simulation": {"seed": 42},
+        "simulation": {
+            "seed":                   42,
+            # Tiny budget keeps tests fast (100 symbols × 4 sps = 400 samples).
+            "max_block_size_samples": 400,
+            "target_ci_half_width":   0.5,   # huge → converge in 1 iteration
+            "confidence":             0.95,
+            "min_errors":             0,
+            "max_iterations":         2,
+        },
         "output": {
             "output_dir": str(tmp_path),
             "plots":      plots,
@@ -73,7 +81,7 @@ def test_main_plots_disabled(tmp_path):
 def test_main_carrier_name_slug(tmp_path):
     """Spaces in carrier names are replaced with underscores in plot filenames."""
     spaced = dict(name="my carrier", symbol_rate=1e6, sps=4, rolloff=0.35,
-                  filter_span=8, num_symbols=100, power_db=0.0, freq=0.0,
+                  filter_span=8, power_db=0.0, freq=0.0,
                   modulation="BPSK", sweep_demod=True)
     cfg = _make_cfg(tmp_path, extra_carriers=[spaced])
     with patch("main.load_config", return_value=cfg), \
@@ -101,7 +109,7 @@ def test_main_demod_writes_report(tmp_path):
     """A carrier with sweep_demod=True is demodulated and writes report.md."""
     fixed_carrier = dict(
         name="fd", symbol_rate=1e6, sps=4, rolloff=0.35, filter_span=8,
-        num_symbols=200, power_db=0.0, freq=0.0,
+        power_db=0.0, freq=0.0,
         modulation="BPSK", sweep_demod=True,
     )
     cfg = _make_cfg(tmp_path, extra_carriers=[fixed_carrier])
@@ -158,7 +166,6 @@ symbol_rate = 1
 sps         = 4
 rolloff     = 0.35
 filter_span = 8
-num_symbols = 100
 power_db    = 0.0
 freq        = -3
 """
@@ -172,6 +179,9 @@ def test_load_config(tmp_path):
     cfg = load_config(path)
 
     assert cfg["simulation"]["seed"] == 99
+    # Defaults populated for fields the user didn't set
+    assert cfg["simulation"]["max_block_size_samples"] == 16_777_216
+    assert cfg["simulation"]["confidence"] == 0.95
     assert cfg["sweep"]["sample_rate"] == 16_000_000  # 16 MHz -> Hz
     assert cfg["sweep"]["ibo_db"] == [6.0]
     assert cfg["sweep"]["noise_density_dbfs"] == [-160.0]

@@ -209,7 +209,7 @@ def test_rational_resample_no_fractional_L_error():
     _am_pm = {"input":  [0.0, 0.5, 1.0], "phase_deg": [0.0, 1.0, 3.0]}
     carrier = dict(
         name="fast", symbol_rate=2e6, sps=4, rolloff=0.35,
-        filter_span=8, num_symbols=300, power_db=0.0, freq=0.0,
+        filter_span=8, power_db=0.0, freq=0.0,
         modulation="BPSK",
     )
     result = wideband_bpsk_simulation(
@@ -217,6 +217,7 @@ def test_rational_resample_no_fractional_L_error():
         sample_rate=500e6,
         am_am_cfg=_am_am,
         am_pm_cfg=_am_pm,
+        max_block_size_samples=1200,    # 300 symbols × sps=4
         input_backoff_db=6.0,
         ola_filter_span=8,
         seed=0,

@@ -1,5 +1,10 @@
 [simulation]
-seed = 42
+seed                   = 42
+max_block_size_samples = 4_194_304
+target_ci_half_width   = 2e-3
+confidence             = 0.95
+min_errors             = 50
+max_iterations         = 20
 
 [sweep]
 sample_rate        = 20
@@ -29,7 +34,6 @@ symbol_rate  = 1
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
-num_symbols  = 2_000
 power_db     = 0
 freq         = 0
 enabled      = true
@@ -42,7 +46,6 @@ symbol_rate  = 2
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
-num_symbols  = 1_000_000
 power_db     = 0
 freq         = 1.5
 enabled      = true

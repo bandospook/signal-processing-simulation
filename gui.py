@@ -38,7 +38,15 @@ def build_toml(cfg: dict) -> str:
     def kv(k, v, w=0): L.append(f"{k:<{w}} = {_lit(v)}")
     def kva(k, v, w=0): L.append(f"{k:<{w}} = {_arr(v)}")
 
-    ln("[simulation]");  kv("seed", cfg["simulation"]["seed"]);  ln()
+    sim = cfg["simulation"]
+    ln("[simulation]")
+    kv("seed                  ", sim["seed"])
+    kv("max_block_size_samples", sim["max_block_size_samples"])
+    kv("target_ci_half_width  ", sim["target_ci_half_width"])
+    kv("confidence            ", sim["confidence"])
+    kv("min_errors            ", sim["min_errors"])
+    kv("max_iterations        ", sim["max_iterations"])
+    ln()
 
     sw = cfg["sweep"]
     ln("[sweep]")
@@ -67,7 +75,7 @@ def build_toml(cfg: dict) -> str:
     for carr in cfg.get("carrier", []):
         ln("[[carrier]]")
         for k in ("name", "modulation", "symbol_rate", "sps", "rolloff", "filter_span",
-                  "num_symbols", "power_db", "freq", "enabled", "sweep_demod"):
+                  "power_db", "freq", "enabled", "sweep_demod"):
             if k in carr:
                 kv(f"{k:12}", carr[k])
         cod = carr.get("coding")
@@ -169,8 +177,6 @@ class CarrierFrame(ttk.LabelFrame):
          "RRC filter roll-off factor α (0 – 1). Higher = wider occupied bandwidth, lower peak ISI."),
         ("filter_span", "Filter Span",      "int",   "8",
          "RRC filter half-span in symbols. Total taps = filter_span × sps + 1."),
-        ("num_symbols", "Num Symbols",      "int",   "1000",
-         "Symbols simulated per run. Higher count improves BER statistical accuracy."),
         ("power_db",    "Power (dB)",       "float", "0.0",
          "Carrier power in dBFS relative to the wideband composite full-scale."),
         ("freq",        "Freq (MHz)",       "float", "0.0",
@@ -282,20 +288,15 @@ class CarrierFrame(ttk.LabelFrame):
                           values=self._CODING_SCHEMES, state="readonly", width=14)
         cb.grid(row=0, column=1, sticky="w", pady=2)
         _Tip(cb, "FEC scheme: convolutional, concatenated, turbo, or ldpc.")
-        _lf(self._coding_frame, "Num Frames:", 0, 2)
-        nf_var = tk.StringVar(value=_fmt(cod.get("num_frames", 5)))
-        self._coding_vars["num_frames"] = nf_var
-        _ent(self._coding_frame, nf_var, 0, 3, width=8,
-             tip="Frames to simulate (num_symbols derived from frame count × code parameters).")
-        _lf(self._coding_frame, "Block Length:", 1, 0)
+        _lf(self._coding_frame, "Block Length:", 0, 2)
         bl_var = tk.StringVar(value=_fmt(cod.get("block_length", 1024)))
         self._coding_vars["block_length"] = bl_var
-        _ent(self._coding_frame, bl_var, 1, 1, width=10,
+        _ent(self._coding_frame, bl_var, 0, 3, width=10,
              tip="Data bits per frame (convolutional and turbo). Ignored for concatenated/ldpc.")
-        _lf(self._coding_frame, "LDPC Matrix:", 1, 2)
+        _lf(self._coding_frame, "LDPC Matrix:", 1, 0)
         lm_var = tk.StringVar(value=cod.get("matrix", ""))
         self._coding_vars["matrix"] = lm_var
-        _ent(self._coding_frame, lm_var, 1, 3, width=24,
+        _ent(self._coding_frame, lm_var, 1, 1, width=32,
              tip="Path to .alist file for LDPC code. "
                  "Leave blank to use the bundled default (data/ldpc/mackay_13298.alist).")
 
@@ -331,12 +332,11 @@ class CarrierFrame(ttk.LabelFrame):
             scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
             if scheme:
                 cod["scheme"] = scheme
-            for key in ("num_frames", "block_length"):
-                raw = self._coding_vars.get(key, tk.StringVar()).get().strip()
-                try:
-                    cod[key] = int(float(raw))
-                except ValueError:
-                    pass
+            raw = self._coding_vars.get("block_length", tk.StringVar()).get().strip()
+            try:
+                cod["block_length"] = int(float(raw))
+            except ValueError:
+                pass
             matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
             if matrix:
                 cod["matrix"] = matrix
@@ -490,6 +490,37 @@ class App:
              tip="Composite wideband sample rate in MHz.\n"
                  "Must be at least 2x the highest carrier edge frequency."); r += 1
 
+        r = self._section(f, "Adaptive BER measurement", r)
+        _lf(f, "Max Block Size (samples):", r, 0)
+        _ent(f, self._sv("sim.max_block_size_samples"), r, 1, width=20,
+             tip="Per-carrier native-rate buffer cap, in samples, for ONE iteration.\n"
+                 "num_symbols (uncoded) or num_frames (coded) are derived from this so\n"
+                 "the largest per-carrier buffer never exceeds it. Increase to reduce\n"
+                 "iteration count at low BER; decrease to fit smaller machines.\n"
+                 "Memory ≈ this × 16 bytes per active demod carrier."); r += 1
+        _lf(f, "Target CI Half-Width:", r, 0)
+        _ent(f, self._sv("sim.target_ci_half_width"), r, 1, width=20,
+             tip="Absolute half-width on BER at the chosen confidence level.\n"
+                 "Iterations accumulate at each (IBO, noise) point until the\n"
+                 "Wilson interval is at most ±this around the estimate.\n"
+                 "Example: 2e-3 means BER ± 0.002 at 95% confidence."); r += 1
+        _lf(f, "Confidence:", r, 0)
+        _ent(f, self._sv("sim.confidence"), r, 1, width=20,
+             tip="Two-sided confidence level for the Wilson interval, in (0, 1).\n"
+                 "Typical value: 0.95. Used for both the CI stop criterion and the\n"
+                 "rule-of-three upper bound reported when zero errors are observed."); r += 1
+        _lf(f, "Min Errors:", r, 0)
+        _ent(f, self._sv("sim.min_errors"), r, 1, width=20,
+             tip="Minimum cumulative bit errors required before convergence can be\n"
+                 "declared at a sweep point. Prevents premature stops when the CI is\n"
+                 "tight but jittery from too few errors. Typical value: 50."); r += 1
+        _lf(f, "Max Iterations:", r, 0)
+        _ent(f, self._sv("sim.max_iterations"), r, 1, width=20,
+             tip="Safety cap on the number of full sim runs per (IBO, noise) point.\n"
+                 "Each iteration processes one Max-Block-Size buffer per carrier;\n"
+                 "iterations that hit this cap without converging are flagged in\n"
+                 "report.md with an asterisk on the iteration count."); r += 1
+
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
         _lf(f, "Filter Span:", r, 0)
         _ent(f, self._sv("ola.filter_span"), r, 1,
@@ -625,6 +656,13 @@ class App:
     def _populate(self, cfg: dict):
         sim = cfg.get("simulation", {})
         self._vars["sim.seed"].set(str(sim.get("seed", 42)))
+        self._vars["sim.max_block_size_samples"].set(
+            str(sim.get("max_block_size_samples", 16_777_216)))
+        self._vars["sim.target_ci_half_width"].set(
+            _fmt(sim.get("target_ci_half_width", 2e-3)))
+        self._vars["sim.confidence"].set(_fmt(sim.get("confidence", 0.95)))
+        self._vars["sim.min_errors"].set(str(sim.get("min_errors", 50)))
+        self._vars["sim.max_iterations"].set(str(sim.get("max_iterations", 100)))
 
         ola = cfg.get("ola", {})
         self._vars["ola.filter_span"].set(str(ola.get("filter_span", 16)))
@@ -665,7 +703,14 @@ class App:
         def tv(key): return _parse_float_list(self._texts[key].get("1.0", "end"))
 
         cfg: dict = {
-            "simulation": {"seed": iv("sim.seed")},
+            "simulation": {
+                "seed":                   iv("sim.seed"),
+                "max_block_size_samples": iv("sim.max_block_size_samples"),
+                "target_ci_half_width":   fv("sim.target_ci_half_width"),
+                "confidence":             fv("sim.confidence"),
+                "min_errors":             iv("sim.min_errors"),
+                "max_iterations":         iv("sim.max_iterations"),
+            },
             "sweep": {
                 "sample_rate":        fv("sweep.sample_rate"),
                 "ibo_db":             _parse_float_list(sv("sweep.ibo")),

@@ -101,6 +101,17 @@ def test_plot_carrier_detector_single_ibo():
         plot_carrier_detector(_SWEEP_FINITE, "c1", save_path=None)
 
 
+def test_plot_carrier_detector_zero_ber_with_inf_cnr():
+    """CNR-row zero-BER annotation skips points where cnr_db is non-finite
+    (e.g. zero-noise → CNR = inf), avoiding an inf x-coordinate annotation."""
+    sweep = [
+        {"ibo_db": 3.0, "noise_density_dbfs": -160.0,
+         "carriers": [{"name": "c1", "cnir_db": 40.0, "cnr_db": float("inf"),
+                       "cir_db": 40.0, "ber": 0.0, "evm_rms": 3.0}]},
+    ]
+    plot_carrier_detector(sweep, "c1", save_path=None)
+
+
 # ── write_report ──────────────────────────────────────────────────────────────
 
 _ROWS_NO_THEORY = [
@@ -137,6 +148,50 @@ def test_write_report_basic(tmp_path):
     assert "IBO (dB)" in text
     assert "| 3.0" in text         # ibo_db value formatted
     assert "—" in text             # theory_ebn0_db is None
+
+
+def test_write_report_zero_ber_no_upper_renders_as_0(tmp_path):
+    """ber == 0 without a ber_upper_95 falls through to the literal '0' branch."""
+    rows = [dict(_ROWS_NO_THEORY[0])]
+    rows[0]["ber_upper_95"] = None
+    path = str(tmp_path / "report.md")
+    write_report(rows, save_path=path)
+    text = Path(path).read_text(encoding="utf-8")
+    # Cell appears between pipes — anchor on the surrounding pipes to avoid
+    # matching the literal "0" elsewhere (e.g. in IBO 3.0).
+    assert "| 0 |" in text or "| 0 " in text
+
+
+def test_write_report_zero_ber_with_upper_renders_as_lt(tmp_path):
+    """ber == 0 with a ber_upper_95 set renders as '< x.xe-y'."""
+    rows = [dict(_ROWS_NO_THEORY[0])]
+    rows[0]["ber_upper_95"] = 3e-6
+    path = str(tmp_path / "report.md")
+    write_report(rows, save_path=path)
+    text = Path(path).read_text(encoding="utf-8")
+    assert "< 3.00e-06" in text
+
+
+def test_write_report_capped_iter_marks_asterisk(tmp_path):
+    """converged=False appends '*' to the iteration count cell."""
+    rows = [dict(_ROWS_NO_THEORY[0])]
+    rows[0]["iterations"] = 100
+    rows[0]["converged"]  = False
+    path = str(tmp_path / "report.md")
+    write_report(rows, save_path=path)
+    text = Path(path).read_text(encoding="utf-8")
+    assert "100*" in text
+
+
+def test_write_report_ber_none_renders_em_dash(tmp_path):
+    """ber=None (e.g. demod skipped) renders as '—' in the BER cell."""
+    rows = [dict(_ROWS_NO_THEORY[0])]
+    rows[0]["ber"] = None
+    path = str(tmp_path / "report.md")
+    write_report(rows, save_path=path)
+    text = Path(path).read_text(encoding="utf-8")
+    # The BER cell sits between two pipes
+    assert "| — |" in text or "| —" in text
 
 
 def test_write_report_with_theory(tmp_path):

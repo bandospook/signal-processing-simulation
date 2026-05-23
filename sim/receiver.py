@@ -135,22 +135,28 @@ def receive(signal: np.ndarray,
 
     sym_decisions, bit_decisions = decide(samples_norm, mod, **mod_kwargs)
 
+    n_bits = 0
+    n_errors = 0
     if mod == "DBPSK":
         # Differential decode: N decisions → N-1 bits; compare with reference[1:]
         bit_decisions = differential_decode(sym_decisions)
         if reference_bits is not None:
             ref = np.asarray(reference_bits, dtype=int)
             n = min(len(bit_decisions), len(ref) - 1)
-            ber = float(np.mean(bit_decisions[:n] != ref[1 : n + 1]))
+            n_bits = int(n)
+            n_errors = int(np.sum(bit_decisions[:n] != ref[1 : n + 1]))
+            ber = (n_errors / n_bits) if n_bits > 0 else None
         else:
             ber = None
     elif reference_bits is not None:
-        ber = _ber_with_ambiguity(samples_norm, reference_bits, mod, **mod_kwargs)
+        ber, n_bits, n_errors = _ber_with_ambiguity(
+            samples_norm, reference_bits, mod, **mod_kwargs)
     else:
         ber = None
 
     evm = measure_evm_rms(samples_norm, sym_decisions)
-    return dict(samples=samples_norm, decisions=bit_decisions, ber=ber, evm_rms=evm)
+    return dict(samples=samples_norm, decisions=bit_decisions, ber=ber, evm_rms=evm,
+                n_bits=n_bits, n_errors=n_errors)
 
 
 def _msk_receive(signal: np.ndarray, sps: int,
@@ -188,37 +194,48 @@ def _msk_receive(signal: np.ndarray, sps: int,
     bit_decisions[1::2] = q_dec
 
     ber: float | None = None
+    n_bits = 0
+    n_errors = 0
     if reference_bits is not None:
         ref = np.asarray(reference_bits[:n_sym], dtype=int)
         n = min(len(bit_decisions), len(ref))
-        ber = float(np.mean(bit_decisions[:n] != ref[:n]))
-        if ber > 0.5:
-            ber = 1.0 - ber
+        n_bits = int(n)
+        n_errors = int(np.sum(bit_decisions[:n] != ref[:n]))
+        if n_errors * 2 > n_bits:
+            n_errors = n_bits - n_errors
             bit_decisions = 1 - bit_decisions
+        ber = (n_errors / n_bits) if n_bits > 0 else None
 
     return dict(samples=signal[:total:sps], decisions=bit_decisions,
-                ber=ber, evm_rms=float("nan"))
+                ber=ber, evm_rms=float("nan"),
+                n_bits=n_bits, n_errors=n_errors)
 
 
 def _ber_with_ambiguity(samples: np.ndarray, reference_bits: np.ndarray,
-                        mod: str, **mod_kwargs) -> float:
+                        mod: str, **mod_kwargs) -> tuple[float, int, int]:
     """
     BER with phase-ambiguity resolution.
 
     Tries all N rotationally equivalent orientations of the received samples
-    (where N = rotational_symmetry(mod)) and returns the minimum BER.
-    This handles the systematic phase offset introduced by AM-PM without
-    requiring explicit carrier phase recovery.
+    (where N = rotational_symmetry(mod)) and returns (best_ber, n_bits, best_errors)
+    for the orientation that minimises the error count.  This handles the
+    systematic phase offset introduced by AM-PM without requiring explicit
+    carrier phase recovery.
     """
     ref = np.asarray(reference_bits, dtype=int)
     n_rot = rotational_symmetry(mod)
-    best = 1.0
+    best_n_bits = 0
+    best_errors = 0
+    best_ber = 1.0
     for k in range(n_rot):
         angle = k * 2 * np.pi / n_rot
         rotated = samples * np.exp(1j * angle)
         _, bit_dec = decide(rotated, mod, **mod_kwargs)
         n = min(len(bit_dec), len(ref))
-        ber_k = float(np.mean(bit_dec[:n] != ref[:n]))
-        if ber_k < best:
-            best = ber_k
-    return best
+        errs_k = int(np.sum(bit_dec[:n] != ref[:n]))
+        ber_k = (errs_k / n) if n > 0 else 1.0
+        if ber_k < best_ber:
+            best_ber = ber_k
+            best_n_bits = int(n)
+            best_errors = errs_k
+    return best_ber, best_n_bits, best_errors

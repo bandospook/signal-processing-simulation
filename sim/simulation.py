@@ -6,10 +6,14 @@ import numpy as np
 from .baseband import rrc_baseband
 from scipy.signal import resample_poly
 
-from .coding import build_code, decode_frames, encode_frames
+from .coding import (build_code, decode_frames, encode_frames,
+                     ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode)
 from .filters import OLAState, x_up_block, apply_channel_impairment
+from .modulation import bits_per_symbol
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive, soft_demap
+
+_AnyCode = ConvolutionalCode | ConcatenatedCode | LDPCCode | TurboCode
 
 _PrintCB = Callable[[str], None] | None
 
@@ -71,10 +75,32 @@ def _decimate(filtered: np.ndarray, L: int,
 
 # ── Simulation ───────────────────────────────────────────────────────────────
 
+def _derive_block_counts(carr: dict, sps: int, bps: int,
+                         budget_samples: int) -> tuple[int, int, _AnyCode | None]:
+    """Return (num_symbols, n_frames, code) sized to fit budget_samples.
+
+    For uncoded carriers, n_frames == 0 and code is None.
+    For coded carriers, n_frames is the integer number of FEC frames whose
+    total native-rate sample length fits within budget_samples (≥ 1), and
+    num_symbols is the corresponding symbol count.
+    """
+    coding_cfg = carr.get("coding")
+    if coding_cfg is None:
+        return max(1, budget_samples // sps), 0, None
+    code = build_code(coding_cfg)
+    if isinstance(code, LDPCCode):
+        code.build_generator()
+    syms_per_frame = math.ceil(code.coded_bits / bps)
+    native_per_frame = max(1, syms_per_frame * sps)
+    n_frames = max(1, budget_samples // native_per_frame)
+    return syms_per_frame * n_frames, n_frames, code
+
+
 def wideband_bpsk_simulation(carriers: list[dict],
                               sample_rate: float,
                               am_am_cfg: dict,
                               am_pm_cfg: dict,
+                              max_block_size_samples: int,
                               input_backoff_db: float = 0.0,
                               noise_density_dbfs: float | None = None,
                               ola_filter_span: int = 16,
@@ -126,7 +152,6 @@ def wideband_bpsk_simulation(carriers: list[dict],
         sps         = int(carr["sps"])
         rolloff     = float(carr["rolloff"])
         filter_span = int(carr["filter_span"])
-        num_symbols = int(carr.get("num_symbols", 0))
         power_db    = float(carr.get("power_db", 0.0))
         freq        = float(carr["freq"])
         channel_cfg = carr.get("channel")
@@ -147,21 +172,22 @@ def wideband_bpsk_simulation(carriers: list[dict],
         mod_kwargs = {k: carr[k] for k in ("apsk_gamma", "apsk_gamma1", "apsk_gamma2")
                       if k in carr}
 
+        # Derive symbol / frame counts from the memory budget.  The budget is
+        # interpreted per-carrier on the native-rate buffer (num_symbols × sps).
+        bps = bits_per_symbol(modulation)
+        num_symbols, n_frames, code = _derive_block_counts(
+            carr, sps, bps, max_block_size_samples)
+
         # FEC-coded carrier: encode random data frames and feed the coded bits
         # to the modulator.  Uncoded carrier: rrc_baseband generates the bits.
-        coding_cfg = carr.get("coding")
-        if coding_cfg is not None:
-            code = build_code(coding_cfg)
-            n_frames = int(carr.get("num_frames", 1))
+        if code is not None:
             data_bits, coded_bits = encode_frames(
                 code, n_frames, np.random.default_rng(int(per_carrier_seeds[i])))
             bb, t, bits, symbols = rrc_baseband(
                 modulation, 0, symbol_rate, native_rate,
                 rolloff, filter_span, bits=coded_bits, **mod_kwargs)
         else:
-            code = None
             data_bits = None
-            n_frames = 0
             bb, t, bits, symbols = rrc_baseband(
                 modulation, num_symbols, symbol_rate, native_rate,
                 rolloff, filter_span, seed=int(per_carrier_seeds[i]), **mod_kwargs)
@@ -288,7 +314,9 @@ def wideband_bpsk_simulation(carriers: list[dict],
     for i, cr in enumerate(carrier_state):
         if demod_carriers is not None and cr["name"] not in demod_carriers:
             cr.update(nl=None, cnr_db=float("nan"), cir_db=float("nan"),
-                      cnir_db=float("nan"), ber=None, evm_rms=float("nan"))
+                      cnir_db=float("nan"), ber=None, evm_rms=float("nan"),
+                      n_bits=0, n_errors=0,
+                      uncoded_n_bits=0, uncoded_n_errors=0)
             continue
 
         raw_ref   = np.concatenate(buf_ref[i])   if buf_ref[i]   else np.zeros(0, dtype=complex)
@@ -344,6 +372,11 @@ def wideband_bpsk_simulation(carriers: list[dict],
             reference_bits=cr["bits"],
             **cr["mod_kwargs"],
         )
+        # Channel-bit counts (denominator/numerator for the pre-FEC BER).  For
+        # uncoded carriers these double as the primary n_bits/n_errors below.
+        n_channel = rx.get("n_bits", 0)
+        e_channel = rx.get("n_errors", 0)
+
         # For a coded carrier, soft-demap the symbol samples, FEC-decode, and
         # report the post-decoder BER as `ber` (the channel BER becomes uncoded_ber).
         if cr["code"] is not None:
@@ -354,8 +387,17 @@ def wideband_bpsk_simulation(carriers: list[dict],
             decoded = decode_frames(cr["code"], llrs, cr["n_frames"])
             data = cr["data_bits"]
             n = min(len(decoded), len(data))
-            rx["uncoded_ber"] = rx["ber"]
-            rx["ber"] = float(np.mean(decoded[:n] != data[:n]))
+            rx["uncoded_ber"]      = rx["ber"]
+            rx["uncoded_n_bits"]   = n_channel
+            rx["uncoded_n_errors"] = e_channel
+            n_post = int(n)
+            e_post = int(np.sum(decoded[:n] != data[:n]))
+            rx["ber"]      = (e_post / n_post) if n_post > 0 else None
+            rx["n_bits"]   = n_post
+            rx["n_errors"] = e_post
+        else:
+            rx["uncoded_n_bits"]   = 0
+            rx["uncoded_n_errors"] = 0
         cr.update(rx)
 
     # ── Finalise Welch PSDs ───────────────────────────────────────────────────

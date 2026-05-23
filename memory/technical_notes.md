@@ -150,3 +150,141 @@ This is implemented in sim/simulation.py (commit e33778e).
 
 Use np.real(x) not x.real. Pylance's numpy stubs have broken overloads for the
 property form on ndarray[Any, dtype[Any]].
+
+---
+
+## Implementation loss is measured, not approximated
+
+**Decision (2026-05-23):** Implementation loss is reported only as the
+*measured* gap between effective Eb/N0 and the AWGN theory curve at the
+observed BER:
+
+    IL_dB = effective_Eb/N0_dB - theory_Eb/N0_dB(at_measured_BER)
+
+We considered also reporting a cheap predictor based on the Gaussian-
+distortion approximation:
+
+    IL_approx_dB = (C/N)_dB - (C/(N+I))_dB
+
+That formula treats the NL-induced distortion `I` as if it were additional
+AWGN of power equal to the measured CIR's `I`.  It's accurate when the
+distortion really is Gaussian-like — many independent carriers through a
+memoryless NL at moderate IBO, radially symmetric constellations
+(BPSK/QPSK/MSK/OQPSK), CLT-friendly statistics.
+
+The approximation breaks down in regimes we actually care about:
+
+- **Single carrier, low IBO** — distortion is a deterministic per-symbol warp,
+  not random.  BPSK can sit at BER ≈ 0 even with finite CIR; IL_approx
+  predicts several dB of loss that doesn't exist.
+- **Multi-amplitude constellations** (16QAM, 16APSK, 32APSK) — AM-AM and
+  AM-PM act differently on inner vs. outer rings.  Distortion is
+  symbol-correlated and asymmetric; Gaussian-equivalence is off by 0.5–2 dB
+  in either direction depending on regime.
+- **AM-PM-dominated regimes** — pure phase distortion looks like rotation,
+  not noise.  Phase-ambiguity resolution removes the systematic component;
+  the amplitude-dependent residual still warps multi-ring constellations.
+- **Coded carriers** — the decoder assumes Gaussian-noise LLRs.  Non-Gaussian
+  distortion mis-scales LLR magnitudes and shifts coding gain by an amount
+  no AWGN-theory curve can predict.  IL_approx is essentially a guess here.
+- **Error floors at high CNR** — IL_approx predicts BER keeps falling on the
+  AWGN curve translated by a constant; reality is a floor.  Gap grows
+  without bound.
+
+Adding IL_approx as a second column was considered.  Decision: don't.  It
+encourages reading the predicted value when the measured one is available
+and authoritative.  If we ever want the gap as a diagnostic ("is distortion
+Gaussian-like at this operating point?"), compute it offline from the
+existing CNR/CIR/CNIR columns — no need to bake it into the report.
+
+---
+
+## Adaptive iteration: CI-bounded BER measurement at a fixed memory budget
+
+**Decision (2026-05-23):** The sim runs each (IBO, noise) sweep point as an
+adaptive accumulation of independent iterations rather than a single fixed-
+size shot.  Per-carrier `num_symbols` / `num_frames` are derived from a
+memory budget; total bits are grown by re-running with fresh seeds until a
+Wilson-CI half-width target on BER is met.
+
+### Why
+
+A fixed `num_symbols` forces an awkward trade-off: too small → BER estimates
+have huge variance at low error rates (a single error swings the estimate by
+orders of magnitude); too large → the narrowband carrier's native-rate buffer
+blows the memory budget that the chunk pipeline was built to respect.
+Adaptive iteration breaks the trade-off: each iteration stays within budget,
+and the count of iterations scales automatically with the difficulty of the
+operating point (more iters needed at low BER, fewer at high BER).
+
+### Configuration
+
+New `[simulation]` keys (also displayed on the GUI's General tab):
+
+    max_block_size_samples    int    per-carrier native-rate buffer cap (samples)
+    target_ci_half_width      float  absolute half-width on BER (e.g. 2e-3)
+    confidence                float  two-sided level for the Wilson CI (e.g. 0.95)
+    min_errors                int    minimum cumulative errors before convergence
+                                     can be declared (default 50)
+    max_iterations            int    safety cap; iteration runs that hit this
+                                     without converging are flagged `CAPPED`
+
+`num_symbols` and `num_frames` are no longer user-settable on carriers.  They
+are derived per-carrier as:
+
+    uncoded:  num_symbols   = max(1, max_block_size_samples // sps)
+    coded:    syms_per_frame = ceil(code.coded_bits / bps)
+              n_frames       = max(1, max_block_size_samples // (syms_per_frame * sps))
+
+### Stopping rule (per carrier, per sweep point)
+
+Stop when:
+
+    (wilson_half_width(k, n, confidence) <= target_ci_half_width  AND  k >= min_errors)
+    OR  iterations >= max_iterations
+
+The Wilson score interval is used rather than the Wald (normal-approx)
+interval because Wald collapses to zero half-width at k=0 and gives
+non-sensical bounds at small p; Wilson behaves correctly across the full
+range.  The `min_errors` floor prevents premature stops when the Wilson
+half-width is small but jittery from too few errors.
+
+### Zero-errors reporting
+
+If a point exits the loop with k=0, BER is reported as an upper bound rather
+than zero.  Using the rule of three (95%):
+
+    BER < -ln(1 - confidence) / n_bits
+
+This shows up in `report.md` as e.g. `< 3.2e-9` so the absence of evidence
+isn't mistaken for evidence of absence.  Implementation loss is recorded as
+`—` in this case (no theory inversion possible from a zero BER).
+
+### Aggregation of non-BER metrics
+
+CNR / CIR / CNIR / EVM are averaged across iterations (arithmetic mean of
+the per-iteration values).  CNR/CIR/CNIR are nearly deterministic across
+seeds anyway — both depend on signal statistics and analytical noise power,
+not on noise realisation — so the mean is essentially identical to any
+single iteration's value.  EVM has slight jitter; the mean is the right
+reduction.
+
+### Per-iteration seeding
+
+Iterations use `point_seed = base_seed + grid_index * STRIDE + iter_index`
+with `STRIDE = 2_147_483_587` (large prime).  This guarantees independent
+bit streams and AWGN realisations across iterations while remaining
+reproducible from the user-set base seed.
+
+### Per-carrier convergence (strict policy)
+
+All `sweep_demod` carriers at a point must individually converge before the
+point is considered done.  A single low-BER carrier can dominate iteration
+count for an entire sweep — accepted as the price of statistical honesty.
+
+### Cost shape
+
+Per-iteration cost is the full chunk-pipeline run at the budget size.  Worst
+case is `max_iterations × grid_size` runs (e.g. 100 × 12 = 1200 sim runs);
+typical case converges in 1–10 iterations per point depending on operating
+point and target.  The user controls the worst case via `max_iterations`.

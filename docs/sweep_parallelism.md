@@ -161,4 +161,6 @@ n_workers = sweep_cfg.get("n_workers", 1)
 
 - **Batch of TOMLs.** A coarser-grained layer above the sweep — run a list
   of `.toml` configs in parallel, each its own output directory, no GUI.
-  See `docs/batch_runs.md` (TBD) for design.
+  See [batch_runs.md](batch_runs.md). The two layers do not nest: when the
+  batch layer is active, it forces sweep-level `n_workers = 1` inside each
+  scenario.

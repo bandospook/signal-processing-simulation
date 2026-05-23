@@ -124,7 +124,7 @@ class _Tip:
         tk.Label(tw, text=self._txt, justify="left",
                  background="#ffffc0", foreground="#1a1a1a",
                  relief="solid", borderwidth=1,
-                 wraplength=280, font=("", 8),
+                 wraplength=380, font=("", 8),
                  padx=5, pady=3).pack()
 
     def _hide(self, _=None):
@@ -502,48 +502,48 @@ class App:
              tip="Random seed for reproducible simulations (integer)."); r += 1
         _lf(f, "Sample Rate (MHz):", r, 0)
         _ent(f, self._sv("sweep.sample_rate"), r, 1, width=20,
-             tip="Composite wideband sample rate in MHz.\n"
+             tip="Composite wideband sample rate in MHz. "
                  "Must be at least 2x the highest carrier edge frequency."); r += 1
 
         r = self._section(f, "Adaptive BER measurement", r)
         _lf(f, "Max Block Size (samples):", r, 0)
         _ent(f, self._sv("sim.max_block_size_samples"), r, 1, width=20,
-             tip="Per-carrier native-rate buffer cap, in samples, for ONE iteration.\n"
-                 "num_symbols (uncoded) or num_frames (coded) are derived from this so\n"
-                 "the largest per-carrier buffer never exceeds it. Increase to reduce\n"
-                 "iteration count at low BER; decrease to fit smaller machines.\n"
+             tip="Per-carrier native-rate buffer cap, in samples, for ONE iteration. "
+                 "num_symbols (uncoded) or num_frames (coded) are derived from this "
+                 "so the largest per-carrier buffer never exceeds it. Increase to "
+                 "reduce iteration count at low BER; decrease to fit smaller machines. "
                  "Memory ≈ this × 16 bytes per active demod carrier."); r += 1
         _lf(f, "Target CI Half-Width:", r, 0)
         _ent(f, self._sv("sim.target_ci_half_width"), r, 1, width=20,
-             tip="Absolute half-width on BER at the chosen confidence level.\n"
-                 "Iterations accumulate at each (IBO, noise) point until the\n"
-                 "Wilson interval is at most ±this around the estimate.\n"
+             tip="Absolute half-width on BER at the chosen confidence level. "
+                 "Iterations accumulate at each (IBO, noise) point until the Wilson "
+                 "interval is at most ±this around the estimate. "
                  "Example: 2e-3 means BER ± 0.002 at 95% confidence."); r += 1
         _lf(f, "Confidence:", r, 0)
         _ent(f, self._sv("sim.confidence"), r, 1, width=20,
-             tip="Two-sided confidence level for the Wilson interval, in (0, 1).\n"
-                 "Typical value: 0.95. Used for both the CI stop criterion and the\n"
+             tip="Two-sided confidence level for the Wilson interval, in (0, 1). "
+                 "Typical value: 0.95. Used for both the CI stop criterion and the "
                  "rule-of-three upper bound reported when zero errors are observed."); r += 1
         _lf(f, "Min Errors:", r, 0)
         _ent(f, self._sv("sim.min_errors"), r, 1, width=20,
-             tip="Minimum cumulative bit errors required before convergence can be\n"
-                 "declared at a sweep point. Prevents premature stops when the CI is\n"
+             tip="Minimum cumulative bit errors required before convergence can be "
+                 "declared at a sweep point. Prevents premature stops when the CI is "
                  "tight but jittery from too few errors. Typical value: 50."); r += 1
         _lf(f, "Max Iterations:", r, 0)
         _ent(f, self._sv("sim.max_iterations"), r, 1, width=20,
-             tip="Safety cap on the number of full sim runs per (IBO, noise) point.\n"
-                 "Each iteration processes one Max-Block-Size buffer per carrier;\n"
-                 "iterations that hit this cap without converging are flagged in\n"
+             tip="Safety cap on the number of full sim runs per (IBO, noise) point. "
+                 "Each iteration processes one Max-Block-Size buffer per carrier; "
+                 "iterations that hit this cap without converging are flagged in "
                  "report.md with an asterisk on the iteration count."); r += 1
 
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
         _lf(f, "Filter Span:", r, 0)
         _ent(f, self._sv("ola.filter_span"), r, 1,
-             tip="Half-span of the OLA resampling filter in symbols.\n"
+             tip="Half-span of the OLA resampling filter in symbols. "
                  "Longer span = better stopband rejection, higher latency."); r += 1
         _lf(f, "Block Size:", r, 0)
         _ent(f, self._sv("ola.block_size"), r, 1,
-             tip="FFT block size for the overlap-add resampler (samples).\n"
+             tip="FFT block size for the overlap-add resampler (samples). "
                  "Must be a power of two; larger = more efficient for long filters."); r += 1
         f.columnconfigure(1, weight=1)
 
@@ -578,11 +578,11 @@ class App:
             row=r, column=0, columnspan=3, sticky="w");  r += 1
         _lf(f, "IBO values (dB):", r, 0)
         _ent(f, self._sv("sweep.ibo"), r, 1, width=44,
-             tip="Comma-separated IBO values to sweep (dB).\n"
+             tip="Comma-separated IBO values to sweep (dB). "
                  "Example: 0.0, 1.5, 3.0, 4.5, 6.0"); r += 1
         _lf(f, "Noise values (dBFS/Hz):", r, 0)
         _ent(f, self._sv("sweep.noise"), r, 1, width=44,
-             tip="Comma-separated noise density values to sweep (dBFS/Hz).\n"
+             tip="Comma-separated noise density values to sweep (dBFS/Hz). "
                  "Example: -140.0, -130.0, -120.0"); r += 1
 
         r = self._section(f, "Output", r)
@@ -598,9 +598,9 @@ class App:
         cb = ttk.Checkbutton(f, text="Generate plots", variable=plots_var)
         cb.grid(row=r, column=0, columnspan=2, sticky="w", pady=(6, 0));  r += 1
         _Tip(cb,
-             "When checked, the simulation writes wideband.png, amplifier.png,\n"
-             "<carrier>_detector.png for each detector carrier, and\n"
-             "<carrier>_channel.png for each carrier with channel impairments.\n"
+             "When checked, the simulation writes wideband.png, amplifier.png, "
+             "<carrier>_detector.png for each detector carrier, and "
+             "<carrier>_channel.png for each carrier with channel impairments. "
              "report.md is always written.")
         f.columnconfigure(1, weight=1)
 

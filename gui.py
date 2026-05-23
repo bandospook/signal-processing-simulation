@@ -293,12 +293,27 @@ class CarrierFrame(ttk.LabelFrame):
         self._coding_vars["block_length"] = bl_var
         _ent(self._coding_frame, bl_var, 0, 3, width=10,
              tip="Data bits per frame (convolutional and turbo). Ignored for concatenated/ldpc.")
-        _lf(self._coding_frame, "LDPC Matrix:", 1, 0)
+
+        # LDPC matrix row: only shown when scheme == "ldpc".
+        self._ldpc_label = ttk.Label(self._coding_frame, text="LDPC Matrix:")
+        self._ldpc_label.grid(row=1, column=0, sticky="w", padx=(0, 4), pady=2)
         lm_var = tk.StringVar(value=cod.get("matrix", ""))
         self._coding_vars["matrix"] = lm_var
-        _ent(self._coding_frame, lm_var, 1, 1, width=32,
-             tip="Path to .alist file for LDPC code. "
-                 "Leave blank to use the bundled default (data/ldpc/mackay_13298.alist).")
+        self._ldpc_entry = _ent(self._coding_frame, lm_var, 1, 1, width=32,
+            tip="Path to .alist file for LDPC code. "
+                "Leave blank to use the bundled default (data/ldpc/mackay_13298.alist).")
+        cb.bind("<<ComboboxSelected>>",
+                lambda _e: self._update_ldpc_visibility(), add="+")
+        self._update_ldpc_visibility()
+
+    def _update_ldpc_visibility(self):
+        scheme = self._coding_vars.get("scheme", tk.StringVar()).get()
+        if scheme == "ldpc":
+            self._ldpc_label.grid()
+            self._ldpc_entry.grid()
+        else:
+            self._ldpc_label.grid_remove()
+            self._ldpc_entry.grid_remove()
 
     def _toggle_ch(self):
         if self._has_ch.get():

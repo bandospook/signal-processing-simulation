@@ -64,7 +64,7 @@ flowchart LR
     subgraph WB["Composite  —  wideband sample rate"]
         direction TB
         SUM["Σ  Sum all enabled carriers"]
-        NORM["Normalise to unit peak<br/>apply input backoff"]
+        NORM["Normalise to unit RMS<br/>(analytical, seed-independent)<br/>apply input backoff"]
         NLA["Nonlinear amplifier<br/>AM-AM + AM-PM<br/>nonlinear_amplifier.py"]
         AWGN["Add wideband AWGN<br/>after amp · satellite downlink model"]
         SUM --> NORM --> NLA --> AWGN
@@ -158,14 +158,19 @@ python main.py
 
 This will:
 1. Run the full IBO × noise sweep configured in `[sweep]` (one or more points).
+   Each grid point iterates until the Wilson 95% CI on BER reaches the configured
+   half-width (see §8).
 2. Print a per-carrier metrics table to the console for the first sweep point,
    with progress indicators throughout.
 3. Save PNG files into the `output/` directory: `wideband.png` from the first
-   sweep point, `amplifier_nl.png`, optional per-carrier channel responses, and
-   `sweep_results.png` (BER/EVM/CNR vs IBO across all noise values).
+   sweep point, `amplifier.png` (AM-AM / AM-PM with operating-point marker),
+   `<name>_detector.png` per `sweep_demod` carrier (a 2×3 grid of BER / EVM /
+   CNR-CIR-CNIR vs IBO on top and vs CNR on the bottom), and
+   `<name>_channel.png` per carrier with `[carrier.channel]` configured.
 4. If any carriers have `sweep_demod = true`, write `report.md` — one flat
-   table, one row per `(IBO, noise, carrier)` with BER, Eb/N0, and
-   implementation loss.
+   table, one row per `(carrier, IBO, noise)` with iteration count, accumulated
+   bit count, error count, BER (or rule-of-three upper bound), Wilson CI
+   half-width, Eb/N0, and implementation loss.
 
 ### Step 4 — Use the GUI
 
@@ -192,7 +197,8 @@ signal-processing-simulation/
 │   ├── plots.py              ← all visualisation, sweep report, detector results table
 │   ├── receiver.py           ← matched filter, decisions, BER (phase-ambiguity resolved), EVM
 │   ├── simulation.py         ← full wideband signal chain, per-carrier metric extraction
-│   ├── sweep.py              ← 2-D IBO × noise sweep
+│   ├── stats.py              ← Wilson CI half-width and rule-of-three upper bound
+│   ├── sweep.py              ← 2-D IBO × noise sweep with adaptive CI-driven iteration
 │   ├── theory.py             ← closed-form BER curves and numerical Eb/N0 inverse
 │   └── coding/               ← forward error correction (FEC)
 │       ├── convolutional.py  ← rate-1/2 K=7 code with soft-decision Viterbi
@@ -209,7 +215,9 @@ signal-processing-simulation/
 │   ├── test_simulation.py           ← wideband simulation integration
 │   ├── test_coding.py               ← FEC unit tests: encode/decode round-trip
 │   ├── test_coding_performance.py   ← BER waterfall plots, coding gain validation
-│   └── test_plots.py                ← plot and table output functions
+│   ├── test_plots.py                ← plot and table output functions
+│   ├── test_stats.py                ← Wilson CI and rule-of-three helpers
+│   └── test_sweep.py                ← adaptive accumulation and convergence logic
 ├── docs/
 │   ├── GUIDE.md              ← this file
 │   ├── simulation_overview.md← execution paths and output files (§13)
@@ -233,11 +241,12 @@ signal-processing-simulation/
 | `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample (anti-alias Kaiser sinc), per-carrier channel impairments. |
 | `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model; piecewise linear interpolation of user-supplied lookup tables. |
 | `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set (carriers not in the set contribute to the IM environment but skip the expensive receiver chain). Returns CNR/CIR/CNIR per carrier via projection method. |
-| `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
-| `sim/sweep.py` | 2-D sweep over IBO × noise; honours `sweep_demod` per carrier. |
+| `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Returns raw `n_bits` and `n_errors` alongside the BER ratio so the sweep layer can aggregate across iterations. Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
+| `sim/stats.py` | `wilson_half_width(k, n, confidence)` — symmetric radius of the Wilson score interval for a binomial proportion. `rule_of_three_upper(n, confidence)` — upper bound `−ln(1−c)/n` reported when zero errors are observed. |
+| `sim/sweep.py` | 2-D sweep over IBO × noise with adaptive accumulation: each grid point reruns the full chunk pipeline (independent seeds) until the Wilson CI half-width on BER meets the target with at least `min_errors` observed, or `max_iterations` is hit. Aggregated counts and Wilson half-widths flow into `report.md`. Honours `sweep_demod` per carrier. |
 | `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/MSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
 | `sim/coding/` | Four FEC codecs: `ConvolutionalCode` (rate-1/2, K=7, soft Viterbi), `ConcatenatedCode` (RS + convolutional, random interleaver), `TurboCode` (rate-1/3 PCCC, max-log-MAP BCJR), `LDPCCode` (normalized min-sum BP). `build_code(cfg)` factory, `encode_frames` / `decode_frames` helpers. |
-| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, sweep plots, and `write_report` (flat markdown table of BER/Eb/N0/implementation loss per `(carrier, IBO, noise)`). |
+| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, the 2×3 per-carrier detector plot (BER/EVM/CNR-family vs IBO and vs CNR), and `write_report` (flat markdown table of iteration counts, accumulated counts, BER, CI, Eb/N0, and implementation loss per `(carrier, IBO, noise)`). |
 
 ---
 
@@ -248,9 +257,17 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 
 ### `[simulation]`
 
-| Key | Type | Description |
-|---|---|---|
-| `seed` | int | Global random seed for reproducible symbol sequences and noise. |
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `seed` | int | `42` | Global random seed. Per-iteration seeds are derived as `seed + grid_index × stride + iter_index` for reproducibility. |
+| `max_block_size_samples` | int | `16_777_216` | Per-carrier native-rate buffer cap (samples) for one iteration. Each carrier's `num_symbols` (uncoded) or `num_frames` (coded) is derived automatically so the largest per-carrier buffer never exceeds this. Memory ≈ this × 16 bytes per active demod carrier. |
+| `target_ci_half_width` | float | `2e-3` | Absolute half-width on BER (Wilson score interval at `confidence`). Iterations stop accumulating at a grid point once the half-width is at or below this value. |
+| `confidence` | float ∈ (0, 1) | `0.95` | Two-sided confidence level for the Wilson interval and the rule-of-three upper bound. |
+| `min_errors` | int | `50` | Minimum cumulative bit errors required before convergence is declared. Prevents premature stops when the CI is tight but jittery from too few errors. |
+| `max_iterations` | int | `100` | Safety cap on iterations per `(IBO, noise)` point. Points that exit at the cap are flagged with a `*` suffix on the iteration count in `report.md`. |
+
+See [technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md) for
+the design rationale and the stopping-rule math.
 
 ### `[sweep]`
 
@@ -283,63 +300,73 @@ the PSD plot; the full grid feeds `report.md`.
 
 ### `[output]`
 
-| Key | Description |
-|---|---|
-| `output_dir` | Directory for all output files. Created automatically. |
-| `wideband` | Filename for the wideband PSD figure. |
-| `nl_tables` | Filename for the AM-AM/AM-PM plot. |
-| `sweep` | Filename for the sweep results PNG. |
-| `report` | Filename for the per-`(carrier, IBO, noise)` results table (BER, Eb/N0, implementation loss, CNR/CIR/CNIR, EVM). Defaults to `report.md` if omitted. |
+Filenames are fixed (see §6). Only the directory and an overall image toggle
+are configurable.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `output_dir` | string | `"."` | Directory for all output files. Created automatically. |
+| `plots` | bool | `true` | Master toggle for image outputs. When `false`, no PNG files are written but `report.md` is still produced (whenever any carrier has `sweep_demod = true`). |
 
 ### `[[carrier]]` (repeated block, one per carrier)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `name` | string | — | Label used in plots and console output. |
+| `name` | string | — | Label used in plots and the report. Spaces are replaced with underscores in PNG filenames. |
 | `modulation` | string | `"BPSK"` | One of: `BPSK`, `DBPSK`, `MSK`, `QPSK`, `OQPSK`, `8PSK`, `16QAM`, `16APSK`, `32APSK`. |
-| `symbol_rate` | int (Hz) | — | Symbol rate. Native sample rate = `sps × symbol_rate`. |
+| `symbol_rate` | int (MHz in TOML → Hz internally) | — | Symbol rate. Native sample rate = `sps × symbol_rate`. |
 | `sps` | int | — | Samples per symbol at native rate. |
 | `rolloff` | float | — | RRC rolloff factor (0–1). Occupied BW ≈ `(1+rolloff) × symbol_rate`. |
 | `filter_span` | int | — | RRC filter half-span in symbols (TX and RX share the same value). Total taps = `filter_span × sps + 1`. |
-| `num_symbols` | int | — | Symbols to generate. Controls BER statistics and memory. |
-| `power_db` | float (dB) | — | Carrier power relative to 0 dB. Controls inter-carrier ratio before the amp; the composite is peak-normalised before the NL. |
-| `freq` | int (Hz) | — | Centre frequency in the wideband spectrum. Carriers must not overlap. |
-| `enabled` | bool | `true` | If `false`, the carrier is excluded from the wideband composite entirely (no signal, no IM contribution). Useful for quickly disabling a carrier without removing it from the config. |
-| `sweep_demod` | bool | `false` | If `true`, this carrier is downsampled, demodulated, and included in the detector-results table. If `false`, it contributes to the IM environment but its BER/EVM are not computed. |
-| `num_frames` | int | — | For FEC-coded carriers: number of frames to simulate. `num_symbols` is derived from `num_frames × code.n / bps`. Omit when not using FEC. |
+| `power_db` | float (dB) | `0.0` | Carrier power relative to 0 dB. Controls inter-carrier ratio before the amp; the composite is RMS-normalised before the NL (see [technical_notes.md § "NLA input normalization"](../memory/technical_notes.md)). |
+| `freq` | int (MHz in TOML → Hz internally) | — | Centre frequency in the wideband spectrum. Carriers must not overlap. |
+| `enabled` | bool | `true` | If `false`, the carrier is excluded from the wideband composite entirely (no signal, no IM contribution). |
+| `sweep_demod` | bool | `false` | If `true`, this carrier is downsampled, demodulated, and added to `report.md` and the per-carrier detector plot. If `false`, it contributes to the IM environment but its BER/EVM are not computed. |
+
+**Note:** `num_symbols` and `num_frames` are *not* user-settable. They are derived
+per carrier from `[simulation].max_block_size_samples` (see §8).
 
 ### `[carrier.coding]` (optional, per carrier — enables FEC)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `scheme` | string | — | FEC scheme: `convolutional`, `concatenated`, `turbo`, or `ldpc`. Required when the coding block is present. |
-| `block_length` | int | 1024 | Data bits per frame. Used by `convolutional` and `turbo`; ignored for `concatenated` and `ldpc`. |
-| `matrix` | string | — | Path to an `.alist` file. Required for `ldpc` (e.g. `data/ldpc/mackay_13298.alist`). |
+| `block_length` | int | `1024` | Data bits per frame. Used by `convolutional` and `turbo`; ignored for `concatenated` and `ldpc`. |
+| `matrix` | string | bundled default | Path to an `.alist` file. Used by `ldpc`; if omitted, falls back to `data/ldpc/mackay_13298.alist` shipped in the repo. |
 
-When `[carrier.coding]` is present, the transmit chain FEC-encodes random data frames before modulation, and the receive chain applies a soft-decision decoder after the matched filter.  `num_symbols` in `[[carrier]]` should be 0 or omitted; set `num_frames` instead.
+When `[carrier.coding]` is present, the transmit chain FEC-encodes random data
+frames before modulation, and the receive chain applies a soft-decision decoder
+after the matched filter. Frame count is derived automatically from the memory
+budget.
 
 ### `[carrier.channel]` (optional, per carrier)
 
+Presence of the section enables the impairment; omit the section to disable.
+There is no `enabled` flag.
+
 | Key | Description |
 |---|---|
-| `enabled` | Master enable. `false` = bypass all impairments. |
 | `ripple_db` | Peak-to-peak amplitude ripple across passband (dB). |
 | `ripple_cycles` | Number of complete ripple cycles across the signal bandwidth. |
 | `max_phase_dev_deg` | Peak phase deviation from linear phase at band edge (°). |
 | `phase_poly_order` | Polynomial order of the phase shape (2 = quadratic). |
-| `plot` | Filename for the channel impairment response plot. |
 
 ---
 
 ## 6. Output files
 
+All filenames are fixed. `<name>` is the carrier's `name` with spaces replaced
+by underscores. The `[output].plots` toggle gates every image; `report.md` is
+always written when any carrier has `sweep_demod = true`. There is also a
+`simulation.log` file when the run is launched from the GUI (stdout tee).
+
 | File | Contents |
 |---|---|
-| `output/wideband.png` | Composite wideband PSD (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised floor between carriers. |
-| `output/amplifier_nl.png` | AM-AM and AM-PM curves with peak operating point (red marker). |
-| `output/channel_<name>.png` | Amplitude ripple and phase nonlinearity across each carrier's passband. |
-| `output/sweep_results.png` | Per-carrier rows: BER vs IBO, EVM vs IBO, CNR/CIR/CNIR vs IBO. Multiple noise levels colour-coded. |
-| `output/report.md` | One flat table, one row per `(carrier, IBO, noise)`: BER, effective Eb/N0, theory Eb/N0, implementation loss, CNR/CIR/CNIR, EVM. Written whenever any carrier has `sweep_demod = true`. |
+| `output/wideband.png` | Composite wideband PSD from the first sweep point (pre-NL, post-NL, post-NL+noise). Spectral regrowth from the NL amplifier is visible as a raised floor between carriers. |
+| `output/amplifier.png` | AM-AM and AM-PM curves with the first sweep point's IBO marker. |
+| `output/<name>_channel.png` | Per-carrier amplitude ripple and phase nonlinearity. One file per carrier with a `[carrier.channel]` block. |
+| `output/<name>_detector.png` | Per-carrier 2×3 performance grid: BER / EVM / CNR-CIR-CNIR vs IBO on the top row (one line per noise level) and vs CNR on the bottom row (one line per IBO). One file per `sweep_demod = true` carrier. |
+| `output/report.md` | Flat table, one row per `(carrier, IBO, noise)`: iteration count, accumulated `n_bits` / `n_errors`, BER (or `< x.xe-y` rule-of-three bound when zero errors), Wilson CI half-width, effective Eb/N0, theory Eb/N0, implementation loss, CNR / CIR / CNIR, EVM. Iteration counts marked `*` exited at the iteration cap without meeting the CI target. |
 
 ---
 
@@ -349,32 +376,44 @@ When `[carrier.coding]` is present, the transmit chain FEC-encodes random data f
 
 ```
 [  0%] Loading configuration...
-[  5%] Running wideband simulation (2 carriers, 2 demodulated)...
-[ 15%] Wideband simulation complete.
+[  5%] Running parameter sweep: 4 IBO x 3 noise = 12 points (1 carriers, 1 demodulated)...
+        chunk 64/1954
+        ...
+        chunk 1954/1954
+[ 12%] Sweep: 1/12 points complete
+  [ 1/12] IBO=0.0 dB  noise=-85.0 dBFS/Hz  iters=1 (converged)
+        chunk 64/1954
+        ...
+[ 90%] Sweep: 12/12 points complete
+  [12/12] IBO=5.0 dB  noise=-90.0 dBFS/Hz  iters=1 (converged)
+[ 90%] Sweep complete.
 ---------------------------------------------------------------
 Carrier     CNR (dB)  CIR (dB)  CNIR (dB)  EVM (%)          BER
 ---------------------------------------------------------------
-slow            78.9      48.1       48.1     4.84            0
-fast            65.8      40.8       40.8     3.33            0
+simple carrier   4.0      16.2        3.7    56.70    1.557e-02
 ---------------------------------------------------------------
-[ 17%] Saving wideband PSD plot...
-[ 20%] Plots saved.
+[ 91%] Saving wideband PSD plot (IBO=0.0 dB, noise=-85.0 dBFS/Hz)...
+[ 99%] Report written -> output\report.md
 [100%] Done.
 ```
 
 Each line beginning with `[NNN%]` marks a significant milestone. The GUI uses these
 percentages to drive the progress bar; a terminal user sees them as plain-text status.
+Within each sweep point the chunk pipeline streams progress as `chunk N/M`; the GUI
+collapses these into a single live-updating line.
 
-**Interpreting the metrics table:**
+**Interpreting the per-point summary:**
 
-- **CNR 79/66 dB** — Noise density of −160 dBFS/Hz is far below the carrier power;
-  thermal noise is negligible. Raise `noise_density_dbfs` toward −140 dBFS/Hz to
-  bring CNR into the picture.
-- **CIR 48/41 dB** — At 3 dB IBO the amp is moderately backed off; measurable but
-  not severe IM distortion. Reduce IBO to 1 dB to drop CIR sharply.
-- **CNIR ≈ CIR** — Distortion-limited regime; noise is not yet a factor.
-- **EVM 4.8/3.3%** — Includes NL distortion and channel impairments.
-- **BER = 0** — No errors in the simulated symbols. Drive harder or increase noise.
+- `iters=N (converged)` — the Wilson CI on BER reached the target half-width in N
+  iterations. Each iteration is one full pass through the chunk pipeline, sized to
+  `max_block_size_samples` per carrier.
+- `iters=N (CAPPED at M)` — N == M iterations were run without meeting the target.
+  Either the actual BER is below what M iterations can resolve, or the CI target
+  is too tight. The corresponding row in `report.md` carries a `*` after the
+  iteration count.
+
+The single-line metrics table at the end reports the **first sweep point's** carrier
+metrics. The full grid is in `report.md`.
 
 ---
 
@@ -385,11 +424,52 @@ product of the two lists in `[sweep]`. Only carriers with `sweep_demod = true`
 have demodulation performed at each sweep point; others contribute to the wideband
 IM environment but their BER/EVM are not computed, saving significant time.
 
-**Markdown report** (`report.md`) is a single flat table — one row per
-`(carrier, IBO, noise)` with columns for BER, effective Eb/N0, theory Eb/N0,
-implementation loss, CNR, CIR, CNIR, and EVM. Configuration metadata is not
-duplicated here; the source TOML is the canonical record of how the run was
-configured.
+### Adaptive Wilson-CI iteration
+
+Each `(IBO, noise)` point is **not** a single sim run. The sweep layer reruns the
+chunk pipeline with independent seeds at that point and accumulates `n_bits` and
+`n_errors` per carrier across iterations. It stops when either:
+
+- the Wilson 95% (or `[simulation].confidence`) interval half-width on BER is at
+  or below `[simulation].target_ci_half_width`, **and** the carrier has observed
+  at least `[simulation].min_errors` bit errors; or
+- `[simulation].max_iterations` is reached.
+
+This breaks the fixed-`num_symbols` trade-off: each iteration's per-carrier buffer
+is bounded by `[simulation].max_block_size_samples`, so memory stays predictable
+even for very narrowband carriers, while the iteration count scales automatically
+with operating-point difficulty (more iterations at low BER, fewer at high BER).
+
+**Worked example.** With `max_block_size_samples = 16_777_216` and a BPSK carrier
+at `sps = 4`, each iteration generates ~4.2 M bits. At `max_iterations = 100`
+that's up to 420 M bits per sweep point — enough to confidently measure BERs
+down to about `1e-7`. For BERs near `1e-9` you would raise `max_iterations`
+(the run takes proportionally longer; there is no shortcut for measuring rare
+events).
+
+**Strict per-carrier convergence.** All `sweep_demod = true` carriers at a point
+must individually meet the CI target before the point is considered converged.
+A single low-BER carrier can dominate the iteration count for that point.
+
+**Zero-error reporting.** If a point exits the loop with zero errors observed,
+BER is reported as an upper bound via the rule of three: `BER < −ln(1−c) / n_bits`
+(approximately `3/n_bits` at 95%). The cell renders as `< x.xe-y`, not `0`.
+
+**Coded carriers.** Convergence is measured on the **post-decoder bit BER**.
+Channel (pre-FEC) bit errors are tracked separately for diagnostic purposes but
+do not gate the stopping rule.
+
+See [memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md)
+for the full design rationale, seeding scheme, and metric-aggregation policy.
+
+### Markdown report
+
+`report.md` is a single flat table — one row per `(carrier, IBO, noise)` — with
+columns for iteration count, accumulated `n_bits` and `n_errors`, BER, Wilson
+CI half-width, effective Eb/N0, theory Eb/N0, implementation loss, CNR, CIR,
+CNIR, and EVM. Iteration counts marked `*` exited at the iteration cap without
+meeting the CI target. Configuration metadata is not duplicated here; the source
+TOML is the canonical record of how the run was configured.
 
 ---
 
@@ -424,19 +504,41 @@ implementation loss near 0 dB. A nonlinear operating point or multi-carrier load
 will produce positive implementation loss — the system needs more signal power than
 theory predicts to achieve the same BER.
 
-Implementation loss is `None` for 16APSK and 32APSK because no closed-form BER
-formula exists for those modulations.
+Implementation loss is `None` (rendered as `—`) for 16APSK and 32APSK because no
+closed-form BER formula exists for those modulations, and also when zero errors
+were observed (no measured BER to invert).
+
+### Why not the Gaussian-distortion approximation?
+
+A tempting cheap predictor is `IL_approx = (C/N)_dB − (C/(N+I))_dB`, which treats
+NL-induced distortion as if it were additional Gaussian noise. It is accurate in
+narrow regimes (many carriers, moderate IBO, radially symmetric constellations)
+but diverges from measured IL in regimes we actually care about: single-carrier
+low-IBO operation, multi-amplitude constellations (16QAM / 16APSK / 32APSK),
+AM-PM-dominated phase distortion, coded systems where the decoder's
+Gaussian-LLR assumption fails, and high-CNR error floors. We measure rather than
+predict; the Gaussian approximation is not reported. See
+[memory/technical_notes.md § "Implementation loss is measured, not approximated"](../memory/technical_notes.md)
+for the full case analysis.
 
 ### Results table
 
 Results are written to `output/report.md` whenever any carrier has
-`sweep_demod = true`. Each row covers one `(carrier, IBO, noise)` measurement:
+`sweep_demod = true`. Each row covers one `(carrier, IBO, noise)` measurement.
+Example excerpt:
 
-| Carrier | IBO (dB) | Noise (dBFS/Hz) | BER | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| slow | 3.0 | -160.0 | 0 | 62.3 | — | — | 65.8 | 40.8 | 40.8 | 3.3 |
+| Carrier | IBO (dB) | Noise (dBFS/Hz) | Iters | n_bits | n_err | BER | CI ± | Eff Eb/N0 (dB) | Theory Eb/N0 (dB) | Impl Loss (dB) | CNR (dB) | CIR (dB) | CNIR (dB) | EVM (%) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| simple carrier | 0.0 | -85.0 | 1 | 1,048,568 | 16,334 | 1.56e-02 | 2.37e-04 | 3.71 | 3.66 | 0.05 | 4.0 | 16.2 | 3.7 | 56.70 |
+| simple carrier | 5.0 | -90.0 | 3 | 3,145,704 | 7,407 | 2.35e-03 | 5.36e-05 | 6.18 | 6.01 | 0.17 | 6.2 | 30.5 | 6.2 | 46.09 |
 
-- **Impl Loss = —** — BER was zero or the modulation has no closed-form theory (APSK).
+- **Iters** — iteration count that produced this row. A trailing `*` (e.g. `100*`)
+  means the loop exited at the iteration cap without meeting the CI target.
+- **CI ±** — Wilson half-width on BER at the configured confidence level.
+- **BER `< x.xe-y`** — zero errors observed; the value is the rule-of-three upper
+  bound (no measurement, just an inequality).
+- **Impl Loss = —** — BER was zero, or the modulation has no closed-form theory
+  (APSK).
 
 ---
 
@@ -455,24 +557,24 @@ Results are written to `output/report.md` whenever any carrier has
 3. **Within wideband bandwidth** — all carriers must fit within
    `[−sample_rate/2, +sample_rate/2]`.
 
+Carrier parameters do not include symbol or frame counts. Per-iteration size is
+derived from `[simulation].max_block_size_samples` (see §8).
+
 ### Example: adding a 16QAM carrier
 
 ```toml
 [[carrier]]
 name        = "medium"
 modulation  = "16QAM"
-symbol_rate = 5_000_000
+symbol_rate = 5            # MHz
 sps         = 8
 rolloff     = 0.25
 filter_span = 10
-num_symbols = 5_000
 power_db    = 0
-freq        = -500_000_000
+freq        = -500         # MHz
 enabled     = true
 sweep_demod = true
-
-[carrier.channel]
-enabled = false
+# No [carrier.channel] section → no impairment for this carrier.
 ```
 
 ### Example: adding a convolutionally-coded BPSK carrier
@@ -481,21 +583,23 @@ enabled = false
 [[carrier]]
 name        = "coded"
 modulation  = "BPSK"
-symbol_rate = 1_000_000
+symbol_rate = 1            # MHz
 sps         = 4
 rolloff     = 0.35
 filter_span = 8
-num_symbols = 0          # derived from num_frames × code parameters
 power_db    = 0
-freq        = 0
+freq        = 0            # MHz
 enabled     = true
 sweep_demod = true
-num_frames  = 10
 
 [carrier.coding]
 scheme       = "convolutional"
-block_length = 1024
+block_length = 1024        # data bits per FEC frame
 ```
+
+The frame count is computed automatically: with `max_block_size_samples =
+4_194_304`, `sps = 4`, BPSK, and a `(1024+6)·2 = 2060`-bit codeword (sps = 4 →
+~8240 native samples per frame), each iteration carries roughly 500 frames.
 
 ---
 
@@ -528,10 +632,23 @@ it reads and writes `.toml` files directly and launches `main.py` as a subproces
 
 | Tab | Contents |
 |---|---|
-| **General** | Simulation seed, OLA filter span and block size |
+| **General** | Three sections: **Simulation** (seed, sample rate), **Adaptive BER measurement** (max block size, target CI half-width, confidence, min errors, max iterations), and **Overlap-Add (OLA) Filter** (filter span, block size). Every field has a hover tooltip explaining what it does and typical values. |
 | **Amplifier** | AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
-| **Sweep & Output** | Sample rate, IBO sweep list, noise sweep list, output directory (with Browse button), filenames for all output files including `report` |
+| **Sweep & Output** | IBO sweep list, noise sweep list, output directory (with Browse button), and a single "Generate plots" checkbox. There are no per-file filename fields — filenames are fixed (see §6). |
 | **Carriers** | One scrollable labeled frame per carrier (see below); view-filter dropdown at the top |
+
+### General tab: Adaptive BER measurement
+
+Five fields control the convergence loop described in §8. Each field shows a
+tooltip with the meaning, typical value, and the consequence of changing it:
+
+| Field | Maps to | Tooltip summary |
+|---|---|---|
+| Max Block Size (samples) | `max_block_size_samples` | Per-carrier native-rate buffer cap for ONE iteration. `num_symbols` / `num_frames` are derived from this so the largest per-carrier buffer never exceeds it. |
+| Target CI Half-Width | `target_ci_half_width` | Absolute half-width on BER at the chosen confidence level. Example: 2e-3 means BER ± 0.002 at 95% confidence. |
+| Confidence | `confidence` | Two-sided confidence level in (0, 1). Used for both the CI stop criterion and the rule-of-three upper bound. |
+| Min Errors | `min_errors` | Minimum cumulative bit errors before convergence can be declared. Prevents premature stops when the CI is tight but jittery. |
+| Max Iterations | `max_iterations` | Safety cap on iterations per (IBO, noise) point. Capped runs are flagged with `*` on the iteration count in `report.md`. |
 
 ### Carriers tab controls
 
@@ -542,27 +659,33 @@ updates automatically when carriers are added or removed.
 
 **Per-carrier frame** — each carrier has:
 
-- **Name, Modulation, Symbol Rate, SPS, Roll-off, Filter Span, Num Symbols, Power (dB),
-  Freq (Hz)** — the basic carrier parameters, arranged in a two-column grid.
+- **Name, Modulation, Symbol Rate, SPS, Roll-off, Filter Span, Power (dB), Freq (MHz)**
+  — the basic carrier parameters, arranged in a two-column grid. There are no
+  `Num Symbols` / `Num Frames` fields — those are derived globally from
+  **Max Block Size** on the General tab.
 
 - **Include in wideband** checkbox (`enabled`) — when unchecked, the carrier is
   excluded from the simulation entirely. It does not appear in the composite signal and
   contributes no IM products.
 
 - **Enable detector model** checkbox (`sweep_demod`) — when checked, the carrier is
-  downsampled, demodulated, and included in the detector-results table after the run.
-  BER, EVM, CNR, CIR, CNIR, effective Eb/N0, and implementation loss are all reported
-  at the globally configured `noise_density_dbfs`. When unchecked, the carrier
-  contributes to the wideband IM environment but its BER/EVM are not computed.
+  downsampled, demodulated, and included in `report.md` and gets a
+  `<name>_detector.png` plot. When unchecked, the carrier contributes to the
+  wideband IM environment but its BER/EVM are not computed.
 
 - **FEC coding** checkbox — when checked, expands the FEC Parameters panel:
   - **Scheme** — one of `convolutional`, `concatenated`, `turbo`, `ldpc`.
-  - **Num Frames** — number of FEC frames per simulation run (replaces `num_symbols`).
-  - **Block Length** — data bits per frame (convolutional/turbo only).
-  - **LDPC Matrix** — path to an `.alist` file (ldpc only).
+  - **Block Length** — data bits per frame (convolutional/turbo only; ignored for
+    concatenated and ldpc).
+  - **LDPC Matrix** — path to an `.alist` file (ldpc only). Blank uses the
+    bundled `data/ldpc/mackay_13298.alist`.
+  The number of frames per iteration is derived automatically from
+  Max Block Size, sps, modulation, and the code's bits-per-frame.
 
 - **Channel impairments** checkbox — when checked, expands fields for amplitude
-  ripple, ripple cycles, phase nonlinearity, poly order, and an optional plot filename.
+  ripple, ripple cycles, phase nonlinearity, and poly order. Unchecking removes
+  the `[carrier.channel]` block entirely from the saved TOML (no `enabled` flag —
+  presence of the section is the enable).
 
 - **Remove** button — removes the carrier from the config.
 
@@ -700,6 +823,25 @@ End-to-end smoke test: mocks `load_config` with a minimal two-carrier config, ru
 Integration tests on the full `wideband_bpsk_simulation` function: checks that CNR
 varies correctly with noise density, CIR varies with IBO, and that disabling
 `demod_carriers` returns NaN placeholders without affecting the wideband signal.
+Also exercises `_derive_block_counts` for both uncoded and LDPC carriers,
+confirming the budget-driven sizing.
+
+### `tests/test_stats.py`
+
+Unit tests for `sim/stats.py`: `z_score` matches the 95% reference value, rejects
+out-of-range confidence; `wilson_half_width` returns `+inf` for `n = 0`, validates
+`k` range, and shrinks monotonically with `n`; `rule_of_three_upper` matches the
+classical `3/n` ≈ `2.996/n` and returns `+inf` for `n = 0`.
+
+### `tests/test_sweep.py`
+
+Tests the `_ErrorAccumulator` and `parameter_sweep` accumulation logic:
+empty-accumulator edges (BER/uncoded-BER are `None`, half-width is `+inf`,
+not-converged); the `min_errors` floor blocks convergence even when the Wilson
+half-width is tight; the capped-iterations path produces `converged=False` and
+sets the rule-of-three upper bound; the convergence path with `iter_cb` records
+the iteration count, grid position, and stops in one iteration when the target
+is permissive.
 
 ---
 
@@ -736,23 +878,25 @@ snippets covering single-point, fixed-noise, and full sweep configurations.
 **→ [memory_scaling.md](memory_scaling.md)**
 
 Analyses where memory goes in the simulation and how it scales with the two
-configuration dimensions that matter most: the upsample factor L (ratio of wideband
-sample rate to carrier native rate) and the simulation duration T (governed by the
-longest carrier's `num_symbols / symbol_rate`).
+dimensions that matter most: the upsample factor L (ratio of wideband sample rate
+to carrier native rate) and per-iteration buffer size, which is now governed by
+`[simulation].max_block_size_samples` rather than a per-carrier `num_symbols`.
 
-The key result is that OLA chunk processing decouples FFT working memory from signal
-length. The per-block FFT buffer — the dominant working allocation — is sized by the
-filter length, which scales with L but is reused for every block regardless of how
-many symbols are simulated. By contrast, the persistent wideband arrays (`wideband`,
-`wideband_nl`, `wideband_noisy`, and intermediate OLA outputs) all scale with
-`T × sample_rate` and are the true memory cost of a long simulation.
+The key result is that OLA chunk processing decouples FFT working memory from
+signal length. The per-block FFT buffer — the dominant working allocation — is
+sized by the filter length, which scales with L but is reused for every block
+regardless of buffer size. The wideband composite is never materialised in full
+under the chunk pipeline; peak wideband memory stays around 12 MB regardless of
+how long the simulation runs. The binding memory constraint is the per-carrier
+**native-rate** output buffer (`num_symbols × sps × 16 bytes`), which is what
+`max_block_size_samples` caps.
 
-The document includes a worked example for the default configuration (~11 MB peak),
-a scaling table across seven orders of magnitude of carrier symbol rate, and a
-concrete demonstration of what happens to OLA efficiency as L grows (from 50% at
-L = 10 to 0.05% at L = 200,000). For very narrowband carriers the document shows
-that raising `block_size` is more effective than any other tuning lever — it recovers
-OLA efficiency without changing the filter or the output.
+The document includes the OLA efficiency curve as L grows (from 50% at L = 10
+to 0.05% at L = 200,000) and shows that raising `block_size` is the right
+tuning lever for very narrowband carriers — it recovers OLA efficiency without
+changing the filter or the output. With the adaptive-iteration sweep, total
+simulation length is `iterations × max_block_size_samples / sample_rate`
+rather than a hard-coded duration.
 
 ---
 

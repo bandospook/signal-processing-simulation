@@ -11,11 +11,11 @@ output files produced by each path.
 ```mermaid
 flowchart LR
     CFG[/"simulation.toml"/]
-    SWEEP["Parameter sweep<br/>every (ibo_db, noise_density_dbfs) point<br/>runs the full chunk pipeline"]
+    SWEEP["Parameter sweep<br/>every (ibo_db, noise_density_dbfs) point<br/>runs adaptive Wilson-CI iteration"]
     FIRST["First point<br/>wideband PSD + console metrics"]
-    GRID["All points<br/>per-carrier BER · EVM · CNR/CIR/CNIR"]
-    FOUTS["wideband.png · amplifier_nl.png<br/>channel_name.png"]
-    GOUTS["sweep_results.png · report.md"]
+    GRID["All points<br/>per-carrier BER · EVM · CNR/CIR/CNIR<br/>accumulated across iterations"]
+    FOUTS["wideband.png · amplifier.png<br/>&lt;name&gt;_channel.png"]
+    GOUTS["&lt;name&gt;_detector.png · report.md"]
 
     CFG --> SWEEP
     SWEEP --> FIRST --> FOUTS
@@ -143,18 +143,25 @@ The sweep is the sole simulation driver. Every (IBO, noise) point listed in
 A single-point "config" is simply a 1×1 sweep — there is no separate fixed-noise
 mode.
 
+Each grid point is iterated adaptively: the chunk pipeline reruns with
+independent seeds until the Wilson 95% CI half-width on BER reaches
+`[simulation].target_ci_half_width` (with at least `min_errors` observed), or
+`max_iterations` is hit. Per-carrier `num_symbols` / `num_frames` for one
+iteration are derived from `[simulation].max_block_size_samples`. See
+[memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md).
+
 - **IBO axis** — `[sweep].ibo_db` (list, ≥1 value).  Each value sets the drive
   level at that grid point.
 - **Noise axis** — `[sweep].noise_density_dbfs` (list, ≥1 value).  Each value
   sets the AWGN PSD at that grid point.
 - **Demodulated carriers** — all carriers with `sweep_demod = true`.
-- **PSD plot point** — the first grid point
-  `(ibo_db[0], noise_density_dbfs[0])` provides the wideband composite for
-  `wideband.png`.
+- **PSD plot point** — the first grid point's first iteration's wideband
+  composite feeds `wideband.png`.
 
 For each demodulated carrier at each grid point, effective Eb/N0 is computed
-from the CNIR measurement.  CNIR is reported in the symbol-rate (matched-filter)
-bandwidth, so CNIR = Es/N0 directly; the per-bit conversion is:
+from the (iteration-averaged) CNIR measurement.  CNIR is reported in the
+symbol-rate (matched-filter) bandwidth, so CNIR = Es/N0 directly; the per-bit
+conversion is:
 
 ```
 Eff Eb/N0 = CNIR_dB − 10·log10(bits_per_symbol)
@@ -164,20 +171,27 @@ For BPSK (bps = 1) Eff Eb/N0 is identical to CNIR.
 
 This is compared to the theoretical Eb/N0 required to achieve the measured BER
 in pure AWGN, giving the **implementation loss** (IL = Eff Eb/N0 − Theory Eb/N0).
-Every grid point becomes one row per demodulated carrier in `report.md`.
+Every grid point becomes one row per demodulated carrier in `report.md`, with
+columns including the iteration count, accumulated bit/error counts, and the
+Wilson CI half-width.
 
 ---
 
 ## 5. Output Files Summary
 
-| File (under `output_dir`) | Produced by | Always? |
+All filenames are fixed (no per-file overrides). `<name>` is the carrier's
+`name` with spaces replaced by underscores. The `[output].plots` boolean
+(default `true`) gates every image output; `report.md` is always written
+whenever any carrier has `sweep_demod = true`.
+
+| File (under `output_dir`) | Produced by | Gated by |
 |---|---|---|
-| `wideband.png` | First sweep point's full pipeline | Yes — if `output.wideband` is set |
-| `amplifier_nl.png` | Config tables (no sim needed) | Yes — if `output.nl_tables` is set |
-| `channel_<name>.png` | Per-carrier with `[carrier.channel]` | If carrier has a channel block with `plot` key |
-| Console metrics table | First sweep point's demod results | Yes — for all demodulated carriers |
-| `sweep_results.png` | Full sweep | If `output.sweep` is set and at least one carrier was demodulated |
-| `report.md` | Full sweep | If at least one carrier has `sweep_demod = true` and `output.report` is set (defaults to `report.md` if omitted) |
+| `wideband.png` | First sweep point's first iteration | `[output].plots` |
+| `amplifier.png` | Config tables (no sim needed) | `[output].plots` |
+| `<name>_channel.png` | Per-carrier with `[carrier.channel]` block | `[output].plots` |
+| `<name>_detector.png` | Per-`sweep_demod` carrier; 2×3 grid (vs IBO and vs CNR) | `[output].plots` |
+| Console metrics table | First sweep point's first iteration | Always |
+| `report.md` | Full sweep, one row per (carrier, IBO, noise) | Always (when any `sweep_demod`) |
 
 ---
 
@@ -196,8 +210,9 @@ name = "beacon"
 sweep_demod = false   # default; included in composite, not decoded
 ```
 
-A 1×1 sweep with no demod carriers → only `wideband.png` and `amplifier_nl.png`
-are produced (the sweep grid is degenerate so no useful sweep plot is drawn).
+A 1×1 sweep with no demod carriers → only `wideband.png` and `amplifier.png`
+are produced. No `report.md` (nothing was demodulated), no `<name>_detector.png`
+(no `sweep_demod = true` carrier).
 
 ---
 
@@ -214,8 +229,9 @@ name = "link"
 sweep_demod = true
 ```
 
-Runs one simulation.  Produces `wideband.png`, `amplifier_nl.png`, and
-`report.md` (one row for `link`).
+Runs one grid point (iterated until the CI target is met). Produces
+`wideband.png`, `amplifier.png`, `link_detector.png`, and a one-row
+`report.md`.
 
 ---
 
@@ -232,5 +248,6 @@ name = "link"
 sweep_demod = true
 ```
 
-Runs 9 grid points.  Produces `wideband.png` (from the first point),
-`amplifier_nl.png`, `sweep_results.png`, and a 9-row `report.md`.
+Runs 9 grid points, each adaptively iterated. Produces `wideband.png` (from
+the first point's first iteration), `amplifier.png`, `link_detector.png` (2×3
+grid summarising all 9 points), and a 9-row `report.md`.

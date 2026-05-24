@@ -892,15 +892,6 @@ class App:
                     self._slow_warned = False
         except queue.Empty:
             pass
-        if self._running and not self._slow_warned:
-            elapsed = time.monotonic() - self._last_progress_time
-            if elapsed >= 30.0:
-                label = self._last_progress_line or "(simulation start)"
-                self._log_append(
-                    f"[GUI] Still working — no progress update for {int(elapsed)}s "
-                    f"(last step: {label})"
-                )
-                self._slow_warned = True
         self.root.after(100, self._poll_proc)
 
     def _on_run_complete(self):

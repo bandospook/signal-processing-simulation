@@ -1,15 +1,15 @@
 [simulation]
 seed                   = 42
 max_block_size_samples = 4_194_304
-target_ci_half_width   = 2e-3
+target_ci_half_width   = 1e-06
 confidence             = 0.95
 min_errors             = 50
 max_iterations         = 20
 
 [sweep]
 sample_rate        = 800
-ibo_db             = [0, 1, 2, 5]
-noise_density_dbfs = [-85, -87, -90]
+ibo_db             = [1]
+noise_density_dbfs = [-91]
 
 [amplifier.am_am]
 input  = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -21,7 +21,7 @@ phase_deg = [0, 0.05, 0.2, 0.45, 0.8, 1.25, 1.8, 2.45, 3.2, 4.05, 5]
 
 [ola]
 filter_span  = 16
-block_size   = 4_096
+block_size   = 8_192
 
 [output]
 output_dir = "output"

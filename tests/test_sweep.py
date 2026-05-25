@@ -108,8 +108,18 @@ def test_parameter_sweep_chunk_print_carries_iter_prefix_and_tally():
     assert len(tally_lines) == 2
     assert tally_lines[0].startswith("iter 1/2 done: c1 ")
     assert tally_lines[1].startswith("iter 2/2 done: c1 ")
-    # At -200 dBFS/Hz we expect zero errors, so the human-readable form is used.
-    assert "BER=0 (no errors)" in tally_lines[0]
+    # Zero errors at -200 dBFS/Hz are rendered as BER=0.00e+00 with the
+    # `errors=` column carrying the explicit zero count.
+    assert "errors=       0" in tally_lines[0]
+    assert "BER=0.00e+00" in tally_lines[0]
+    # The bits column is right-aligned to a fixed width so successive lines
+    # line up vertically.
+    bits_col = tally_lines[0].index("bits=")
+    assert tally_lines[1].index("bits=") == bits_col
+    err_col = tally_lines[0].index("errors=")
+    assert tally_lines[1].index("errors=") == err_col
+    ber_col = tally_lines[0].index("BER=")
+    assert tally_lines[1].index("BER=") == ber_col
     # min_errors=1 not met → no "(target met)" suffix on either iter.
     assert not any("(target met)" in ln for ln in tally_lines)
     assert results[0]["iterations"] == 2

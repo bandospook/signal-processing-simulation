@@ -108,6 +108,13 @@ def parameter_sweep(carriers: list[dict],
                 for n in demod_carriers
             }
 
+            # Field widths for the in-place per-iteration status line.  The
+            # iter index is padded to the width of max_iterations and the
+            # carrier name to the longest demod-carrier name, so successive
+            # status lines vertically align column-for-column.
+            iter_width = len(str(max_iterations))
+            name_width = max((len(n) for n in accs), default=1)
+
             it = 0
             converged_all = True
             last_sim: dict | None = None
@@ -121,8 +128,9 @@ def parameter_sweep(carriers: list[dict],
                 # the iteration count incrementing when a point needs more stats.
                 inner_print: _PrintCB = None
                 if chunk_print is not None:
-                    def _iter_chunk_print(msg: str, _n: int = iter_num) -> None:
-                        chunk_print(f"iter {_n}/{max_iterations}: {msg}")
+                    def _iter_chunk_print(msg: str, _n: int = iter_num,
+                                          _w: int = iter_width) -> None:
+                        chunk_print(f"iter {_n:>{_w}}/{max_iterations}: {msg}")
                     inner_print = _iter_chunk_print
 
                 sim = wideband_bpsk_simulation(
@@ -161,18 +169,23 @@ def parameter_sweep(carriers: list[dict],
                             s[key.split("_")[0] + "_n"] += 1
 
                 # Cumulative running tally per demod carrier — one line per iter.
+                # Fixed-width columns keep successive lines vertically aligned
+                # (and matched by the GUI's chunk regex so they overwrite in
+                # place instead of accumulating).
                 if chunk_print is not None and accs:
                     for name in sorted(accs):
                         a = accs[name]
                         hw = a.half_width(confidence)
-                        ber_s = ("BER=0 (no errors)" if a.n_errors == 0
-                                 else f"BER={a.ber:.2e}")
+                        ber_val = a.ber if a.ber is not None else 0.0
                         target_met = a.converged(
                             target_ci_half_width, confidence, min_errors)
                         suffix = "  (target met)" if target_met else ""
                         chunk_print(
-                            f"iter {iter_num}/{max_iterations} done: {name} "
-                            f"bits={a.n_bits} errors={a.n_errors} {ber_s} "
+                            f"iter {iter_num:>{iter_width}}/{max_iterations} done: "
+                            f"{name:<{name_width}}  "
+                            f"bits={a.n_bits:>10}  "
+                            f"errors={a.n_errors:>8}  "
+                            f"BER={ber_val:.2e}  "
                             f"CI±={hw:.1e}{suffix}")
 
                 if iter_cb is not None:

@@ -372,7 +372,12 @@ class CarrierFrame(ttk.LabelFrame):
 # ── Main application ──────────────────────────────────────────────────────────
 
 _PCT_RE   = re.compile(r'^\[\s*(\d+)%\]')
-_CHUNK_RE = re.compile(r'^\s+(iter \d+/\d+: )?chunk \d+/\d+')
+# Matches the per-iteration in-place status lines emitted from sim.sweep:
+#   "  iter  3/100: chunk 5/12"          (during chunk processing)
+#   "  iter  3/100 done: c1   bits=..."  (cumulative tally after each iter)
+# Both forms overwrite the previous status line in the GUI log and in
+# simulation.log so a sweep point shows as a single rolling line.
+_CHUNK_RE = re.compile(r'^\s+iter\s+\d+/\d+')
 
 
 class App:

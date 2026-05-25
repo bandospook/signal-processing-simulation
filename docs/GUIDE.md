@@ -367,6 +367,7 @@ always written when any carrier has `sweep_demod = true`. There is also a
 | `output/amplifier.png` | AM-AM and AM-PM curves with the first sweep point's IBO marker. |
 | `output/<name>_channel.png` | Per-carrier amplitude ripple and phase nonlinearity. One file per carrier with a `[carrier.channel]` block. |
 | `output/<name>_detector.png` | Per-carrier 2×3 performance grid: BER / EVM / CNR-CIR-CNIR vs IBO on the top row (one line per noise level) and vs CNR on the bottom row (one line per IBO). One file per `sweep_demod = true` carrier. |
+| `output/<name>_detector_<panel>.png` | Each of the six detector panels also saved as a standalone PNG, for cases where you want to look at one panel without the rest of the grid. Panel keys are `ber_vs_ibo`, `evm_vs_ibo`, `db_vs_ibo`, `ber_vs_cnr`, `evm_vs_cnr`, `db_vs_cnr`. |
 | `output/report.md` | Flat table, one row per `(carrier, IBO, noise)`: iteration count, accumulated `n_bits` / `n_errors`, BER (or `< x.xe-y` rule-of-three bound when zero errors), Wilson CI half-width, effective Eb/N0, theory Eb/N0, implementation loss, CNR / CIR / CNIR, EVM. Iteration counts marked `*` exited at the iteration cap without meeting the CI target. |
 
 ---

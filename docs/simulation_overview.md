@@ -204,6 +204,7 @@ whenever any carrier has `sweep_demod = true`.
 | `amplifier.png` | Config tables (no sim needed) | `[output].plots` |
 | `<name>_channel.png` | Per-carrier with `[carrier.channel]` block | `[output].plots` |
 | `<name>_detector.png` | Per-`sweep_demod` carrier; 2×3 grid (vs IBO and vs CNR) | `[output].plots` |
+| `<name>_detector_<panel>.png` | Same data, one PNG per panel (`ber_vs_ibo`, `evm_vs_ibo`, `db_vs_ibo`, `ber_vs_cnr`, `evm_vs_cnr`, `db_vs_cnr`) | `[output].plots` |
 | Console metrics table | First sweep point's first iteration | Always |
 | `report.md` | Full sweep, one row per (carrier, IBO, noise) | Always (when any `sweep_demod`) |
 

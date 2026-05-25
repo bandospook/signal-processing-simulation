@@ -63,6 +63,10 @@ def test_main_runs(tmp_path):
     assert (tmp_path / "amplifier.png").exists()
     assert (tmp_path / "c1_detector.png").exists()
     assert (tmp_path / "c1_channel.png").exists()
+    # Each of the six detector panels is also saved as a standalone PNG.
+    for panel in ("ber_vs_ibo", "evm_vs_ibo", "db_vs_ibo",
+                  "ber_vs_cnr", "evm_vs_cnr", "db_vs_cnr"):
+        assert (tmp_path / f"c1_detector_{panel}.png").exists()
 
 
 def test_main_plots_disabled(tmp_path):

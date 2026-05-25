@@ -57,6 +57,13 @@ For each **enabled** carrier (`enabled = true`):
    filter that adds:
    - Passband amplitude ripple: `1 + r·cos(π · ripple_cycles · f_norm)` in-band.
    - Phase nonlinearity: a polynomial curve up to `max_phase_dev_deg` degrees.
+4b. **Phase noise** *(optional)* — if a top-level `[phase_noise]` block is
+   present and `enabled = true`, the per-carrier baseband is multiplied by
+   `exp(j·φ[n])` where `φ[n]` is a real-valued Gaussian process whose PSD
+   follows the user's `(offset_hz, dbc_per_hz)` mask (log-log interpolation,
+   flat extrapolation past either end).  Applied at the carrier's native
+   sample rate, in the same step as the channel filter, so the noise lives
+   in the carrier's own baseband bandwidth before the OLA upsample.
 
 ### 2b. Wideband composite formation
 

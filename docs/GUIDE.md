@@ -292,6 +292,22 @@ the PSD plot; the full grid feeds `report.md`.
 | `output` | float list | (am_am) Output amplitude at each breakpoint. |
 | `phase_deg` | float list | (am_pm) Phase shift in degrees at each amplitude. |
 
+### `[phase_noise]` (optional)
+
+Per-carrier oscillator phase noise. Applied at each carrier's native sample
+rate, immediately after the channel-impairment filter and before the OLA
+upsample. The mask is interpolated in log-log space (linear in
+`log10(offset_Hz)`, linear in `dBc/Hz`) and held flat past either end of the
+anchor grid. Phase noise travels with the signal through the whole chain,
+so it shows up in measured BER and EVM (it does not appear in CIR/CNIR
+since the projection-based decomposition treats it as part of the signal).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` (when section present) | Master toggle. Setting `false` preserves the spec in TOML without applying it. |
+| `offset_hz` | float list (Hz) | — | Mask anchor offsets, must be > 0. Need at least one point. |
+| `dbc_per_hz` | float list (dBc/Hz) | — | L(f) values at each anchor, single-sideband phase noise power per Hz. Same length as `offset_hz`. |
+
 ### `[ola]`
 
 | Key | Default | Description |
@@ -701,7 +717,7 @@ it reads and writes `.toml` files directly and launches `main.py` as a subproces
 | Tab | Contents |
 |---|---|
 | **General** | Three sections laid out in a two-column field grid: **Simulation** (seed · sample rate), **Adaptive BER measurement** (max block size · max iterations / target CI half-width · target CI relative / min errors · confidence), and **Overlap-Add (OLA) Filter** (filter span · block size). Every field has a hover tooltip explaining what it does and typical values. |
-| **Amplifier** | AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
+| **Amplifier** | AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns), and **Phase Noise** (enabled checkbox + `offset_hz` / `dbc_per_hz` mask) |
 | **Sweep & Output** | IBO sweep list, noise sweep list, output directory (with Browse button), and a single "Generate plots" checkbox. There are no per-file filename fields — filenames are fixed (see §6). |
 | **Carriers** | One scrollable labeled frame per carrier (see below); view-filter dropdown at the top |
 

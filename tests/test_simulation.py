@@ -139,6 +139,40 @@ def test_derive_block_counts_ldpc():
     assert num_symbols == n_frames * math.ceil(code.coded_bits / 1)
 
 
+def test_phase_noise_degrades_evm():
+    """Adding phase noise rotates received symbols off the constellation,
+    raising EVM relative to the same point without phase noise.
+
+    Phase noise is intentionally applied to bb_ch BEFORE the chunk pipeline
+    forks into reference / NL / noisy branches, so it travels with the signal
+    through every branch.  The projection-based CIR therefore cannot see it
+    (both ref and NL carry the same φ(t) and cancel in the projection); EVM
+    measures actual deviation from the ideal constellation and does pick it up.
+    """
+    base = _run_no_noise(ibo_db=12.0)
+    base_evms = [cr["evm_rms"] for cr in base["carriers"]]
+
+    pn_cfg = {
+        "enabled":    True,
+        "offset_hz":  [1e3, 1e4, 1e5, 1e6],
+        "dbc_per_hz": [-40.0, -60.0, -80.0, -100.0],   # aggressive mask
+    }
+    with_pn = wideband_bpsk_simulation(
+        carriers=_CARRIERS, sample_rate=_SAMPLE_RATE,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        max_block_size_samples=_BUDGET,
+        input_backoff_db=12.0, noise_density_dbfs=None,
+        phase_noise_cfg=pn_cfg,
+        ola_filter_span=8, ola_block_size=1024, seed=42,
+    )
+    pn_evms = [cr["evm_rms"] for cr in with_pn["carriers"]]
+    for base_evm, pn_evm, cr in zip(base_evms, pn_evms, with_pn["carriers"]):
+        assert pn_evm > base_evm * 2.0, (
+            f"Phase noise should at least double EVM on '{cr['name']}': "
+            f"baseline {base_evm:.2f}% -> with phase noise {pn_evm:.2f}%"
+        )
+
+
 def test_distortion_increases_with_drive():
     """
     CIR must decrease monotonically as input backoff decreases (harder drive

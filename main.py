@@ -45,6 +45,9 @@ def main(config_path: str = "simulation.toml",
     ola = cfg["ola"]
     sim = cfg["simulation"]
     out = cfg["output"]
+    phase_noise_cfg = cfg.get("phase_noise")
+    if phase_noise_cfg is not None and not phase_noise_cfg.get("enabled", True):
+        phase_noise_cfg = None
 
     out_dir = Path(out.get("output_dir", "."))
     out_dir.mkdir(exist_ok=True)
@@ -107,6 +110,7 @@ def main(config_path: str = "simulation.toml",
         ola_filter_span           = ola["filter_span"],
         ola_block_size            = ola["block_size"],
         seed                      = sim["seed"],
+        phase_noise_cfg           = phase_noise_cfg,
         chunk_print               = _chunk_print,
         point_cb                  = _sweep_pt_cb,
     )

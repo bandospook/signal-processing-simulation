@@ -269,6 +269,50 @@ existing CNR/CIR/CNIR columns — no need to bake it into the report.
 
 ---
 
+## Phase noise: mask-driven, applied at per-carrier native rate
+
+**Decision (2026-05-25):** `[phase_noise]` is a top-level optional config
+section consumed by `sim.simulation`.  The mask is a list of
+`(offset_hz, dbc_per_hz)` anchor points; `sim/phase_noise.py` interpolates
+in log-log space (linear in `log10(offset_Hz)`, linear in `dBc/Hz`) with
+flat extrapolation past either end, then generates a real Gaussian phase
+process via frequency-domain coloring (white → `rfft` → multiply by
+`sqrt(2 · 10^(L/10) · fs)` → `irfft`).
+
+### Where in the chain
+
+Applied **per carrier at native rate**, immediately after
+`apply_channel_impairment` and before the rational resample / OLA upsample.
+Phase noise therefore lives in the carrier's own baseband bandwidth and is
+part of the signal that goes through the wideband composite.  The per-carrier
+RNG is derived from `per_carrier_seeds[i] ^ 0x5A5A5A5A` so reruns with the
+same seed produce the same `φ(t)`.
+
+### What it shows up in
+
+- **EVM**: yes — rotation off the constellation is exactly what EVM measures.
+- **BER**: yes for phase-sensitive modulations (PSK, APSK).
+- **CIR / CNIR**: no — phase noise is applied before the chunk pipeline
+  forks into reference / NL / noisy branches, so both the reference (`bb_rx`)
+  and the NL output (`nl_pure`) carry the same `φ(t)`.  The projection
+  cancels it as part of "the signal", which matches the design intent: phase
+  noise is an oscillator effect that travels with the signal, not an
+  IM-style distortion injected by the amplifier.
+
+If you want CIR/CNIR to capture phase noise too, the chain would have to
+duplicate the per-carrier baseband (one phase-noise-free for the reference,
+one with phase noise for the NL path) and re-upsample both — significant
+extra compute.  Not done.
+
+### Mask convention
+
+`dbc_per_hz` is IEEE single-sideband `L(f)` in dBc/Hz; the PSD of the
+phase fluctuation in rad²/Hz is `S_φ(f) = 2 · 10^(L(f)/10)`.  At
+sample rate `f_s`, the realized variance of `φ[n]` is
+`σ²_φ ≈ 2 · ∫_0^{f_s/2} S_φ(f) df`.
+
+---
+
 ## Adaptive iteration: CI-bounded BER measurement at a fixed memory budget
 
 **Decision (2026-05-23):** The sim runs each (IBO, noise) sweep point as an

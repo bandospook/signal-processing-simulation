@@ -10,6 +10,7 @@ from .coding import (build_code, decode_frames, encode_frames,
                      ConcatenatedCode, ConvolutionalCode, LDPCCode, TurboCode)
 from .filters import OLAState, x_up_block, apply_channel_impairment
 from .modulation import bits_per_symbol
+from .phase_noise import apply_phase_noise
 from .nonlinear_amplifier import nonlinear_amplifier
 from .receiver import receive, soft_demap
 
@@ -103,6 +104,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
                               max_block_size_samples: int,
                               input_backoff_db: float = 0.0,
                               noise_density_dbfs: float | None = None,
+                              phase_noise_cfg: dict | None = None,
                               ola_filter_span: int = 16,
                               ola_block_size: int = 4096,
                               seed: int | None = None,
@@ -195,6 +197,18 @@ def wideband_bpsk_simulation(carriers: list[dict],
         signal_bw = (1 + rolloff) * symbol_rate
         bb_ch = (apply_channel_impairment(bb, native_rate, signal_bw, channel_cfg)
                  if channel_cfg is not None else bb)
+
+        # Phase noise: per-carrier oscillator phase fluctuation, applied at
+        # the carrier's own native bandwidth right after the channel filter
+        # and before the OLA upsample / wideband stage.  Reproducible via a
+        # per-carrier-derived RNG so reruns of the same seed see the same φ(t).
+        if phase_noise_cfg is not None:
+            pn_rng = np.random.default_rng(int(per_carrier_seeds[i]) ^ 0x5A5A_5A5A)
+            bb_ch = apply_phase_noise(
+                bb_ch, native_rate,
+                phase_noise_cfg["offset_hz"], phase_noise_cfg["dbc_per_hz"],
+                pn_rng,
+            )
 
         # Rational-resample from native_rate to sample_rate/L (effective native rate)
         # when L_float was non-integer.  P_rs/Q_rs == 1/1 for integer-L carriers.

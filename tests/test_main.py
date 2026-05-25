@@ -69,6 +69,21 @@ def test_main_runs(tmp_path):
         assert (tmp_path / f"c1_detector_{panel}.png").exists()
 
 
+def test_main_skips_disabled_phase_noise(tmp_path):
+    """A `[phase_noise]` block with enabled=False is dropped before being
+    handed to the sweep — the run should look identical to one with no block."""
+    cfg = _make_cfg(tmp_path)
+    cfg["phase_noise"] = {
+        "enabled":    False,
+        "offset_hz":  [1e3, 1e5],
+        "dbc_per_hz": [-60.0, -100.0],
+    }
+    with patch("main.load_config", return_value=cfg), \
+         patch("matplotlib.pyplot.show"):
+        main_module.main()
+    assert (tmp_path / "report.md").exists()
+
+
 def test_main_plots_disabled(tmp_path):
     """plots=false skips image files; report.md is still written."""
     with patch("main.load_config", return_value=_make_cfg(tmp_path, plots=False)), \

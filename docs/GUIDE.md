@@ -262,6 +262,7 @@ All parameters live in `simulation.toml`. Large integers may use underscores
 | `seed` | int | `42` | Global random seed. Per-iteration seeds are derived as `seed + grid_index × stride + iter_index` for reproducibility. |
 | `max_block_size_samples` | int | `16_777_216` | Per-carrier native-rate buffer cap (samples) for one iteration. Each carrier's `num_symbols` (uncoded) or `num_frames` (coded) is derived automatically so the largest per-carrier buffer never exceeds this. Memory ≈ this × 16 bytes per active demod carrier. |
 | `target_ci_half_width` | float | `2e-3` | Absolute half-width on BER (Wilson score interval at `confidence`). Iterations stop accumulating at a grid point once the half-width is at or below this value. |
+| `target_ci_relative` | float | _unset_ | Optional relative half-width target, expressed as a fraction of BER itself (e.g. `0.01` ≡ ±1% of BER). When set, convergence is declared as soon as **either** the absolute or relative target is met — see §8. Omit the key to use the absolute target only. |
 | `confidence` | float ∈ (0, 1) | `0.95` | Two-sided confidence level for the Wilson interval and the rule-of-three upper bound. |
 | `min_errors` | int | `50` | Minimum cumulative bit errors required before convergence is declared. Prevents premature stops when the CI is tight but jittery from too few errors. |
 | `max_iterations` | int | `100` | Safety cap on iterations per `(IBO, noise)` point. Points that exit at the cap are flagged with a `*` suffix on the iteration count in `report.md`. |
@@ -428,28 +429,82 @@ IM environment but their BER/EVM are not computed, saving significant time.
 
 Each `(IBO, noise)` point is **not** a single sim run. The sweep layer reruns the
 chunk pipeline with independent seeds at that point and accumulates `n_bits` and
-`n_errors` per carrier across iterations. It stops when either:
+`n_errors` per carrier across iterations. The stopping rule is:
 
-- the Wilson 95% (or `[simulation].confidence`) interval half-width on BER is at
-  or below `[simulation].target_ci_half_width`, **and** the carrier has observed
-  at least `[simulation].min_errors` bit errors; or
-- `[simulation].max_iterations` is reached.
+```
+k ≥ min_errors  AND  ( hw ≤ target_ci_half_width
+                       OR  (target_ci_relative is set AND ber > 0
+                            AND hw / ber ≤ target_ci_relative) )
+OR  iterations ≥ max_iterations
+```
+
+where `hw` is the Wilson half-width at the configured `confidence`. The absolute
+test always applies; the relative test is opt-in (omit `target_ci_relative` to
+disable it).
 
 This breaks the fixed-`num_symbols` trade-off: each iteration's per-carrier buffer
 is bounded by `[simulation].max_block_size_samples`, so memory stays predictable
 even for very narrowband carriers, while the iteration count scales automatically
 with operating-point difficulty (more iterations at low BER, fewer at high BER).
 
-**Worked example.** With `max_block_size_samples = 16_777_216` and a BPSK carrier
-at `sps = 4`, each iteration generates ~4.2 M bits. At `max_iterations = 100`
-that's up to 420 M bits per sweep point — enough to confidently measure BERs
-down to about `1e-7`. For BERs near `1e-9` you would raise `max_iterations`
-(the run takes proportionally longer; there is no shortcut for measuring rare
-events).
+### Sizing the iteration count
+
+For a target absolute half-width `hw` at a true BER of `p`, the Wilson interval
+shape gives (large-`n` approximation, with `z` the two-sided confidence z-value):
+
+```
+n  ≈  (z / hw)² · p · (1 − p)        bits required
+iterations ≈ n / bits_per_iteration
+bits_per_iteration  ≈  num_symbols × bits_per_symbol
+                    =  (max_block_size_samples / sps) × bits_per_symbol
+```
+
+For 95% confidence, `z ≈ 1.96`, so `(z / 1e-6)² ≈ 3.84 × 10¹²` at `hw = 1e-6` —
+the bit count scales linearly with BER and quadratically with the inverse target.
+
+**Worked example.** A BPSK carrier (`sps = 4`, 1 bit/symbol) with
+`max_block_size_samples = 4_194_304` generates ≈ 1.05 M bits per iteration. The
+iterations required to hit an absolute half-width of `1 × 10⁻⁶` at 95%
+confidence then look like:
+
+| Approx BER | Bits needed (`(z/hw)²·p`) | Iterations (@1.05 M/iter) |
+|---:|---:|---:|
+| `8 × 10⁻²` | `3.0 × 10¹¹` | ≈ 290,000 |
+| `2 × 10⁻²` | `8.6 × 10¹⁰` | ≈ 82,000 |
+| `6 × 10⁻³` | `2.3 × 10¹⁰` | ≈ 22,000 |
+| `7.7 × 10⁻⁴` | `3.0 × 10⁹` | ≈ 2,800 |
+| `2 × 10⁻⁴` | `7.3 × 10⁸` | ≈ 700 |
+
+A few practical implications fall out of the formula:
+
+- A tight absolute target (`1e-6`) at high BER (≥ 1%) is impractical — the
+  high-BER end of any sweep would dominate runtime by orders of magnitude.
+- Doubling the target half-width quarters the required bit count.
+- Doubling `max_block_size_samples` halves the iteration count at the same
+  total-bits cost (one bigger iter instead of two smaller ones).
+
+### Either-or relative target
+
+A single absolute target is overkill at high BER and a hard requirement at low
+BER. Setting `target_ci_relative` (e.g. `0.01` ≡ ±1% of BER) declares
+convergence as soon as `hw / ber ≤ target_ci_relative`, in addition to the
+absolute test. With both set, each sweep point exits on whichever fires first:
+
+- A noisy point at BER ≈ 1% needs `hw ≤ 1 × 10⁻⁴` for ±1% of BER — typically a
+  handful of iterations.
+- A clean point at BER ≈ 1 × 10⁻⁶ never reaches ±1% of BER within any reasonable
+  iteration count, so the absolute target governs.
+
+This lets you keep the absolute target loose enough to be reachable (e.g.
+`1e-4`) and rely on the relative target to keep error bars meaningful on the
+high-BER end of the sweep, without forcing the low-BER end to chase a relative
+ratio it can never meet. Omit the key (or leave the GUI field blank) to disable
+the relative path entirely.
 
 **Strict per-carrier convergence.** All `sweep_demod = true` carriers at a point
-must individually meet the CI target before the point is considered converged.
-A single low-BER carrier can dominate the iteration count for that point.
+must individually meet the stopping rule before the point is considered
+converged. A single low-BER carrier can dominate the iteration count for that
+point.
 
 **Zero-error reporting.** If a point exits the loop with zero errors observed,
 BER is reported as an upper bound via the rule of three: `BER < −ln(1−c) / n_bits`
@@ -639,13 +694,14 @@ it reads and writes `.toml` files directly and launches `main.py` as a subproces
 
 ### General tab: Adaptive BER measurement
 
-Five fields control the convergence loop described in §8. Each field shows a
+Six fields control the convergence loop described in §8. Each field shows a
 tooltip with the meaning, typical value, and the consequence of changing it:
 
 | Field | Maps to | Tooltip summary |
 |---|---|---|
 | Max Block Size (samples) | `max_block_size_samples` | Per-carrier native-rate buffer cap for ONE iteration. `num_symbols` / `num_frames` are derived from this so the largest per-carrier buffer never exceeds it. |
 | Target CI Half-Width | `target_ci_half_width` | Absolute half-width on BER at the chosen confidence level. Example: 2e-3 means BER ± 0.002 at 95% confidence. |
+| Target CI Relative | `target_ci_relative` | Optional ±%-of-BER target (e.g. 0.01 ≡ ±1% of BER). When set, convergence is met on whichever of the absolute or relative target fires first. Leave blank to use the absolute target only. |
 | Confidence | `confidence` | Two-sided confidence level in (0, 1). Used for both the CI stop criterion and the rule-of-three upper bound. |
 | Min Errors | `min_errors` | Minimum cumulative bit errors before convergence can be declared. Prevents premature stops when the CI is tight but jittery. |
 | Max Iterations | `max_iterations` | Safety cap on iterations per (IBO, noise) point. Capped runs are flagged with `*` on the iteration count in `report.md`. |

@@ -144,11 +144,25 @@ A single-point "config" is simply a 1×1 sweep — there is no separate fixed-no
 mode.
 
 Each grid point is iterated adaptively: the chunk pipeline reruns with
-independent seeds until the Wilson 95% CI half-width on BER reaches
-`[simulation].target_ci_half_width` (with at least `min_errors` observed), or
-`max_iterations` is hit. Per-carrier `num_symbols` / `num_frames` for one
-iteration are derived from `[simulation].max_block_size_samples`. See
-[memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md).
+independent seeds until the Wilson CI half-width on BER meets a stopping rule
+(with at least `min_errors` observed), or `max_iterations` is hit. Per-carrier
+`num_symbols` / `num_frames` for one iteration are derived from
+`[simulation].max_block_size_samples`.
+
+The stopping rule supports an either-or test:
+
+```
+hw ≤ target_ci_half_width
+OR  (target_ci_relative is set AND ber > 0 AND hw / ber ≤ target_ci_relative)
+```
+
+The absolute target is always active; the relative target (e.g. `0.01` ≡ ±1%
+of BER) is opt-in and lets noisy points exit in a handful of iterations without
+forcing a tiny absolute interval that only matters at low BER.  See
+[GUIDE.md § 8 "Sweep mode"](GUIDE.md#8-sweep-mode) for the iteration-sizing
+formula and a worked example, and
+[memory/technical_notes.md § "Adaptive iteration"](../memory/technical_notes.md)
+for the full design rationale.
 
 - **IBO axis** — `[sweep].ibo_db` (list, ≥1 value).  Each value sets the drive
   level at that grid point.

@@ -109,11 +109,35 @@ def parameter_sweep(carriers: list[dict],
             }
 
             # Field widths for the in-place per-iteration status line.  The
-            # iter index is padded to the width of max_iterations and the
-            # carrier name to the longest demod-carrier name, so successive
-            # status lines vertically align column-for-column.
-            iter_width = len(str(max_iterations))
-            name_width = max((len(n) for n in accs), default=1)
+            # iter index is padded to max_iterations; the action field
+            # ("chunk K/N" or "done") is padded to a fixed width so the stats
+            # tail starts at the same column on every line; the carrier name
+            # is padded to the longest demod-carrier name.
+            iter_width   = len(str(max_iterations))
+            name_width   = max((len(n) for n in accs), default=1)
+            action_width = 14   # wide enough for "chunk 9999/9999"
+
+            def _stats_tail(_accs: dict[str, _ErrorAccumulator] = accs,
+                            _nw: int = name_width) -> str:
+                # Joins the cumulative bits/errors/BER/CI columns for every
+                # demod carrier into one tail string.  Reads the accumulator
+                # at call time, so chunk-time invocations show whatever the
+                # accumulator currently holds (= cumulative through the prior
+                # iteration; '---' before any iteration has completed).
+                parts: list[str] = []
+                for nm in sorted(_accs):
+                    a = _accs[nm]
+                    if a.n_bits > 0:
+                        ber = a.ber if a.ber is not None else 0.0
+                        ber_s = f"{ber:.2e}"
+                        ci_s  = f"{a.half_width(confidence):.1e}"
+                    else:
+                        ber_s = f"{'---':>8}"
+                        ci_s  = f"{'---':>7}"
+                    parts.append(
+                        f"{nm:<{_nw}}  bits={a.n_bits:>10}  "
+                        f"errors={a.n_errors:>8}  BER={ber_s}  CI±={ci_s}")
+                return "  ".join(parts)
 
             it = 0
             converged_all = True
@@ -123,14 +147,19 @@ def parameter_sweep(carriers: list[dict],
                 point_seed = base_seed + (ibo_i * len(noise_density_dbfs_values) + noise_i) \
                              * _SEED_STRIDE + it
 
-                # Wrap chunk_print to prefix every chunk line with the iteration
-                # count so the user sees both baseband-consumption progress AND
-                # the iteration count incrementing when a point needs more stats.
+                # Wrap chunk_print so every chunk line carries the iteration
+                # count, the chunk progress, AND the running stats tail.  The
+                # tail is the cumulative-through-prior-iteration result — it
+                # stays visible (stale) while the current iteration is busy
+                # consuming chunks of the freshly-generated baseband signal.
                 inner_print: _PrintCB = None
                 if chunk_print is not None:
                     def _iter_chunk_print(msg: str, _n: int = iter_num,
-                                          _w: int = iter_width) -> None:
-                        chunk_print(f"iter {_n:>{_w}}/{max_iterations}: {msg}")
+                                          _w: int = iter_width,
+                                          _aw: int = action_width) -> None:
+                        chunk_print(
+                            f"iter {_n:>{_w}}/{max_iterations}: "
+                            f"{msg:<{_aw}}  {_stats_tail()}")
                     inner_print = _iter_chunk_print
 
                 sim = wideband_bpsk_simulation(
@@ -168,25 +197,18 @@ def parameter_sweep(carriers: list[dict],
                             s[key] += float(val)
                             s[key.split("_")[0] + "_n"] += 1
 
-                # Cumulative running tally per demod carrier — one line per iter.
-                # Fixed-width columns keep successive lines vertically aligned
-                # (and matched by the GUI's chunk regex so they overwrite in
-                # place instead of accumulating).
+                # Post-iteration "done" line: same column layout as the chunk
+                # lines, with the just-updated tail and an optional
+                # "(target met)" suffix when every demod carrier has crossed
+                # the convergence threshold.
                 if chunk_print is not None and accs:
-                    for name in sorted(accs):
-                        a = accs[name]
-                        hw = a.half_width(confidence)
-                        ber_val = a.ber if a.ber is not None else 0.0
-                        target_met = a.converged(
-                            target_ci_half_width, confidence, min_errors)
-                        suffix = "  (target met)" if target_met else ""
-                        chunk_print(
-                            f"iter {iter_num:>{iter_width}}/{max_iterations} done: "
-                            f"{name:<{name_width}}  "
-                            f"bits={a.n_bits:>10}  "
-                            f"errors={a.n_errors:>8}  "
-                            f"BER={ber_val:.2e}  "
-                            f"CI±={hw:.1e}{suffix}")
+                    all_met = all(
+                        a.converged(target_ci_half_width, confidence, min_errors)
+                        for a in accs.values())
+                    suffix = "  (target met)" if all_met else ""
+                    chunk_print(
+                        f"iter {iter_num:>{iter_width}}/{max_iterations}: "
+                        f"{'done':<{action_width}}  {_stats_tail()}{suffix}")
 
                 if iter_cb is not None:
                     iter_cb(it + 1, ibo_i, noise_i)

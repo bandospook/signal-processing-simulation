@@ -308,7 +308,7 @@ def wideband_bpsk_simulation(carriers: list[dict],
 
         if chunk_print is not None and (
                 k % _CHUNK_REPORT == _CHUNK_REPORT - 1 or k == N_chunks - 1):
-            chunk_print(f"chunk {k + 1}/{N_chunks}")
+            chunk_print(f"chunk {k + 1:>{len(str(N_chunks))}}/{N_chunks}")
 
     # ── Per-carrier demod and metrics ─────────────────────────────────────────
     for i, cr in enumerate(carrier_state):

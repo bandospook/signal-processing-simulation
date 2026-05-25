@@ -76,8 +76,9 @@ def test_parameter_sweep_capped_iterations():
 
 
 def test_parameter_sweep_chunk_print_carries_iter_prefix_and_tally():
-    """chunk_print receives both per-iteration chunk lines (prefixed with the
-    iteration count) and a cumulative tally line after each iteration completes."""
+    """chunk_print receives a unified status line for both in-flight chunks
+    and post-iteration tallies; both forms share fixed-width columns for the
+    cumulative bits/errors/BER/CI fields."""
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -101,25 +102,39 @@ def test_parameter_sweep_chunk_print_carries_iter_prefix_and_tally():
         seed=0,
         chunk_print=lines.append,
     )
-    chunk_lines = [ln for ln in lines if "chunk" in ln and "done" not in ln]
-    tally_lines = [ln for ln in lines if "done:" in ln]
-    assert any(ln.startswith("iter 1/2: chunk ") for ln in chunk_lines)
-    assert any(ln.startswith("iter 2/2: chunk ") for ln in chunk_lines)
+    chunk_lines = [ln for ln in lines if ": chunk " in ln]
+    tally_lines = [ln for ln in lines if ": done" in ln]
+    assert any(ln.startswith("iter 1/2: chunk") for ln in chunk_lines)
+    assert any(ln.startswith("iter 2/2: chunk") for ln in chunk_lines)
     assert len(tally_lines) == 2
-    assert tally_lines[0].startswith("iter 1/2 done: c1 ")
-    assert tally_lines[1].startswith("iter 2/2 done: c1 ")
-    # Zero errors at -200 dBFS/Hz are rendered as BER=0.00e+00 with the
-    # `errors=` column carrying the explicit zero count.
+    assert tally_lines[0].startswith("iter 1/2: done")
+    assert tally_lines[1].startswith("iter 2/2: done")
+    # Every status line — chunk or done — carries the running carrier tail.
+    assert all("c1" in ln for ln in chunk_lines + tally_lines)
+    # Iter-1 chunk lines fire BEFORE iter 1's demod runs, so the cumulative
+    # accumulator is still empty → bits=0 and BER/CI render as '---'.
+    iter1_chunks = [ln for ln in chunk_lines if ln.startswith("iter 1/2: chunk")]
+    assert iter1_chunks, "expected at least one iter-1 chunk line"
+    assert "bits=         0" in iter1_chunks[0]
+    assert "BER=     ---" in iter1_chunks[0]
+    assert "CI±=    ---" in iter1_chunks[0]
+    # Iter-2 chunk lines see iter-1's stale tally (n_bits > 0 from iter 1).
+    iter2_chunks = [ln for ln in chunk_lines if ln.startswith("iter 2/2: chunk")]
+    assert iter2_chunks, "expected at least one iter-2 chunk line"
+    assert "BER=0.00e+00" in iter2_chunks[0]
+    # Zero errors at -200 dBFS/Hz → BER=0.00e+00 with explicit errors=0.
     assert "errors=       0" in tally_lines[0]
     assert "BER=0.00e+00" in tally_lines[0]
-    # The bits column is right-aligned to a fixed width so successive lines
-    # line up vertically.
+    # All cumulative columns line up vertically across chunk and done lines.
     bits_col = tally_lines[0].index("bits=")
-    assert tally_lines[1].index("bits=") == bits_col
-    err_col = tally_lines[0].index("errors=")
-    assert tally_lines[1].index("errors=") == err_col
-    ber_col = tally_lines[0].index("BER=")
-    assert tally_lines[1].index("BER=") == ber_col
+    err_col  = tally_lines[0].index("errors=")
+    ber_col  = tally_lines[0].index("BER=")
+    ci_col   = tally_lines[0].index("CI±=")
+    for ln in chunk_lines + tally_lines:
+        assert ln.index("bits=")   == bits_col
+        assert ln.index("errors=") == err_col
+        assert ln.index("BER=")    == ber_col
+        assert ln.index("CI±=")    == ci_col
     # min_errors=1 not met → no "(target met)" suffix on either iter.
     assert not any("(target met)" in ln for ln in tally_lines)
     assert results[0]["iterations"] == 2
@@ -150,7 +165,7 @@ def test_parameter_sweep_tally_flags_target_met_when_converged():
         seed=0,
         chunk_print=lines.append,
     )
-    tally_lines = [ln for ln in lines if "done:" in ln]
+    tally_lines = [ln for ln in lines if ": done" in ln]
     assert len(tally_lines) == 1
     assert tally_lines[0].endswith("(target met)")
 

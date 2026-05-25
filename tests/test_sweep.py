@@ -75,6 +75,76 @@ def test_parameter_sweep_capped_iterations():
         assert cr["ber_upper_95"] is not None and cr["ber_upper_95"] > 0
 
 
+def test_parameter_sweep_chunk_print_carries_iter_prefix_and_tally():
+    """chunk_print receives both per-iteration chunk lines (prefixed with the
+    iteration count) and a cumulative tally line after each iteration completes."""
+    carriers = [dict(
+        name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
+        rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
+        sweep_demod=True,
+    )]
+    lines: list[str] = []
+    _, results = parameter_sweep(
+        carriers=carriers,
+        sample_rate=16e6,
+        am_am_cfg=_AM_AM,
+        am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0],
+        noise_density_dbfs_values=[-200.0],
+        max_block_size_samples=400,
+        target_ci_half_width=1e-12,           # impossible → drives 2 iterations
+        confidence=0.95,
+        min_errors=1,
+        max_iterations=2,
+        ola_filter_span=8,
+        ola_block_size=1024,
+        seed=0,
+        chunk_print=lines.append,
+    )
+    chunk_lines = [ln for ln in lines if "chunk" in ln and "done" not in ln]
+    tally_lines = [ln for ln in lines if "done:" in ln]
+    assert any(ln.startswith("iter 1/2: chunk ") for ln in chunk_lines)
+    assert any(ln.startswith("iter 2/2: chunk ") for ln in chunk_lines)
+    assert len(tally_lines) == 2
+    assert tally_lines[0].startswith("iter 1/2 done: c1 ")
+    assert tally_lines[1].startswith("iter 2/2 done: c1 ")
+    # At -200 dBFS/Hz we expect zero errors, so the human-readable form is used.
+    assert "BER=0 (no errors)" in tally_lines[0]
+    # min_errors=1 not met → no "(target met)" suffix on either iter.
+    assert not any("(target met)" in ln for ln in tally_lines)
+    assert results[0]["iterations"] == 2
+
+
+def test_parameter_sweep_tally_flags_target_met_when_converged():
+    """The tally line for the converging iteration ends with '(target met)'."""
+    carriers = [dict(
+        name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
+        rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
+        sweep_demod=True,
+    )]
+    lines: list[str] = []
+    parameter_sweep(
+        carriers=carriers,
+        sample_rate=16e6,
+        am_am_cfg=_AM_AM,
+        am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0],
+        noise_density_dbfs_values=[-160.0],
+        max_block_size_samples=400,
+        target_ci_half_width=0.5,             # trivially satisfied
+        confidence=0.95,
+        min_errors=0,
+        max_iterations=3,
+        ola_filter_span=8,
+        ola_block_size=1024,
+        seed=0,
+        chunk_print=lines.append,
+    )
+    tally_lines = [ln for ln in lines if "done:" in ln]
+    assert len(tally_lines) == 1
+    assert tally_lines[0].endswith("(target met)")
+
+
 def test_parameter_sweep_converges_in_one_iteration_with_iter_cb():
     """Permissive CI target converges in iteration 1; iter_cb is called with the
     iteration index and grid position."""

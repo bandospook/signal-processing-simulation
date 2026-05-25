@@ -112,8 +112,19 @@ def parameter_sweep(carriers: list[dict],
             converged_all = True
             last_sim: dict | None = None
             for it in range(max_iterations):
+                iter_num = it + 1
                 point_seed = base_seed + (ibo_i * len(noise_density_dbfs_values) + noise_i) \
                              * _SEED_STRIDE + it
+
+                # Wrap chunk_print to prefix every chunk line with the iteration
+                # count so the user sees both baseband-consumption progress AND
+                # the iteration count incrementing when a point needs more stats.
+                inner_print: _PrintCB = None
+                if chunk_print is not None:
+                    def _iter_chunk_print(msg: str, _n: int = iter_num) -> None:
+                        chunk_print(f"iter {_n}/{max_iterations}: {msg}")
+                    inner_print = _iter_chunk_print
+
                 sim = wideband_bpsk_simulation(
                     carriers=carriers,
                     sample_rate=sample_rate,
@@ -126,7 +137,7 @@ def parameter_sweep(carriers: list[dict],
                     ola_block_size=ola_block_size,
                     seed=point_seed,
                     demod_carriers=demod_carriers,
-                    chunk_print=chunk_print,
+                    chunk_print=inner_print,
                 )
                 if first_sim is None:
                     first_sim = sim
@@ -148,6 +159,21 @@ def parameter_sweep(carriers: list[dict],
                         if val is not None and math.isfinite(val):
                             s[key] += float(val)
                             s[key.split("_")[0] + "_n"] += 1
+
+                # Cumulative running tally per demod carrier — one line per iter.
+                if chunk_print is not None and accs:
+                    for name in sorted(accs):
+                        a = accs[name]
+                        hw = a.half_width(confidence)
+                        ber_s = ("BER=0 (no errors)" if a.n_errors == 0
+                                 else f"BER={a.ber:.2e}")
+                        target_met = a.converged(
+                            target_ci_half_width, confidence, min_errors)
+                        suffix = "  (target met)" if target_met else ""
+                        chunk_print(
+                            f"iter {iter_num}/{max_iterations} done: {name} "
+                            f"bits={a.n_bits} errors={a.n_errors} {ber_s} "
+                            f"CI±={hw:.1e}{suffix}")
 
                 if iter_cb is not None:
                     iter_cb(it + 1, ibo_i, noise_i)

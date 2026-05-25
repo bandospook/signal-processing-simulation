@@ -372,7 +372,7 @@ class CarrierFrame(ttk.LabelFrame):
 # ── Main application ──────────────────────────────────────────────────────────
 
 _PCT_RE   = re.compile(r'^\[\s*(\d+)%\]')
-_CHUNK_RE = re.compile(r'^\s+chunk \d+/\d+')
+_CHUNK_RE = re.compile(r'^\s+(iter \d+/\d+: )?chunk \d+/\d+')
 
 
 class App:

@@ -687,7 +687,7 @@ it reads and writes `.toml` files directly and launches `main.py` as a subproces
 
 | Tab | Contents |
 |---|---|
-| **General** | Three sections: **Simulation** (seed, sample rate), **Adaptive BER measurement** (max block size, target CI half-width, confidence, min errors, max iterations), and **Overlap-Add (OLA) Filter** (filter span, block size). Every field has a hover tooltip explaining what it does and typical values. |
+| **General** | Three sections laid out in a two-column field grid: **Simulation** (seed · sample rate), **Adaptive BER measurement** (max block size · max iterations / target CI half-width · target CI relative / min errors · confidence), and **Overlap-Add (OLA) Filter** (filter span · block size). Every field has a hover tooltip explaining what it does and typical values. |
 | **Amplifier** | AM-AM table (input/output amplitude columns), AM-PM table (input/phase columns) |
 | **Sweep & Output** | IBO sweep list, noise sweep list, output directory (with Browse button), and a single "Generate plots" checkbox. There are no per-file filename fields — filenames are fixed (see §6). |
 | **Carriers** | One scrollable labeled frame per carrier (see below); view-filter dropdown at the top |

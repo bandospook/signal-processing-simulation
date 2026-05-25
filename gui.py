@@ -136,8 +136,9 @@ class _Tip:
 
 
 def _lf(parent, text, row, col, **kw):
-    ttk.Label(parent, text=text).grid(row=row, column=col, sticky="w",
-                                      padx=(0, 4), pady=2, **kw)
+    kw.setdefault("padx", (0, 4))
+    kw.setdefault("pady", 2)
+    ttk.Label(parent, text=text).grid(row=row, column=col, sticky="w", **kw)
 
 def _ent(parent, var, row, col, width=18, tip="", **kw):
     e = ttk.Entry(parent, textvariable=var, width=width)
@@ -503,64 +504,73 @@ class App:
     def _build_general_tab(self, nb):
         tab = ttk.Frame(nb);  nb.add(tab, text="General")
         f = _scrollable(tab)
+
+        # Two-column layout: columns 0,1 = left label/entry pair;
+        # columns 2,3 = right label/entry pair on the same row.
+        # The right-column label gets extra leading pad to separate the two
+        # vertical groups; section headers continue to span all four columns.
+        L_PAD = (16, 4)
+        W = 20
+
         r = self._section(f, "Simulation", 0)
         _lf(f, "Seed:", r, 0)
-        _ent(f, self._sv("sim.seed"), r, 1,
-             tip="Random seed for reproducible simulations (integer)."); r += 1
-        _lf(f, "Sample Rate (MHz):", r, 0)
-        _ent(f, self._sv("sweep.sample_rate"), r, 1, width=20,
+        _ent(f, self._sv("sim.seed"), r, 1, width=W,
+             tip="Random seed for reproducible simulations (integer).")
+        _lf(f, "Sample Rate (MHz):", r, 2, padx=L_PAD)
+        _ent(f, self._sv("sweep.sample_rate"), r, 3, width=W,
              tip="Composite wideband sample rate in MHz. "
                  "Must be at least 2x the highest carrier edge frequency."); r += 1
 
         r = self._section(f, "Adaptive BER measurement", r)
         _lf(f, "Max Block Size (samples):", r, 0)
-        _ent(f, self._sv("sim.max_block_size_samples"), r, 1, width=20,
+        _ent(f, self._sv("sim.max_block_size_samples"), r, 1, width=W,
              tip="Per-carrier native-rate buffer cap, in samples, for ONE iteration. "
                  "num_symbols (uncoded) or num_frames (coded) are derived from this "
                  "so the largest per-carrier buffer never exceeds it. Increase to "
                  "reduce iteration count at low BER; decrease to fit smaller machines. "
-                 "Memory ≈ this × 16 bytes per active demod carrier."); r += 1
+                 "Memory ≈ this × 16 bytes per active demod carrier.")
+        _lf(f, "Max Iterations:", r, 2, padx=L_PAD)
+        _ent(f, self._sv("sim.max_iterations"), r, 3, width=W,
+             tip="Safety cap on the number of full sim runs per (IBO, noise) point. "
+                 "Each iteration processes one Max-Block-Size buffer per carrier; "
+                 "iterations that hit this cap without converging are flagged in "
+                 "report.md with an asterisk on the iteration count."); r += 1
         _lf(f, "Target CI Half-Width:", r, 0)
-        _ent(f, self._sv("sim.target_ci_half_width"), r, 1, width=20,
+        _ent(f, self._sv("sim.target_ci_half_width"), r, 1, width=W,
              tip="Absolute half-width on BER at the chosen confidence level. "
                  "Iterations accumulate at each (IBO, noise) point until the Wilson "
                  "interval is at most ±this around the estimate. "
-                 "Example: 2e-3 means BER ± 0.002 at 95% confidence."); r += 1
-        _lf(f, "Target CI Relative:", r, 0)
-        _ent(f, self._sv("sim.target_ci_relative"), r, 1, width=20,
+                 "Example: 2e-3 means BER ± 0.002 at 95% confidence.")
+        _lf(f, "Target CI Relative:", r, 2, padx=L_PAD)
+        _ent(f, self._sv("sim.target_ci_relative"), r, 3, width=W,
              tip="Optional relative half-width on BER, expressed as a fraction of "
                  "BER itself (e.g. 0.01 = ±1% of BER). When set, convergence is "
                  "declared as soon as EITHER the absolute or relative target is "
                  "met. Lets high-BER points exit quickly without forcing a tiny "
                  "absolute interval that would only matter at low BER. Leave "
                  "blank to use the absolute target only."); r += 1
-        _lf(f, "Confidence:", r, 0)
-        _ent(f, self._sv("sim.confidence"), r, 1, width=20,
+        _lf(f, "Min Errors:", r, 0)
+        _ent(f, self._sv("sim.min_errors"), r, 1, width=W,
+             tip="Minimum cumulative bit errors required before convergence can be "
+                 "declared at a sweep point. Prevents premature stops when the CI is "
+                 "tight but jittery from too few errors. Typical value: 50.")
+        _lf(f, "Confidence:", r, 2, padx=L_PAD)
+        _ent(f, self._sv("sim.confidence"), r, 3, width=W,
              tip="Two-sided confidence level for the Wilson interval, in (0, 1). "
                  "Typical value: 0.95. Used for both the CI stop criterion and the "
                  "rule-of-three upper bound reported when zero errors are observed."); r += 1
-        _lf(f, "Min Errors:", r, 0)
-        _ent(f, self._sv("sim.min_errors"), r, 1, width=20,
-             tip="Minimum cumulative bit errors required before convergence can be "
-                 "declared at a sweep point. Prevents premature stops when the CI is "
-                 "tight but jittery from too few errors. Typical value: 50."); r += 1
-        _lf(f, "Max Iterations:", r, 0)
-        _ent(f, self._sv("sim.max_iterations"), r, 1, width=20,
-             tip="Safety cap on the number of full sim runs per (IBO, noise) point. "
-                 "Each iteration processes one Max-Block-Size buffer per carrier; "
-                 "iterations that hit this cap without converging are flagged in "
-                 "report.md with an asterisk on the iteration count."); r += 1
 
         r = self._section(f, "Overlap-Add (OLA) Filter", r)
         _lf(f, "Filter Span:", r, 0)
-        _ent(f, self._sv("ola.filter_span"), r, 1,
+        _ent(f, self._sv("ola.filter_span"), r, 1, width=W,
              tip="Half-span of the OLA resampling filter in symbols. "
-                 "Longer span = better stopband rejection, higher latency."); r += 1
-        _lf(f, "Block Size:", r, 0)
-        _ent(f, self._sv("ola.block_size"), r, 1,
+                 "Longer span = better stopband rejection, higher latency.")
+        _lf(f, "Block Size:", r, 2, padx=L_PAD)
+        _ent(f, self._sv("ola.block_size"), r, 3, width=W,
              tip="FFT block size for the overlap-add resampler (samples). "
                  "Must be a power of two; larger = more efficient for long filters."); r += 1
         f.columnconfigure(1, weight=1)
+        f.columnconfigure(3, weight=1)
 
     def _build_amplifier_tab(self, nb):
         tab = ttk.Frame(nb);  nb.add(tab, text="Amplifier")

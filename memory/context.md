@@ -81,6 +81,7 @@ memory/
 seed                   = 42
 max_block_size_samples = 16_777_216     # per-carrier native-rate buffer cap (one iter)
 target_ci_half_width   = 2e-3           # absolute half-width on BER (Wilson CI)
+# target_ci_relative   = 0.01           # optional ±%-of-BER target; either/or with absolute
 confidence             = 0.95
 min_errors             = 50             # floor before convergence can be declared
 max_iterations         = 100            # safety cap on iterations per sweep point

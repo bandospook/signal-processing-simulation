@@ -43,6 +43,8 @@ def build_toml(cfg: dict) -> str:
     kv("seed                  ", sim["seed"])
     kv("max_block_size_samples", sim["max_block_size_samples"])
     kv("target_ci_half_width  ", sim["target_ci_half_width"])
+    if sim.get("target_ci_relative") is not None:
+        kv("target_ci_relative    ", sim["target_ci_relative"])
     kv("confidence            ", sim["confidence"])
     kv("min_errors            ", sim["min_errors"])
     kv("max_iterations        ", sim["max_iterations"])
@@ -524,6 +526,14 @@ class App:
                  "Iterations accumulate at each (IBO, noise) point until the Wilson "
                  "interval is at most ±this around the estimate. "
                  "Example: 2e-3 means BER ± 0.002 at 95% confidence."); r += 1
+        _lf(f, "Target CI Relative:", r, 0)
+        _ent(f, self._sv("sim.target_ci_relative"), r, 1, width=20,
+             tip="Optional relative half-width on BER, expressed as a fraction of "
+                 "BER itself (e.g. 0.01 = ±1% of BER). When set, convergence is "
+                 "declared as soon as EITHER the absolute or relative target is "
+                 "met. Lets high-BER points exit quickly without forcing a tiny "
+                 "absolute interval that would only matter at low BER. Leave "
+                 "blank to use the absolute target only."); r += 1
         _lf(f, "Confidence:", r, 0)
         _ent(f, self._sv("sim.confidence"), r, 1, width=20,
              tip="Two-sided confidence level for the Wilson interval, in (0, 1). "
@@ -680,6 +690,8 @@ class App:
             str(sim.get("max_block_size_samples", 16_777_216)))
         self._vars["sim.target_ci_half_width"].set(
             _fmt(sim.get("target_ci_half_width", 2e-3)))
+        _rel = sim.get("target_ci_relative")
+        self._vars["sim.target_ci_relative"].set(_fmt(_rel) if _rel is not None else "")
         self._vars["sim.confidence"].set(_fmt(sim.get("confidence", 0.95)))
         self._vars["sim.min_errors"].set(str(sim.get("min_errors", 50)))
         self._vars["sim.max_iterations"].set(str(sim.get("max_iterations", 100)))
@@ -722,15 +734,20 @@ class App:
         def iv(key): return int(float(sv(key)))
         def tv(key): return _parse_float_list(self._texts[key].get("1.0", "end"))
 
+        sim_block: dict = {
+            "seed":                   iv("sim.seed"),
+            "max_block_size_samples": iv("sim.max_block_size_samples"),
+            "target_ci_half_width":   fv("sim.target_ci_half_width"),
+            "confidence":             fv("sim.confidence"),
+            "min_errors":             iv("sim.min_errors"),
+            "max_iterations":         iv("sim.max_iterations"),
+        }
+        rel_str = sv("sim.target_ci_relative")
+        if rel_str:
+            sim_block["target_ci_relative"] = float(rel_str)
+
         cfg: dict = {
-            "simulation": {
-                "seed":                   iv("sim.seed"),
-                "max_block_size_samples": iv("sim.max_block_size_samples"),
-                "target_ci_half_width":   fv("sim.target_ci_half_width"),
-                "confidence":             fv("sim.confidence"),
-                "min_errors":             iv("sim.min_errors"),
-                "max_iterations":         iv("sim.max_iterations"),
-            },
+            "simulation": sim_block,
             "sweep": {
                 "sample_rate":        fv("sweep.sample_rate"),
                 "ibo_db":             _parse_float_list(sv("sweep.ibo")),

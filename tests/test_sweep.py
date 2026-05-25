@@ -41,6 +41,41 @@ def test_accumulator_not_converged_below_min_errors():
     assert a.converged(target=1e-3, confidence=0.95, min_errors=50)
 
 
+def test_accumulator_relative_target_meets_at_high_ber():
+    """target_rel can declare convergence when the absolute target is far too
+    tight to ever be met at the operating BER but the relative target is."""
+    a = _ErrorAccumulator()
+    # 50000 trials, 500 errors → BER = 0.01, Wilson half-width ≈ 8.7e-4.
+    a.add(n_bits=50_000, n_errors=500)
+    # Absolute target unreachable; without target_rel we don't converge.
+    assert not a.converged(target=1e-6, confidence=0.95, min_errors=50)
+    # Relative target of 10% (hw/ber ≤ 0.10): 8.7e-4 / 1e-2 ≈ 0.087 < 0.10 → meets.
+    assert a.converged(target=1e-6, confidence=0.95, min_errors=50,
+                       target_rel=0.10)
+
+
+def test_accumulator_relative_target_does_not_meet_with_few_errors():
+    """target_rel still requires min_errors and a wide enough relative ratio."""
+    a = _ErrorAccumulator()
+    # Few trials, single error → BER = 0.01 but hw ≈ 0.055; ratio ≈ 5.5 ≫ 0.10.
+    a.add(n_bits=100, n_errors=1)
+    assert not a.converged(target=1e-6, confidence=0.95, min_errors=0,
+                           target_rel=0.10)
+
+
+def test_accumulator_relative_target_inert_when_zero_errors():
+    """With k=0 the relative test is undefined; only the absolute can converge."""
+    a = _ErrorAccumulator()
+    a.add(n_bits=10_000, n_errors=0)
+    # Absolute hw at k=0, n=10000, 95%: ≈ 3.8e-4 — meets 1e-3 target.
+    assert a.converged(target=1e-3, confidence=0.95, min_errors=0,
+                       target_rel=0.01)
+    # Tight absolute target → no convergence even with a generous relative one
+    # (the latter does nothing when BER is zero).
+    assert not a.converged(target=1e-9, confidence=0.95, min_errors=0,
+                           target_rel=0.10)
+
+
 def test_parameter_sweep_capped_iterations():
     """When the BER is too low to reach min_errors, the loop exits at max_iterations
     and the result is flagged with converged=False."""
@@ -168,6 +203,40 @@ def test_parameter_sweep_tally_flags_target_met_when_converged():
     tally_lines = [ln for ln in lines if ": done" in ln]
     assert len(tally_lines) == 1
     assert tally_lines[0].endswith("(target met)")
+
+
+def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
+    """At a high-BER operating point the relative target can be met long
+    before the absolute target — the sweep exits as soon as either fires."""
+    carriers = [dict(
+        name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
+        rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
+        sweep_demod=True,
+    )]
+    _, capped = parameter_sweep(
+        carriers=carriers, sample_rate=16e6,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0],
+        noise_density_dbfs_values=[-40.0],   # extreme noise → ~half BER on BPSK
+        max_block_size_samples=2000,
+        target_ci_half_width=1e-6,           # absolute unreachable here
+        confidence=0.95, min_errors=5, max_iterations=3,
+        ola_filter_span=8, ola_block_size=1024, seed=0,
+    )
+    assert capped[0]["converged"] is False
+    assert capped[0]["iterations"] == 3
+    # With a generous relative target convergence is declared on iter 1.
+    _, met = parameter_sweep(
+        carriers=carriers, sample_rate=16e6,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0], noise_density_dbfs_values=[-40.0],
+        max_block_size_samples=2000,
+        target_ci_half_width=1e-6, target_ci_relative=10.0,
+        confidence=0.95, min_errors=5, max_iterations=3,
+        ola_filter_span=8, ola_block_size=1024, seed=0,
+    )
+    assert met[0]["converged"] is True
+    assert met[0]["iterations"] == 1
 
 
 def test_parameter_sweep_converges_in_one_iteration_with_iter_cb():

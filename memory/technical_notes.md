@@ -223,6 +223,10 @@ New `[simulation]` keys (also displayed on the GUI's General tab):
 
     max_block_size_samples    int    per-carrier native-rate buffer cap (samples)
     target_ci_half_width      float  absolute half-width on BER (e.g. 2e-3)
+    target_ci_relative        float  optional relative half-width (hw/ber, e.g.
+                                     0.01 ≡ ±1% of BER).  Omit to disable;
+                                     when set, convergence is met on whichever
+                                     of the two thresholds fires first.
     confidence                float  two-sided level for the Wilson CI (e.g. 0.95)
     min_errors                int    minimum cumulative errors before convergence
                                      can be declared (default 50)
@@ -240,14 +244,28 @@ are derived per-carrier as:
 
 Stop when:
 
-    (wilson_half_width(k, n, confidence) <= target_ci_half_width  AND  k >= min_errors)
+    k >= min_errors  AND  ( hw <= target_ci_half_width
+                            OR  (target_ci_relative is set
+                                 AND ber > 0
+                                 AND hw / ber <= target_ci_relative) )
     OR  iterations >= max_iterations
+
+where `hw = wilson_half_width(k, n, confidence)` and `ber = k / n`.
 
 The Wilson score interval is used rather than the Wald (normal-approx)
 interval because Wald collapses to zero half-width at k=0 and gives
 non-sensical bounds at small p; Wilson behaves correctly across the full
 range.  The `min_errors` floor prevents premature stops when the Wilson
 half-width is small but jittery from too few errors.
+
+`target_ci_relative` (e.g. `0.01` ≡ ±1% of BER) is an optional
+either-or convergence path.  Without it, the absolute target governs:
+that becomes overkill at high BER (`target = 1e-6` is silly when
+BER ≈ 1e-2) and a hard requirement at low BER.  With both set, each
+sweep point exits on whichever criterion fires first: high-BER points
+typically hit the relative ratio after a handful of iterations, while
+low-BER points fall back on the absolute target.  Omit the key (or
+leave the GUI field blank) to disable the relative path entirely.
 
 ### Zero-errors reporting
 

@@ -48,12 +48,27 @@ class _ErrorAccumulator:
     def half_width(self, confidence: float) -> float:
         return wilson_half_width(self.n_errors, self.n_bits, confidence)
 
-    def converged(self, target: float, confidence: float, min_errors: int) -> bool:
+    def converged(self, target: float, confidence: float, min_errors: int,
+                  target_rel: float | None = None) -> bool:
+        """Either-or convergence test.
+
+        Returns True when min_errors is met AND (the Wilson half-width is
+        at most `target` absolute OR `target_rel` is set and the half-width
+        is at most `target_rel * ber`).  `target_rel` is the maximum
+        allowed ratio of half-width to BER (e.g. 0.01 ≡ ±1% of BER).
+        """
         if self.n_bits <= 0:
             return False
         if self.n_errors < min_errors:
             return False
-        return self.half_width(confidence) <= target
+        hw = self.half_width(confidence)
+        if hw <= target:
+            return True
+        if target_rel is not None:
+            ber = self.ber
+            if ber is not None and ber > 0 and hw / ber <= target_rel:
+                return True
+        return False
 
 
 def parameter_sweep(carriers: list[dict],
@@ -64,6 +79,7 @@ def parameter_sweep(carriers: list[dict],
                     noise_density_dbfs_values: list[float],
                     max_block_size_samples: int,
                     target_ci_half_width: float,
+                    target_ci_relative: float | None = None,
                     confidence: float = 0.95,
                     min_errors: int = 50,
                     max_iterations: int = 100,
@@ -203,7 +219,8 @@ def parameter_sweep(carriers: list[dict],
                 # the convergence threshold.
                 if chunk_print is not None and accs:
                     all_met = all(
-                        a.converged(target_ci_half_width, confidence, min_errors)
+                        a.converged(target_ci_half_width, confidence, min_errors,
+                                    target_rel=target_ci_relative)
                         for a in accs.values())
                     suffix = "  (target met)" if all_met else ""
                     chunk_print(
@@ -214,7 +231,8 @@ def parameter_sweep(carriers: list[dict],
                     iter_cb(it + 1, ibo_i, noise_i)
 
                 if accs and all(
-                        a.converged(target_ci_half_width, confidence, min_errors)
+                        a.converged(target_ci_half_width, confidence, min_errors,
+                                    target_rel=target_ci_relative)
                         for a in accs.values()):
                     break
             else:

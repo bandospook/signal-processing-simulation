@@ -65,6 +65,8 @@ def main(config_path: str = "simulation.toml",
 
     max_block_size_samples = int(sim["max_block_size_samples"])
     target_ci_half_width   = float(sim["target_ci_half_width"])
+    _rel                   = sim.get("target_ci_relative")
+    target_ci_relative     = float(_rel) if _rel is not None else None
     confidence             = float(sim["confidence"])
     min_errors             = int(sim["min_errors"])
     max_iterations         = int(sim["max_iterations"])
@@ -98,6 +100,7 @@ def main(config_path: str = "simulation.toml",
         noise_density_dbfs_values = noise_sweep,
         max_block_size_samples    = max_block_size_samples,
         target_ci_half_width      = target_ci_half_width,
+        target_ci_relative        = target_ci_relative,
         confidence                = confidence,
         min_errors                = min_errors,
         max_iterations            = max_iterations,

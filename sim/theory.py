@@ -1,24 +1,130 @@
-"""Closed-form AWGN BER curves and their numerical inverses."""
+"""Closed-form AWGN BER curves and their numerical inverses.
+
+For modulations with no closed form (16APSK, 32APSK) we look up a numerical
+reference table from ``data/theory/ber_awgn_<MOD>.npz``, generated offline by
+``tools/generate_theory_curves.py``.  The lookup is a piecewise-linear
+interpolation in (Eb/N0_dB, log10(BER)) space, with linear extrapolation past
+either end of the tabulated grid.  Non-default APSK gammas suppress the
+table lookup so we never silently report an IL that assumes the wrong
+constellation geometry.
+"""
 
 import math
+from pathlib import Path
+
+import numpy as np
 from scipy.optimize import brentq
+
 from .modulation import bits_per_symbol
 
 
-def ber_awgn(mod: str, EsN0_dB: float) -> float | None:
+# DVB-S2 default gammas — must match the values baked into the npz tables
+# under tools/generate_theory_curves.py (and sim/modulation.py defaults).
+_APSK_DEFAULT_GAMMAS: dict[str, dict[str, float]] = {
+    "16APSK": {"apsk_gamma":  2.57},
+    "32APSK": {"apsk_gamma1": 2.84, "apsk_gamma2": 5.27},
+}
+
+_TABLE_DIR = Path(__file__).resolve().parent.parent / "data" / "theory"
+
+# Module-level cache: stores the loaded table (or None when the file is absent)
+# so we don't re-read the npz on every IL row in a sweep report.
+_TABLE_CACHE: dict[str, dict | None] = {}
+
+
+def _load_table(modulation: str) -> dict | None:
+    """Return the cached AWGN reference table for `modulation`, or None when
+    the npz is absent.  The negative case is cached too so we don't stat the
+    filesystem on every call."""
+    if modulation in _TABLE_CACHE:
+        return _TABLE_CACHE[modulation]
+    path = _TABLE_DIR / f"ber_awgn_{modulation}.npz"
+    if not path.exists():
+        _TABLE_CACHE[modulation] = None
+        return None
+    with np.load(path, allow_pickle=False) as d:
+        table = {
+            "ebn0_db":   np.asarray(d["ebn0_db"],   dtype=np.float64),
+            "ber":       np.asarray(d["ber"],       dtype=np.float64),
+            "gammas":    {k: float(d[k]) for k in d.files
+                          if k in ("apsk_gamma", "apsk_gamma1", "apsk_gamma2")},
+        }
+    _TABLE_CACHE[modulation] = table
+    return table
+
+
+def _gammas_match(modulation: str, mod_kwargs: dict | None,
+                  table_gammas: dict[str, float]) -> bool:
+    """True when the user-supplied APSK gammas match the table's reference set.
+
+    Absent keys take the modulation.py defaults; explicit keys must agree with
+    the table within a tight tolerance so we never report an IL number that
+    quietly assumes the wrong constellation.
+    """
+    defaults = _APSK_DEFAULT_GAMMAS.get(modulation, {})
+    src = mod_kwargs or {}
+    for key, ref in table_gammas.items():
+        val = float(src.get(key, defaults.get(key, ref)))
+        if not math.isclose(val, ref, rel_tol=1e-6, abs_tol=1e-9):
+            return False
+    return True
+
+
+def _linear_extrap(x: float, xp: np.ndarray, yp: np.ndarray) -> float:
+    """Piecewise-linear interpolation; linear extrapolation past either end.
+
+    ``xp`` must be strictly increasing.  Used in (Eb/N0_dB, log10(BER))
+    space so the natural extrapolation matches the AWGN-tail asymptote
+    (slope is roughly the closed-form derivative at the table edge).
+    """
+    if x <= xp[0]:
+        slope = (yp[1] - yp[0]) / (xp[1] - xp[0])
+        return float(yp[0] + slope * (x - xp[0]))
+    if x >= xp[-1]:
+        slope = (yp[-1] - yp[-2]) / (xp[-1] - xp[-2])
+        return float(yp[-1] + slope * (x - xp[-1]))
+    return float(np.interp(x, xp, yp))
+
+
+def _ber_from_table(modulation: str, ebn0_db: float,
+                    mod_kwargs: dict | None = None) -> float | None:
+    """Interpolated BER at the requested Eb/N0 (dB) for an APSK modulation.
+
+    Returns None when the reference table is missing for this modulation, or
+    when the requested gammas don't match the table's reference set.
+    """
+    table = _load_table(modulation)
+    if table is None:
+        return None
+    if not _gammas_match(modulation, mod_kwargs, table["gammas"]):
+        return None
+    # Only points with a measured (nonzero) BER contribute to the curve.
+    mask = table["ber"] > 0
+    xp = table["ebn0_db"][mask]
+    yp = np.log10(table["ber"][mask])
+    if xp.size < 2:
+        return None     # pragma: no cover  — defensive: tables always have ≥2 nonzero points
+    return float(10.0 ** _linear_extrap(ebn0_db, xp, yp))
+
+
+def ber_awgn(mod: str, EsN0_dB: float,
+             mod_kwargs: dict | None = None) -> float | None:
     """
     Theoretical BER in pure AWGN for the given modulation at Es/N0 (dB).
 
-    Returns None for modulations that have no closed-form formula (16APSK, 32APSK).
+    Returns the closed-form value for BPSK, DBPSK, MSK, QPSK, OQPSK, 8PSK, and
+    16QAM.  For 16APSK and 32APSK, looks up the numerical reference table
+    generated by ``tools/generate_theory_curves.py``; returns None when no
+    table is available or when ``mod_kwargs`` specifies non-default gammas.
 
     DBPSK uses the coherent-detection + differential-decoding formula
-    (BER = 2p(1-p), p = 0.5·erfc(√Eb/N0)) rather than the differentially-coherent
-    formula (0.5·exp(-Eb/N0)), because the simulation uses an RRC matched filter
-    followed by differential decoding of hard symbol decisions.
+    (BER = 2p(1-p), p = 0.5·erfc(√Eb/N0)) rather than the differentially-
+    coherent formula (0.5·exp(-Eb/N0)), because the simulation uses an RRC
+    matched filter followed by differential decoding of hard symbol decisions.
     """
-    bps = bits_per_symbol(mod.upper())
-    EbN0 = 10.0 ** (EsN0_dB / 10.0) / bps
     m = mod.upper()
+    bps = bits_per_symbol(m)
+    EbN0 = 10.0 ** (EsN0_dB / 10.0) / bps
     if m in ("BPSK", "QPSK", "OQPSK", "MSK"):
         return 0.5 * math.erfc(math.sqrt(EbN0))
     if m == "DBPSK":
@@ -28,31 +134,56 @@ def ber_awgn(mod: str, EsN0_dB: float) -> float | None:
         return (1.0 / 3.0) * math.erfc(math.sqrt(3.0 * EbN0) * math.sin(math.pi / 8))
     if m == "16QAM":
         return (3.0 / 8.0) * math.erfc(math.sqrt(2.0 * EbN0 / 5.0))
-    return None
+    if m in _APSK_DEFAULT_GAMMAS:
+        ebn0_db = 10.0 * math.log10(EbN0)
+        return _ber_from_table(m, ebn0_db, mod_kwargs=mod_kwargs)
+    return None  # pragma: no cover  — bits_per_symbol() already rejects unknown mods
 
 
 def ebn0_for_ber(mod: str, target_ber: float,
                  ebn0_lo_db: float = -5.0,
                  ebn0_hi_db: float = 25.0,
-                 tol_db: float = 1e-4) -> float | None:
+                 tol_db: float = 1e-4,
+                 mod_kwargs: dict | None = None) -> float | None:
     """
     Numerically invert ber_awgn(): find Eb/N0 (dB) such that BER = target_ber.
 
-    Returns None if no closed-form formula is available for this modulation, or if
-    target_ber lies outside the BER range achievable within [ebn0_lo_db, ebn0_hi_db].
+    For APSK, inverts the numerical reference table directly (linear in
+    Eb/N0_dB vs log10(BER), with linear extrapolation past the table edges).
+    Returns None when no formula or table is available for this modulation,
+    when ``mod_kwargs`` specifies non-default APSK gammas, or — for closed-form
+    modulations — when ``target_ber`` lies outside the BER range achievable
+    within ``[ebn0_lo_db, ebn0_hi_db]``.
     """
-    bps = bits_per_symbol(mod.upper())
+    m = mod.upper()
+
+    # APSK path: invert the npz table directly with log-linear interpolation.
+    if m in _APSK_DEFAULT_GAMMAS:
+        table = _load_table(m)
+        if table is None or not _gammas_match(m, mod_kwargs, table["gammas"]):
+            return None
+        mask = table["ber"] > 0
+        xp = table["ebn0_db"][mask]
+        yp = np.log10(table["ber"][mask])
+        if xp.size < 2 or target_ber <= 0:
+            return None    # pragma: no cover  — defensive (tables have ≥2 pts; ber>0 enforced upstream)
+        # yp is monotonically decreasing in xp; flip for ascending-x interpolation.
+        return _linear_extrap(math.log10(target_ber), yp[::-1], xp[::-1])
+
+    bps = bits_per_symbol(m)
 
     def theory_ber(ebn0_db: float) -> float:
         esn0_db = ebn0_db + 10.0 * math.log10(bps)
-        v = ber_awgn(mod, esn0_db)
+        v = ber_awgn(m, esn0_db)
         return v if v is not None else float("nan")
 
     ber_lo = theory_ber(ebn0_lo_db)
     ber_hi = theory_ber(ebn0_hi_db)
 
-    if math.isnan(ber_lo):
-        return None  # no formula for this modulation
+    if math.isnan(ber_lo):    # pragma: no cover
+        # Unreachable: APSK now takes the table branch above, and every other
+        # supported mod has a closed-form ber_awgn.
+        return None
 
     # BER decreases as Eb/N0 increases, so ber_lo > ber_hi.
     if target_ber > ber_lo or target_ber < ber_hi:

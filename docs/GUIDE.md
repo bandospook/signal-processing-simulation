@@ -560,9 +560,21 @@ implementation loss near 0 dB. A nonlinear operating point or multi-carrier load
 will produce positive implementation loss — the system needs more signal power than
 theory predicts to achieve the same BER.
 
-Implementation loss is `None` (rendered as `—`) for 16APSK and 32APSK because no
-closed-form BER formula exists for those modulations, and also when zero errors
-were observed (no measured BER to invert).
+Implementation loss is `None` (rendered as `—`) when zero errors were observed
+(no measured BER to invert).  For 16APSK and 32APSK there is no closed-form
+BER formula, so `sim.theory` loads a numerical reference table from
+`data/theory/ber_awgn_<MOD>.npz` (generated offline by
+`tools/generate_theory_curves.py`, committed to the repo) and interpolates in
+log10(BER) vs Eb/N0_dB.  Non-default APSK gammas suppress the table lookup
+(returns `None`) so a non-DVB-S2 constellation never silently inherits the
+default-gamma IL.
+
+The reference table for 32APSK is limited in depth: the chain-induced
+projection-CIR floor saturates `cnir_db` around 8 dB, so the table covers
+roughly BER 0.19 → 6e-4 only.  Deeper queries linearly extrapolate in
+log10(BER) and should be treated as approximate.  See
+[memory/technical_notes.md](../memory/technical_notes.md) for the full note
+on coverage and how to regenerate the tables.
 
 ### Why not the Gaussian-distortion approximation?
 

@@ -159,12 +159,18 @@ def main(config_path: str = "simulation.toml",
                 continue
             mod = carr.get("modulation", "BPSK").upper()
             bps = bits_per_symbol(mod)
+            # Forward any APSK gamma overrides so the theory lookup can
+            # suppress IL when the carrier's gammas differ from the
+            # reference-table constellation.
+            mod_kwargs = {k: carr[k] for k in
+                          ("apsk_gamma", "apsk_gamma1", "apsk_gamma2") if k in carr}
             cnir_db  = cr["cnir_db"]
             # CNIR is already in symbol-rate (matched-filter) bandwidth, so CNIR = Es/N0.
             # Eb/N0 = Es/N0 - 10*log10(bps).  For BPSK (bps=1) Eb/N0 == CNIR.
             eff_ebn0 = cnir_db - 10.0 * math.log10(bps)
             ber_val  = cr.get("ber")
-            theory   = ebn0_for_ber(mod, ber_val) if (ber_val is not None and ber_val > 0) else None
+            theory   = (ebn0_for_ber(mod, ber_val, mod_kwargs=mod_kwargs)
+                        if (ber_val is not None and ber_val > 0) else None)
             impl_loss = (eff_ebn0 - theory) if theory is not None else None
             report_rows.append(dict(
                 name=carr["name"],

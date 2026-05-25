@@ -239,6 +239,47 @@ def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
     assert met[0]["iterations"] == 1
 
 
+def test_parameter_sweep_point_summary_carries_ber_ci_ebn0(capsys):
+    """The per-point summary line printed at each sweep point includes the
+    carrier name, BER (or rule-of-three bound), CI half-width, and Eb/N0."""
+    carriers = [dict(
+        name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
+        rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
+        sweep_demod=True,
+    )]
+    # Noisy point → BER > 0 → numeric BER + CI on the summary line.
+    parameter_sweep(
+        carriers=carriers, sample_rate=16e6,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0], noise_density_dbfs_values=[-40.0],
+        max_block_size_samples=2000,
+        target_ci_half_width=0.5, confidence=0.95,
+        min_errors=0, max_iterations=1,
+        ola_filter_span=8, ola_block_size=1024, seed=0,
+    )
+    out = capsys.readouterr().out
+    summary = next(ln for ln in out.splitlines() if ln.lstrip().startswith("["))
+    assert "c1: BER=" in summary
+    assert "CI±=" in summary
+    assert "Eb/N0=" in summary
+    assert " dB" in summary.split("Eb/N0=", 1)[1]
+
+    # Zero-errors point → BER is rendered as a rule-of-three upper bound.
+    parameter_sweep(
+        carriers=carriers, sample_rate=16e6,
+        am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
+        ibo_db_values=[6.0], noise_density_dbfs_values=[-200.0],
+        max_block_size_samples=400,
+        target_ci_half_width=0.5, confidence=0.95,
+        min_errors=0, max_iterations=1,
+        ola_filter_span=8, ola_block_size=1024, seed=0,
+    )
+    out = capsys.readouterr().out
+    summary = next(ln for ln in out.splitlines() if ln.lstrip().startswith("["))
+    assert "BER<" in summary
+    assert "Eb/N0=" in summary
+
+
 def test_parameter_sweep_converges_in_one_iteration_with_iter_cb():
     """Permissive CI target converges in iteration 1; iter_cb is called with the
     iteration index and grid position."""

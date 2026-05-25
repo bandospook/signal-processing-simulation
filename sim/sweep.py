@@ -2,6 +2,7 @@
 import math
 from collections.abc import Callable
 
+from .modulation import bits_per_symbol
 from .simulation import wideband_bpsk_simulation
 from .stats import rule_of_three_upper, wilson_half_width
 
@@ -290,9 +291,38 @@ def parameter_sweep(carriers: list[dict],
             if point_cb is not None:
                 point_cb(n_done, n_total)
             tag = "converged" if converged_all else f"CAPPED at {max_iterations}"
+            # Append where each demod carrier landed at this point: BER (or
+            # rule-of-three upper bound when zero errors), Wilson CI half-width,
+            # and effective Eb/N0 = CNIR - 10·log10(bps).  This stays on the
+            # summary line (one print() call), so the GUI keeps it on screen
+            # before the next sweep point starts overwriting the chunk row.
+            mod_map = {c["name"]: c.get("modulation", "BPSK").upper()
+                       for c in carriers}
+            stat_parts: list[str] = []
+            for cr in agg_carriers:
+                if cr["name"] not in accs:
+                    continue
+                bps = bits_per_symbol(mod_map.get(cr["name"], "BPSK"))
+                cnir = cr.get("cnir_db", float("nan"))
+                ebn0_s = (f"{cnir - 10.0 * math.log10(bps):.2f} dB"
+                          if math.isfinite(cnir) else "— dB")
+                if cr.get("n_errors", 0) == 0:
+                    # k == 0 → rule-of-three upper bound (always set in
+                    # agg_carriers when n_errors == 0; the "—" fallback is a
+                    # defensive branch for the impossible n_bits == 0 case).
+                    ub = cr.get("ber_upper_95")
+                    ber_s = (f"BER<{ub:.2e}" if ub is not None
+                             else "BER=—")    # pragma: no cover
+                else:
+                    ber_s = f"BER={cr['ber']:.2e}"
+                hw = cr.get("ci_half_width", float("inf"))
+                hw_s = f"{hw:.1e}" if math.isfinite(hw) else "—"
+                stat_parts.append(
+                    f"{cr['name']}: {ber_s}  CI±={hw_s}  Eb/N0={ebn0_s}")
+            stats_suffix = ("  " + "  |  ".join(stat_parts)) if stat_parts else ""
             print(f"  [{n_done:>{len(str(n_total))}}/{n_total}] "
                   f"IBO={ibo:.1f} dB  noise={noise:.1f} dBFS/Hz  "
-                  f"iters={iterations_run} ({tag})")
+                  f"iters={iterations_run} ({tag}){stats_suffix}")
 
     assert first_sim is not None
     return first_sim, results

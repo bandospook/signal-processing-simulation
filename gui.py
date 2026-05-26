@@ -624,6 +624,12 @@ class CarrierFrame(ttk.LabelFrame):
         self._ch_vars:     dict[str, tk.Variable] = {}
         self._coding_vars: dict[str, tk.Variable] = {}
         self._pn_texts:    dict[str, tk.Text]     = {}
+        # Caches hold the last-known values for each optional sub-section so
+        # toggling its checkbox off and back on restores them instead of
+        # collapsing back to defaults.  Seeded from the initial data.
+        self._coding_cache: dict = dict(data.get("coding") or {})
+        self._ch_cache:     dict = dict(data.get("channel") or {})
+        self._pn_cache:     dict = dict(data.get("phase_noise") or {})
         self._enabled     = tk.BooleanVar(value=data.get("enabled", True))
         self._sweep_demod = tk.BooleanVar(value=data.get("sweep_demod", False))
         self._has_coding  = tk.BooleanVar(value=bool(data.get("coding")))
@@ -693,8 +699,10 @@ class CarrierFrame(ttk.LabelFrame):
             row=ch_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._ch_frame = ttk.Frame(self, padding=(14, 0, 0, 0))
         self._ch_frame.grid(row=ch_row + 1, column=0, columnspan=4, sticky="ew")
-        if "channel" in d:
-            self._populate_ch(d["channel"])
+        if self._has_ch.get():
+            self._populate_ch(self._ch_cache)
+        else:
+            self._ch_frame.grid_remove()
 
         # ── Phase noise ──────────────────────────────────────────────────────
         ttk.Checkbutton(self, text="Phase noise", variable=self._has_pn,
@@ -702,17 +710,35 @@ class CarrierFrame(ttk.LabelFrame):
             row=pn_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
         self._pn_frame = ttk.Frame(self, padding=(14, 0, 0, 0))
         self._pn_frame.grid(row=pn_row + 1, column=0, columnspan=4, sticky="ew")
-        if "phase_noise" in d:
-            self._populate_pn(d["phase_noise"])
+        if self._has_pn.get():
+            self._populate_pn(self._pn_cache)
+        else:
+            self._pn_frame.grid_remove()
 
     def _toggle_coding(self):
         if self._has_coding.get():
-            self._populate_coding({})
+            self._populate_coding(self._coding_cache)
             self._coding_frame.grid()
         else:
+            self._coding_cache = self._snapshot_coding()
             for w in self._coding_frame.winfo_children(): w.destroy()
             self._coding_vars.clear()
             self._coding_frame.grid_remove()
+
+    def _snapshot_coding(self) -> dict:
+        """Read current FEC widget values into a dict for cache."""
+        out: dict = {}
+        scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
+        if scheme:
+            out["scheme"] = scheme
+        raw = self._coding_vars.get("block_length", tk.StringVar()).get().strip()
+        if raw:
+            try:               out["block_length"] = int(float(raw))
+            except ValueError: pass
+        matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
+        if matrix:
+            out["matrix"] = matrix
+        return out
 
     def _populate_coding(self, cod: dict):
         for w in self._coding_frame.winfo_children(): w.destroy()
@@ -753,10 +779,27 @@ class CarrierFrame(ttk.LabelFrame):
 
     def _toggle_ch(self):
         if self._has_ch.get():
-            self._populate_ch({})
+            self._populate_ch(self._ch_cache)
+            self._ch_frame.grid()
         else:
+            self._ch_cache = self._snapshot_ch()
             for w in self._ch_frame.winfo_children(): w.destroy()
             self._ch_vars.clear()
+            self._ch_frame.grid_remove()
+
+    def _snapshot_ch(self) -> dict:
+        """Read current channel-impairment widget values into a dict."""
+        out: dict = {}
+        for key, _, typ, _, _ in self._CH:
+            if key not in self._ch_vars: continue
+            raw = self._ch_vars[key].get().strip()
+            if not raw: continue
+            try:
+                out[key] = (int(float(raw)) if typ == "int"
+                            else float(raw) if typ == "float" else raw)
+            except ValueError:
+                out[key] = raw       # keep bad value verbatim for re-display
+        return out
 
     def _populate_ch(self, ch: dict):
         for w in self._ch_frame.winfo_children(): w.destroy()
@@ -771,10 +814,24 @@ class CarrierFrame(ttk.LabelFrame):
 
     def _toggle_pn(self):
         if self._has_pn.get():
-            self._populate_pn({})
+            self._populate_pn(self._pn_cache)
+            self._pn_frame.grid()
         else:
+            self._pn_cache = self._snapshot_pn()
             for w in self._pn_frame.winfo_children(): w.destroy()
             self._pn_texts.clear()
+            self._pn_frame.grid_remove()
+
+    def _snapshot_pn(self) -> dict:
+        """Read current phase-noise mask values into a dict."""
+        out: dict = {}
+        if "offset_hz" in self._pn_texts:
+            offs = _parse_float_list(self._pn_texts["offset_hz"].get("1.0", "end"))
+            if offs: out["offset_hz"] = offs
+        if "dbc_per_hz" in self._pn_texts:
+            dbcs = _parse_float_list(self._pn_texts["dbc_per_hz"].get("1.0", "end"))
+            if dbcs: out["dbc_per_hz"] = dbcs
+        return out
 
     def _populate_pn(self, pn: dict):
         """Two text widgets — offset_hz and dbc_per_hz — for the per-carrier

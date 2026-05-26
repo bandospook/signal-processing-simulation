@@ -169,39 +169,46 @@ generation step per modulation.
 
 ### How the table is built
 
-The generator runs `parameter_sweep` at a single (IBO=0, noise) point per
-Eb/N0 value, with an identity AM-AM table and zero AM-PM — the chain executes
-end-to-end but the NLA does nothing.  Each point uses `target_ci_relative=0.05`
-(±5% of BER at 95% CI) and a per-iteration buffer of 16 M samples; the deepest
-points consume tens of iterations.  Total runtime is ~15–20 min on this
-machine for both modulations.
+The generator drives the *direct-AWGN chain* — the same one used by
+`tests/test_awgn_performance.py:simulate_awgn`:
 
-### The cnir_db convention cancels chain offset
+1. `rrc_baseband(mod, n_sym, sps=4, rolloff=0.35, filter_span=8, **gammas)`
+2. Add complex Gaussian noise of variance `sps / Es/N0_linear` at the native
+   sample rate (so the matched-filter output sees the canonical Es/N0).
+3. `receive(...)` to count errors with phase-ambiguity resolution.
 
-The table's x-axis is the simulator's *reported* `eff_ebn0 = cnir_db - 10·log10(bps)`,
-not the analytical Eb/N0 we set via the noise PSD.  The chain introduces a
-modulation-dependent offset between the two (a few dB for 16APSK, larger for
-32APSK).  Because `main.py` computes `eff_ebn0` the same way for user runs,
-that offset cancels in IL = eff_ebn0_user - theory_ebn0_table(at same BER).
+No OLA up/downsample, no NLA, no projection-based metrics — the table is the
+*pure AWGN reference*.  The Eb/N0 axis is the analytical value derived from
+the noise sigma, which is exactly what `main.py` compares its measured
+`eff_ebn0 = cnir_db - 10·log10(bps)` against when computing implementation
+loss.  IL on an APSK carrier therefore captures every impairment the user's
+chain introduces relative to the AWGN limit (NLA, channel ripple, OLA
+artifacts, alignment) — same convention as BPSK/QPSK/etc.
 
-### Coverage limitations
+Iterations are accumulated adaptively per Eb/N0 point until the running
+Wilson half-width is ≤ 5 % of the BER (95 % CI), with a 50-error floor and
+a 200-iter safety cap.  Per-iter cost is one `rrc_baseband` + AWGN + matched
+filter, no chunk pipeline — even the 1e-6 BER points finish in tens of
+seconds rather than minutes.  Total runtime on this machine is a few minutes
+per modulation.
 
-At very low BER the projection-based CIR saturates — `nl_pure - alpha·bb_rx`
-has a residual floor from chain artifacts (OLA round-trip, matched-filter
-sample alignment, etc.) that doesn't vanish as noise → 0.  This caps how
-deep each table can probe:
+### History — why not the full-chain method
 
-- `ber_awgn_16APSK.npz`: BER 0.19 → ≈ 2.5e-5 (5 decades, sufficient for most use).
-- `ber_awgn_32APSK.npz`: BER 0.19 → ≈ 6e-4 (~2.5 decades only).  The 32APSK
-  `cnir_db` saturates near 8 dB regardless of how much noise is removed;
-  below BER ≈ 6e-4 the loader extrapolates linearly in log10(BER) vs Eb/N0_dB,
-  and 32APSK IL at very low measured BER should be treated as approximate.
+An earlier version of the generator drove `parameter_sweep` with an
+"identity" AM-AM table `[[0, 1] → [0, 1]]` and used the simulator's reported
+`cnir_db - 10·log10(bps)` as the x-axis.  The chain-offset between target
+and reported Eb/N0 (a few dB for 16APSK, ~5–13 dB for 32APSK) was supposed to
+cancel because `main.py` uses the same convention.
 
-To improve depth, the reference chain would need to skip the projection-CIR
-path entirely — e.g. a direct-AWGN generator that adds complex noise at the
-symbol-rate and demodulates with no OLA round-trip.  That changes the Eb/N0
-convention (analytical instead of cnir-derived) and would require a parallel
-change in `main.py` to keep IL consistent, so it isn't a drop-in fix.
+It did cancel — but it hid the chain's IL contribution rather than measuring
+it.  The 4–13 dB "chain offset" was caused by the identity AM-AM table
+clipping signal peaks above amplitude 1.0 (high-PAPR APSK signals reach
+1.8–2.0× the unit RMS, well into the flat-extrapolated saturation region of
+the two-point table).  The fix isn't to extend the table — the cleaner
+answer is to skip the NLA entirely, which is what the direct-AWGN approach
+above does.  This also matches how every other modulation's theory curve is
+computed in `sim.theory`, so APSK IL now lives in the same coordinate system
+as the closed-form moduations.
 
 ### Gammas are pinned to DVB-S2 defaults
 

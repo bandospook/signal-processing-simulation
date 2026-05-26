@@ -33,12 +33,20 @@ _ICON_B64 = base64.b64encode(_build_icon()).decode()
 class Field:
     """One labelled input bound to a TOML path.
 
-    `path` is the nested-key tuple inside the cfg dict (e.g.
-    ("simulation", "seed") → cfg["simulation"]["seed"]).  The internal var
-    key is path joined by ".".  `type` is one of "int", "float",
-    "float_optional", "str", "bool".  An "optional" field maps a missing /
-    None cfg value to an empty StringVar and back, instead of substituting
-    the default.
+    ``path`` is the nested-key tuple inside the cfg dict (e.g.
+    ``("simulation", "seed")`` → ``cfg["simulation"]["seed"]``).  The
+    internal var key is ``path`` joined by ``"."``.  ``type`` is one of:
+
+      "int"               StringVar + Entry, parsed as int.
+      "float"             StringVar + Entry, parsed as float.
+      "float_optional"    StringVar + Entry; blank → omitted from cfg.
+      "str" / "path"      StringVar + Entry; "path" adds a Browse… button.
+      "bool"              BooleanVar + Checkbutton (label is button text).
+      "float_list"        StringVar + Entry of comma-separated floats.
+      "float_list_text"   tk.Text widget (label above, multi-line capable).
+
+    ``default`` is used by populate when the cfg value is missing; for
+    "float_optional" a missing / None value maps to an empty input instead.
     """
     path:    tuple[str, ...]
     label:   str
@@ -54,10 +62,18 @@ class Field:
 
 @dataclass(frozen=True)
 class Section:
-    """A titled group of fields rendered together with an [hr] separator."""
-    title:   str
-    fields:  tuple[Field, ...]
-    columns: int = 2   # 1 = stacked, 2 = label/entry pairs side by side
+    """A titled group of fields.
+
+    ``description`` renders as a gray paragraph between the title and the
+    fields.  ``separator`` toggles the horizontal rule under the title:
+    True for the General / Sweep style, False for the Amplifier style
+    (bold title only, no rule).
+    """
+    title:       str
+    fields:      tuple[Field, ...]
+    columns:     int  = 2     # 1 = stacked, 2 = label/entry pairs side by side
+    description: str  = ""
+    separator:   bool = True
 
 
 @dataclass(frozen=True)
@@ -220,46 +236,118 @@ def _scrollable(parent) -> ttk.Frame:
 _L_PAD_RIGHT = (16, 4)   # padx on right-column labels (separates the two groups)
 
 
+def _make_browse_cb(var: tk.StringVar):
+    """Standard directory-picker callback for "path"-typed fields."""
+    def _cb():
+        path = filedialog.askdirectory(initialdir=var.get() or ".")
+        if path:
+            var.set(path)
+    return _cb
+
+
+def _render_field(parent, fld: Field, row: int,
+                  variables: dict[str, tk.Variable],
+                  texts: dict[str, tk.Text]) -> int:
+    """Create the widget(s) for one Field, register the binding, and return
+    the next free row.  Variables/Texts dicts are mutated.
+
+    Used by the columns=1 layout in `_render_section`; the columns=2 layout
+    is restricted to single-row scalar fields and inlines its own creation.
+    """
+    if fld.type == "bool":
+        var = tk.BooleanVar(value=bool(fld.default))
+        variables[fld.key] = var
+        cb = ttk.Checkbutton(parent, text=fld.label, variable=var)
+        cb.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        if fld.tip: _Tip(cb, fld.tip)
+        return row + 1
+
+    if fld.type == "float_list_text":
+        ttk.Label(parent, text=fld.label + ":", foreground="gray").grid(
+            row=row, column=0, columnspan=4, sticky="w")
+        t = tk.Text(parent, height=1, width=64, wrap="word",
+                    font=("Consolas", 9))
+        t.grid(row=row + 1, column=0, columnspan=4, sticky="ew", pady=2)
+        texts[fld.key] = t
+        if fld.tip: _Tip(t, fld.tip)
+        return row + 2
+
+    # All remaining types (int/float/float_optional/str/path/float_list)
+    # use a StringVar + Entry.  "path" adds a Browse… button to the right.
+    var = tk.StringVar()
+    variables[fld.key] = var
+    if fld.type == "path":
+        _lf(parent, fld.label + ":", row, 0)
+        row_frame = ttk.Frame(parent)
+        row_frame.grid(row=row, column=1, sticky="w")
+        _ent(row_frame, var, 0, 0, width=fld.width, tip=fld.tip)
+        ttk.Button(row_frame, text="Browse…", width=8,
+                   command=_make_browse_cb(var)).grid(row=0, column=1, padx=4)
+        return row + 1
+
+    _lf(parent, fld.label + ":", row, 0)
+    _ent(parent, var, row, 1, width=fld.width, tip=fld.tip)
+    return row + 1
+
+
 def _render_section(parent, sec: Section, section_row: int,
-                    get_var) -> int:
-    """Render one Section onto `parent` starting at `section_row`; return the
-    next free row.  Column 2 layout: columns 0,1 = left pair, 2,3 = right pair.
-    Column 1 layout: columns 0,1 stacked rows."""
+                    variables: dict[str, tk.Variable],
+                    texts: dict[str, tk.Text]) -> int:
+    """Render one Section onto `parent` starting at `section_row`; return
+    the next free row.  Section title / separator / description are drawn
+    by `_render_tab`; this only handles the fields."""
     if sec.columns == 2:
+        # Pair scalar fields into (label, entry) (label, entry) on one row.
+        # This layout only accepts single-row scalar types; verified at the
+        # schema layer by the field type set used in _GENERAL_TAB.
         for i in range(0, len(sec.fields), 2):
             left = sec.fields[i]
+            var_l = tk.StringVar()
+            variables[left.key] = var_l
             _lf(parent, left.label + ":", section_row, 0)
-            _ent(parent, get_var(left.key), section_row, 1,
-                 width=left.width, tip=left.tip)
+            _ent(parent, var_l, section_row, 1, width=left.width, tip=left.tip)
             if i + 1 < len(sec.fields):
                 right = sec.fields[i + 1]
+                var_r = tk.StringVar()
+                variables[right.key] = var_r
                 _lf(parent, right.label + ":", section_row, 2, padx=_L_PAD_RIGHT)
-                _ent(parent, get_var(right.key), section_row, 3,
+                _ent(parent, var_r, section_row, 3,
                      width=right.width, tip=right.tip)
             section_row += 1
-    else:
-        for fld in sec.fields:
-            _lf(parent, fld.label + ":", section_row, 0)
-            _ent(parent, get_var(fld.key), section_row, 1,
-                 width=fld.width, tip=fld.tip)
-            section_row += 1
+        return section_row
+    # columns=1: dispatch each field to _render_field, which knows how to
+    # lay out every supported type (including multi-row text widgets).
+    for fld in sec.fields:
+        section_row = _render_field(parent, fld, section_row, variables, texts)
     return section_row
 
 
-def _render_tab(nb, schema: Tab, section_helper, get_var) -> None:
-    """Build a Tab from its schema: scrollable Frame → per-section
-    label+separator (via `section_helper`) → fields rendered by
-    `_render_section`.  Column 1 and 3 grow if extra width is available."""
+def _render_tab(nb, schema: Tab,
+                variables: dict[str, tk.Variable],
+                texts: dict[str, tk.Text]) -> None:
+    """Build a Tab from its schema onto a Notebook.  Each section gets a
+    bold title, optional horizontal separator, optional gray description,
+    then its fields.  Columns 1 and 3 expand if extra width is available."""
     frame = ttk.Frame(nb); nb.add(frame, text=schema.name)
     inner = _scrollable(frame)
     r = 0
-    has_two_col = False
     for sec in schema.sections:
-        r = section_helper(inner, sec.title, r)
-        r = _render_section(inner, sec, r, get_var)
-        has_two_col = has_two_col or sec.columns == 2
+        title_pady = (12, 0) if sec.separator else (10, 2)
+        ttk.Label(inner, text=sec.title, font=("", 10, "bold")).grid(
+            row=r, column=0, columnspan=4, sticky="w", pady=title_pady)
+        r += 1
+        if sec.separator:
+            ttk.Separator(inner, orient="horizontal").grid(
+                row=r, column=0, columnspan=4, sticky="ew", pady=(0, 4))
+            r += 1
+        if sec.description:
+            ttk.Label(inner, text=sec.description, foreground="gray",
+                      justify="left").grid(
+                row=r, column=0, columnspan=3, sticky="w")
+            r += 1
+        r = _render_section(inner, sec, r, variables, texts)
     inner.columnconfigure(1, weight=1)
-    if has_two_col:
+    if any(s.columns == 2 for s in schema.sections):
         inner.columnconfigure(3, weight=1)
 
 
@@ -288,8 +376,10 @@ def _cfg_set(cfg: dict, path: tuple[str, ...], value) -> None:
 
 
 def _populate_from_schema(schema: Tab, cfg: dict,
-                          variables: dict[str, tk.Variable]) -> None:
-    """Read each field's cfg value and push the formatted form into its var.
+                          variables: dict[str, tk.Variable],
+                          texts: dict[str, tk.Text]) -> None:
+    """Read each field's cfg value and push the formatted form into its
+    binding (StringVar / BooleanVar / Text widget) — dispatched by type.
 
     For ``float_optional``: a missing / None cfg value → empty string in the
     var (which collect interprets as "omit").  For every other type, a
@@ -297,6 +387,22 @@ def _populate_from_schema(schema: Tab, cfg: dict,
     """
     for fld in _walk_fields(schema):
         raw = _cfg_get(cfg, fld.path)
+
+        if fld.type == "float_list_text":
+            t = texts[fld.key]
+            t.delete("1.0", "end")
+            if raw:
+                t.insert("1.0", ", ".join(_fmt(x) for x in raw))
+            continue
+        if fld.type == "bool":
+            variables[fld.key].set(bool(raw) if raw is not None
+                                    else bool(fld.default))
+            continue
+        if fld.type == "float_list":
+            variables[fld.key].set(
+                ", ".join(_fmt(x) for x in (raw or [])))
+            continue
+
         var = variables[fld.key]
         if fld.type == "float_optional":
             var.set(_fmt(raw) if raw is not None else "")
@@ -309,27 +415,38 @@ def _populate_from_schema(schema: Tab, cfg: dict,
             var.set(str(raw))
 
 
-def _collect_from_schema(schema: Tab, variables: dict[str, tk.Variable],
+def _collect_from_schema(schema: Tab,
+                         variables: dict[str, tk.Variable],
+                         texts: dict[str, tk.Text],
                          cfg: dict) -> None:
-    """Read each var, parse per the field's type, and write into `cfg`.
+    """Read each binding, parse per the field's type, and write into `cfg`.
 
     Empty ``float_optional`` values are omitted from `cfg` so the caller's
     TOML writer doesn't emit a key the user left blank.
     """
     for fld in _walk_fields(schema):
+        if fld.type == "float_list_text":
+            _cfg_set(cfg, fld.path,
+                     _parse_float_list(texts[fld.key].get("1.0", "end")))
+            continue
+        if fld.type == "bool":
+            _cfg_set(cfg, fld.path, bool(variables[fld.key].get()))
+            continue
+
         raw = str(variables[fld.key].get()).strip()
         if fld.type == "float_optional":
             if raw:
                 _cfg_set(cfg, fld.path, float(raw))
             continue
+        if fld.type == "float_list":
+            _cfg_set(cfg, fld.path, _parse_float_list(raw))
+            continue
         if fld.type == "int":
             value = int(float(raw))
         elif fld.type == "float":
             value = float(raw)
-        elif fld.type == "bool":
-            value = raw.lower() in ("true", "1", "yes")
         else:
-            value = raw
+            value = raw   # "str" or "path"
         _cfg_set(cfg, fld.path, value)
 
 
@@ -398,6 +515,71 @@ _GENERAL_TAB = Tab(
                       "Must be a power of two; larger = more efficient for "
                       "long filters."),
         )),
+    ),
+)
+
+
+_SWEEP_OUTPUT_TAB = Tab(
+    name="Sweep & Output",
+    sections=(
+        Section(
+            title="Parameter Sweep",
+            description=("The sweep runs at every (IBO, noise) combination. "
+                         "Each list must contain at least one value;\n"
+                         "a list of one value pins that axis. The first point "
+                         "feeds the wideband PSD plot."),
+            columns=1,
+            fields=(
+                Field(("sweep", "ibo_db"), "IBO values (dB)", "float_list",
+                      width=44,
+                      tip="Comma-separated IBO values to sweep (dB). "
+                          "Example: 0.0, 1.5, 3.0, 4.5, 6.0"),
+                Field(("sweep", "noise_density_dbfs"), "Noise values (dBFS/Hz)",
+                      "float_list", width=44,
+                      tip="Comma-separated noise density values to sweep "
+                          "(dBFS/Hz). Example: -140.0, -130.0, -120.0"),
+            ),
+        ),
+        Section(
+            title="Output",
+            columns=1,
+            fields=(
+                Field(("output", "output_dir"), "Output Directory", "path",
+                      default=".", width=28),
+                Field(("output", "plots"), "Generate plots", "bool",
+                      default=True,
+                      tip="When checked, the simulation writes wideband.png, "
+                          "amplifier.png, <carrier>_detector.png for each "
+                          "detector carrier, and <carrier>_channel.png for "
+                          "each carrier with channel impairments. report.md "
+                          "is always written."),
+            ),
+        ),
+    ),
+)
+
+
+_AMPLIFIER_TAB = Tab(
+    name="Amplifier",
+    sections=(
+        Section(
+            title="AM-AM Table", columns=1, separator=False,
+            fields=(
+                Field(("amplifier", "am_am", "input"),
+                      "Input amplitude (comma-separated)", "float_list_text"),
+                Field(("amplifier", "am_am", "output"),
+                      "Output (comma-separated)", "float_list_text"),
+            ),
+        ),
+        Section(
+            title="AM-PM Table", columns=1, separator=False,
+            fields=(
+                Field(("amplifier", "am_pm", "input"),
+                      "Input amplitude (comma-separated)", "float_list_text"),
+                Field(("amplifier", "am_pm", "phase_deg"),
+                      "Phase (°) (comma-separated)", "float_list_text"),
+            ),
+        ),
     ),
 )
 
@@ -789,71 +971,13 @@ class App:
         return row + 2
 
     def _build_general_tab(self, nb):
-        """Render the General tab from `_GENERAL_TAB` schema (Step 1 of the
-        schema-driven GUI refactor — see `Tab`/`Section`/`Field` above)."""
-        # Pre-register a StringVar for each field so _render_tab can look them
-        # up by key.  Defaults are filled by _populate_from_schema once the
-        # cfg is loaded; until then the entries display empty.
-        for fld in _walk_fields(_GENERAL_TAB):
-            self._sv(fld.key)
-        _render_tab(nb, _GENERAL_TAB, self._section, lambda k: self._vars[k])
+        _render_tab(nb, _GENERAL_TAB, self._vars, self._texts)
 
     def _build_amplifier_tab(self, nb):
-        tab = ttk.Frame(nb);  nb.add(tab, text="Amplifier")
-        f = _scrollable(tab)
-        r = 0
-        for title, ik, ok, olabel in (
-            ("AM-AM Table", "amp.am_am.in", "amp.am_am.out", "Output"),
-            ("AM-PM Table", "amp.am_pm.in", "amp.am_pm.phase", "Phase (°)"),
-        ):
-            ttk.Label(f, text=title, font=("", 10, "bold")).grid(
-                row=r, column=0, columnspan=4, sticky="w", pady=(10, 2));  r += 1
-            ttk.Label(f, text="Input amplitude (comma-separated):",
-                      foreground="gray").grid(row=r, column=0, columnspan=4, sticky="w");  r += 1
-            self._text_widget(f, ik, r);  r += 1
-            ttk.Label(f, text=f"{olabel} (comma-separated):",
-                      foreground="gray").grid(row=r, column=0, columnspan=4, sticky="w");  r += 1
-            self._text_widget(f, ok, r);  r += 1
-        f.columnconfigure(0, weight=1)
+        _render_tab(nb, _AMPLIFIER_TAB, self._vars, self._texts)
 
     def _build_sweep_output_tab(self, nb):
-        tab = ttk.Frame(nb);  nb.add(tab, text="Sweep & Output")
-        f = _scrollable(tab)
-        r = self._section(f, "Parameter Sweep", 0)
-        ttk.Label(f,
-                  text="The sweep runs at every (IBO, noise) combination. Each list "
-                       "must contain at least one value;\n"
-                       "a list of one value pins that axis. The first point feeds "
-                       "the wideband PSD plot.",
-                  foreground="gray", justify="left").grid(
-            row=r, column=0, columnspan=3, sticky="w");  r += 1
-        _lf(f, "IBO values (dB):", r, 0)
-        _ent(f, self._sv("sweep.ibo"), r, 1, width=44,
-             tip="Comma-separated IBO values to sweep (dB). "
-                 "Example: 0.0, 1.5, 3.0, 4.5, 6.0"); r += 1
-        _lf(f, "Noise values (dBFS/Hz):", r, 0)
-        _ent(f, self._sv("sweep.noise"), r, 1, width=44,
-             tip="Comma-separated noise density values to sweep (dBFS/Hz). "
-                 "Example: -140.0, -130.0, -120.0"); r += 1
-
-        r = self._section(f, "Output", r)
-        _lf(f, "Output Directory:", r, 0)
-        row_frame = ttk.Frame(f)
-        row_frame.grid(row=r, column=1, sticky="w");  r += 1
-        _ent(row_frame, self._sv("out.dir"), 0, 0, width=28)
-        ttk.Button(row_frame, text="Browse…", command=self._browse_out_dir,
-                   width=8).grid(row=0, column=1, padx=4)
-
-        plots_var = tk.BooleanVar(value=True)
-        self._vars["out.plots"] = plots_var
-        cb = ttk.Checkbutton(f, text="Generate plots", variable=plots_var)
-        cb.grid(row=r, column=0, columnspan=2, sticky="w", pady=(6, 0));  r += 1
-        _Tip(cb,
-             "When checked, the simulation writes wideband.png, amplifier.png, "
-             "<carrier>_detector.png for each detector carrier, and "
-             "<carrier>_channel.png for each carrier with channel impairments. "
-             "report.md is always written.")
-        f.columnconfigure(1, weight=1)
+        _render_tab(nb, _SWEEP_OUTPUT_TAB, self._vars, self._texts)
 
     def _build_carriers_tab(self, nb):
         tab = ttk.Frame(nb);  nb.add(tab, text="Carriers")
@@ -920,31 +1044,10 @@ class App:
         self._status.set(f"Loaded: {path}")
 
     def _populate(self, cfg: dict):
-        # General tab is schema-driven; the rest still uses hand-coded reads.
-        _populate_from_schema(_GENERAL_TAB, cfg, self._vars)
-
-        amp = cfg.get("amplifier", {})
-
-        def set_text(key, lst):
-            t = self._texts[key]
-            t.delete("1.0", "end")
-            t.insert("1.0", ", ".join(_fmt(x) for x in lst))
-
-        am_am = amp.get("am_am", {})
-        set_text("amp.am_am.in",  am_am.get("input", []))
-        set_text("amp.am_am.out", am_am.get("output", []))
-        am_pm = amp.get("am_pm", {})
-        set_text("amp.am_pm.in",    am_pm.get("input", []))
-        set_text("amp.am_pm.phase", am_pm.get("phase_deg", []))
-
-        # sweep.sample_rate is handled by the General-tab schema above.
-        sw = cfg.get("sweep", {})
-        self._vars["sweep.ibo"].set(  ", ".join(_fmt(x) for x in sw.get("ibo_db", [])))
-        self._vars["sweep.noise"].set(", ".join(_fmt(x) for x in sw.get("noise_density_dbfs", [])))
-
-        o = cfg.get("output", {})
-        self._vars["out.dir"].set(o.get("output_dir", "."))
-        self._vars["out.plots"].set(bool(o.get("plots", True)))
+        # General / Sweep & Output / Amplifier tabs are schema-driven;
+        # carriers are still hand-coded.
+        for schema in (_GENERAL_TAB, _SWEEP_OUTPUT_TAB, _AMPLIFIER_TAB):
+            _populate_from_schema(schema, cfg, self._vars, self._texts)
 
         for cf in self._carriers: cf.destroy()
         self._carriers.clear()
@@ -952,26 +1055,12 @@ class App:
             self._add_carrier(carr)
 
     def _collect(self) -> dict:
-        def sv(key): return str(self._vars[key].get()).strip()
-        def tv(key): return _parse_float_list(self._texts[key].get("1.0", "end"))
-
         cfg: dict = {}
-        # General-tab fields populate cfg["simulation"], cfg["ola"], and
-        # cfg["sweep"]["sample_rate"]; the remaining sweep / amplifier /
-        # output / carrier sections are still hand-coded.
-        _collect_from_schema(_GENERAL_TAB, self._vars, cfg)
-
-        cfg.setdefault("sweep", {})
-        cfg["sweep"]["ibo_db"]             = _parse_float_list(sv("sweep.ibo"))
-        cfg["sweep"]["noise_density_dbfs"] = _parse_float_list(sv("sweep.noise"))
-        cfg["amplifier"] = {
-            "am_am": {"input": tv("amp.am_am.in"), "output": tv("amp.am_am.out")},
-            "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
-        }
-        cfg["output"] = {
-            "output_dir": sv("out.dir") or ".",
-            "plots":      bool(self._vars["out.plots"].get()),
-        }
+        for schema in (_GENERAL_TAB, _SWEEP_OUTPUT_TAB, _AMPLIFIER_TAB):
+            _collect_from_schema(schema, self._vars, self._texts, cfg)
+        # Mirror the legacy behavior: empty output_dir → "."
+        if not cfg.get("output", {}).get("output_dir"):
+            cfg.setdefault("output", {})["output_dir"] = "."
         cfg["carrier"] = [cf.to_dict() for cf in self._carriers]
         return cfg
 
@@ -997,10 +1086,6 @@ class App:
             filetypes=[("TOML files", "*.toml"), ("All files", "*.*")])
         if p:
             self._load(Path(p))
-
-    def _browse_out_dir(self):
-        d = filedialog.askdirectory(initialdir=self._vars["out.dir"].get() or ".")
-        if d: self._vars["out.dir"].set(d)
 
     # ── Subprocess monitoring ─────────────────────────────────────────────────
 
@@ -1052,7 +1137,7 @@ class App:
         self._set_running(True)
         self._status.set("Running simulation...")
 
-        out_dir = Path(self._vars["out.dir"].get().strip() or ".")
+        out_dir = Path(self._vars["output.output_dir"].get().strip() or ".")
         out_dir.mkdir(parents=True, exist_ok=True)
         self._log_file_chunk_pos = None
         try:

@@ -12,12 +12,58 @@ import sys
 import threading
 import time
 import tkinter as tk
+from dataclasses import dataclass
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import tomllib
 from misc.gen_icon import build_icon as _build_icon
 
 _ICON_B64 = base64.b64encode(_build_icon()).decode()
+
+
+# ── Form schema ──────────────────────────────────────────────────────────────
+#
+# Tabs/Sections/Fields are plain data; a Tab is rendered onto a scrollable
+# Frame by `_render_tab()` and read/written by `_populate_from_schema()` /
+# `_collect_from_schema()` (defined further down once their helpers exist).
+# Step 1 ports just the General tab — Sweep, Output, Amplifier, and Carriers
+# still use the hand-coded methods.
+
+@dataclass(frozen=True)
+class Field:
+    """One labelled input bound to a TOML path.
+
+    `path` is the nested-key tuple inside the cfg dict (e.g.
+    ("simulation", "seed") → cfg["simulation"]["seed"]).  The internal var
+    key is path joined by ".".  `type` is one of "int", "float",
+    "float_optional", "str", "bool".  An "optional" field maps a missing /
+    None cfg value to an empty StringVar and back, instead of substituting
+    the default.
+    """
+    path:    tuple[str, ...]
+    label:   str
+    type:    str
+    default: object = None
+    tip:     str    = ""
+    width:   int    = 20
+
+    @property
+    def key(self) -> str:
+        return ".".join(self.path)
+
+
+@dataclass(frozen=True)
+class Section:
+    """A titled group of fields rendered together with an [hr] separator."""
+    title:   str
+    fields:  tuple[Field, ...]
+    columns: int = 2   # 1 = stacked, 2 = label/entry pairs side by side
+
+
+@dataclass(frozen=True)
+class Tab:
+    name:     str
+    sections: tuple[Section, ...]
 
 
 # ── TOML serializer ───────────────────────────────────────────────────────────
@@ -167,6 +213,193 @@ def _scrollable(parent) -> ttk.Frame:
     canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
     canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
     return inner
+
+
+# ── Schema-driven rendering and (de)serialisation ────────────────────────────
+
+_L_PAD_RIGHT = (16, 4)   # padx on right-column labels (separates the two groups)
+
+
+def _render_section(parent, sec: Section, section_row: int,
+                    get_var) -> int:
+    """Render one Section onto `parent` starting at `section_row`; return the
+    next free row.  Column 2 layout: columns 0,1 = left pair, 2,3 = right pair.
+    Column 1 layout: columns 0,1 stacked rows."""
+    if sec.columns == 2:
+        for i in range(0, len(sec.fields), 2):
+            left = sec.fields[i]
+            _lf(parent, left.label + ":", section_row, 0)
+            _ent(parent, get_var(left.key), section_row, 1,
+                 width=left.width, tip=left.tip)
+            if i + 1 < len(sec.fields):
+                right = sec.fields[i + 1]
+                _lf(parent, right.label + ":", section_row, 2, padx=_L_PAD_RIGHT)
+                _ent(parent, get_var(right.key), section_row, 3,
+                     width=right.width, tip=right.tip)
+            section_row += 1
+    else:
+        for fld in sec.fields:
+            _lf(parent, fld.label + ":", section_row, 0)
+            _ent(parent, get_var(fld.key), section_row, 1,
+                 width=fld.width, tip=fld.tip)
+            section_row += 1
+    return section_row
+
+
+def _render_tab(nb, schema: Tab, section_helper, get_var) -> None:
+    """Build a Tab from its schema: scrollable Frame → per-section
+    label+separator (via `section_helper`) → fields rendered by
+    `_render_section`.  Column 1 and 3 grow if extra width is available."""
+    frame = ttk.Frame(nb); nb.add(frame, text=schema.name)
+    inner = _scrollable(frame)
+    r = 0
+    has_two_col = False
+    for sec in schema.sections:
+        r = section_helper(inner, sec.title, r)
+        r = _render_section(inner, sec, r, get_var)
+        has_two_col = has_two_col or sec.columns == 2
+    inner.columnconfigure(1, weight=1)
+    if has_two_col:
+        inner.columnconfigure(3, weight=1)
+
+
+def _walk_fields(schema: Tab):
+    """Yield every Field in a Tab schema, flattening across sections."""
+    for sec in schema.sections:
+        yield from sec.fields
+
+
+def _cfg_get(cfg: dict, path: tuple[str, ...]):
+    """Navigate cfg by path; return None if any intermediate key is missing."""
+    d = cfg
+    for k in path:
+        if not isinstance(d, dict) or k not in d:
+            return None
+        d = d[k]
+    return d
+
+
+def _cfg_set(cfg: dict, path: tuple[str, ...], value) -> None:
+    """Insert `value` at `path` in `cfg`, creating intermediate dicts."""
+    d = cfg
+    for k in path[:-1]:
+        d = d.setdefault(k, {})
+    d[path[-1]] = value
+
+
+def _populate_from_schema(schema: Tab, cfg: dict,
+                          variables: dict[str, tk.Variable]) -> None:
+    """Read each field's cfg value and push the formatted form into its var.
+
+    For ``float_optional``: a missing / None cfg value → empty string in the
+    var (which collect interprets as "omit").  For every other type, a
+    missing value substitutes the field's ``default``.
+    """
+    for fld in _walk_fields(schema):
+        raw = _cfg_get(cfg, fld.path)
+        var = variables[fld.key]
+        if fld.type == "float_optional":
+            var.set(_fmt(raw) if raw is not None else "")
+        elif raw is None:
+            d = fld.default
+            var.set(_fmt(d) if isinstance(d, (int, float)) else str(d))
+        elif isinstance(raw, (int, float)):
+            var.set(_fmt(raw))
+        else:
+            var.set(str(raw))
+
+
+def _collect_from_schema(schema: Tab, variables: dict[str, tk.Variable],
+                         cfg: dict) -> None:
+    """Read each var, parse per the field's type, and write into `cfg`.
+
+    Empty ``float_optional`` values are omitted from `cfg` so the caller's
+    TOML writer doesn't emit a key the user left blank.
+    """
+    for fld in _walk_fields(schema):
+        raw = str(variables[fld.key].get()).strip()
+        if fld.type == "float_optional":
+            if raw:
+                _cfg_set(cfg, fld.path, float(raw))
+            continue
+        if fld.type == "int":
+            value = int(float(raw))
+        elif fld.type == "float":
+            value = float(raw)
+        elif fld.type == "bool":
+            value = raw.lower() in ("true", "1", "yes")
+        else:
+            value = raw
+        _cfg_set(cfg, fld.path, value)
+
+
+# ── General-tab schema ───────────────────────────────────────────────────────
+
+_GENERAL_TAB = Tab(
+    name="General",
+    sections=(
+        Section("Simulation", columns=2, fields=(
+            Field(("simulation", "seed"), "Seed", "int", default=42,
+                  tip="Random seed for reproducible simulations (integer)."),
+            Field(("sweep", "sample_rate"), "Sample Rate (MHz)", "float",
+                  default=16.0,
+                  tip="Composite wideband sample rate in MHz. "
+                      "Must be at least 2x the highest carrier edge frequency."),
+        )),
+        Section("Adaptive BER measurement", columns=2, fields=(
+            Field(("simulation", "max_block_size_samples"),
+                  "Max Block Size (samples)", "int", default=16_777_216,
+                  tip="Per-carrier native-rate buffer cap, in samples, for ONE "
+                      "iteration. num_symbols (uncoded) or num_frames (coded) "
+                      "are derived from this so the largest per-carrier buffer "
+                      "never exceeds it. Increase to reduce iteration count at "
+                      "low BER; decrease to fit smaller machines. Memory ≈ "
+                      "this × 16 bytes per active demod carrier."),
+            Field(("simulation", "max_iterations"), "Max Iterations", "int",
+                  default=100,
+                  tip="Safety cap on the number of full sim runs per (IBO, noise) "
+                      "point. Each iteration processes one Max-Block-Size buffer "
+                      "per carrier; iterations that hit this cap without "
+                      "converging are flagged in report.md with an asterisk on "
+                      "the iteration count."),
+            Field(("simulation", "target_ci_half_width"),
+                  "Target CI Half-Width", "float", default=2e-3,
+                  tip="Absolute half-width on BER at the chosen confidence level. "
+                      "Iterations accumulate at each (IBO, noise) point until "
+                      "the Wilson interval is at most ±this around the estimate. "
+                      "Example: 2e-3 means BER ± 0.002 at 95% confidence."),
+            Field(("simulation", "target_ci_relative"),
+                  "Target CI Relative", "float_optional",
+                  tip="Optional relative half-width on BER, expressed as a "
+                      "fraction of BER itself (e.g. 0.01 = ±1% of BER). When set, "
+                      "convergence is declared as soon as EITHER the absolute or "
+                      "relative target is met. Lets high-BER points exit quickly "
+                      "without forcing a tiny absolute interval that would only "
+                      "matter at low BER. Leave blank to use the absolute target "
+                      "only."),
+            Field(("simulation", "min_errors"), "Min Errors", "int", default=50,
+                  tip="Minimum cumulative bit errors required before convergence "
+                      "can be declared at a sweep point. Prevents premature "
+                      "stops when the CI is tight but jittery from too few "
+                      "errors. Typical value: 50."),
+            Field(("simulation", "confidence"), "Confidence", "float",
+                  default=0.95,
+                  tip="Two-sided confidence level for the Wilson interval, in "
+                      "(0, 1). Typical value: 0.95. Used for both the CI stop "
+                      "criterion and the rule-of-three upper bound reported "
+                      "when zero errors are observed."),
+        )),
+        Section("Overlap-Add (OLA) Filter", columns=2, fields=(
+            Field(("ola", "filter_span"), "Filter Span", "int", default=16,
+                  tip="Half-span of the OLA resampling filter in symbols. "
+                      "Longer span = better stopband rejection, higher latency."),
+            Field(("ola", "block_size"), "Block Size", "int", default=4096,
+                  tip="FFT block size for the overlap-add resampler (samples). "
+                      "Must be a power of two; larger = more efficient for "
+                      "long filters."),
+        )),
+    ),
+)
 
 
 # ── CarrierFrame ──────────────────────────────────────────────────────────────
@@ -556,75 +789,14 @@ class App:
         return row + 2
 
     def _build_general_tab(self, nb):
-        tab = ttk.Frame(nb);  nb.add(tab, text="General")
-        f = _scrollable(tab)
-
-        # Two-column layout: columns 0,1 = left label/entry pair;
-        # columns 2,3 = right label/entry pair on the same row.
-        # The right-column label gets extra leading pad to separate the two
-        # vertical groups; section headers continue to span all four columns.
-        L_PAD = (16, 4)
-        W = 20
-
-        r = self._section(f, "Simulation", 0)
-        _lf(f, "Seed:", r, 0)
-        _ent(f, self._sv("sim.seed"), r, 1, width=W,
-             tip="Random seed for reproducible simulations (integer).")
-        _lf(f, "Sample Rate (MHz):", r, 2, padx=L_PAD)
-        _ent(f, self._sv("sweep.sample_rate"), r, 3, width=W,
-             tip="Composite wideband sample rate in MHz. "
-                 "Must be at least 2x the highest carrier edge frequency."); r += 1
-
-        r = self._section(f, "Adaptive BER measurement", r)
-        _lf(f, "Max Block Size (samples):", r, 0)
-        _ent(f, self._sv("sim.max_block_size_samples"), r, 1, width=W,
-             tip="Per-carrier native-rate buffer cap, in samples, for ONE iteration. "
-                 "num_symbols (uncoded) or num_frames (coded) are derived from this "
-                 "so the largest per-carrier buffer never exceeds it. Increase to "
-                 "reduce iteration count at low BER; decrease to fit smaller machines. "
-                 "Memory ≈ this × 16 bytes per active demod carrier.")
-        _lf(f, "Max Iterations:", r, 2, padx=L_PAD)
-        _ent(f, self._sv("sim.max_iterations"), r, 3, width=W,
-             tip="Safety cap on the number of full sim runs per (IBO, noise) point. "
-                 "Each iteration processes one Max-Block-Size buffer per carrier; "
-                 "iterations that hit this cap without converging are flagged in "
-                 "report.md with an asterisk on the iteration count."); r += 1
-        _lf(f, "Target CI Half-Width:", r, 0)
-        _ent(f, self._sv("sim.target_ci_half_width"), r, 1, width=W,
-             tip="Absolute half-width on BER at the chosen confidence level. "
-                 "Iterations accumulate at each (IBO, noise) point until the Wilson "
-                 "interval is at most ±this around the estimate. "
-                 "Example: 2e-3 means BER ± 0.002 at 95% confidence.")
-        _lf(f, "Target CI Relative:", r, 2, padx=L_PAD)
-        _ent(f, self._sv("sim.target_ci_relative"), r, 3, width=W,
-             tip="Optional relative half-width on BER, expressed as a fraction of "
-                 "BER itself (e.g. 0.01 = ±1% of BER). When set, convergence is "
-                 "declared as soon as EITHER the absolute or relative target is "
-                 "met. Lets high-BER points exit quickly without forcing a tiny "
-                 "absolute interval that would only matter at low BER. Leave "
-                 "blank to use the absolute target only."); r += 1
-        _lf(f, "Min Errors:", r, 0)
-        _ent(f, self._sv("sim.min_errors"), r, 1, width=W,
-             tip="Minimum cumulative bit errors required before convergence can be "
-                 "declared at a sweep point. Prevents premature stops when the CI is "
-                 "tight but jittery from too few errors. Typical value: 50.")
-        _lf(f, "Confidence:", r, 2, padx=L_PAD)
-        _ent(f, self._sv("sim.confidence"), r, 3, width=W,
-             tip="Two-sided confidence level for the Wilson interval, in (0, 1). "
-                 "Typical value: 0.95. Used for both the CI stop criterion and the "
-                 "rule-of-three upper bound reported when zero errors are observed."); r += 1
-
-        r = self._section(f, "Overlap-Add (OLA) Filter", r)
-        _lf(f, "Filter Span:", r, 0)
-        _ent(f, self._sv("ola.filter_span"), r, 1, width=W,
-             tip="Half-span of the OLA resampling filter in symbols. "
-                 "Longer span = better stopband rejection, higher latency.")
-        _lf(f, "Block Size:", r, 2, padx=L_PAD)
-        _ent(f, self._sv("ola.block_size"), r, 3, width=W,
-             tip="FFT block size for the overlap-add resampler (samples). "
-                 "Must be a power of two; larger = more efficient for long filters."); r += 1
-        f.columnconfigure(1, weight=1)
-        f.columnconfigure(3, weight=1)
+        """Render the General tab from `_GENERAL_TAB` schema (Step 1 of the
+        schema-driven GUI refactor — see `Tab`/`Section`/`Field` above)."""
+        # Pre-register a StringVar for each field so _render_tab can look them
+        # up by key.  Defaults are filled by _populate_from_schema once the
+        # cfg is loaded; until then the entries display empty.
+        for fld in _walk_fields(_GENERAL_TAB):
+            self._sv(fld.key)
+        _render_tab(nb, _GENERAL_TAB, self._section, lambda k: self._vars[k])
 
     def _build_amplifier_tab(self, nb):
         tab = ttk.Frame(nb);  nb.add(tab, text="Amplifier")
@@ -748,21 +920,8 @@ class App:
         self._status.set(f"Loaded: {path}")
 
     def _populate(self, cfg: dict):
-        sim = cfg.get("simulation", {})
-        self._vars["sim.seed"].set(str(sim.get("seed", 42)))
-        self._vars["sim.max_block_size_samples"].set(
-            str(sim.get("max_block_size_samples", 16_777_216)))
-        self._vars["sim.target_ci_half_width"].set(
-            _fmt(sim.get("target_ci_half_width", 2e-3)))
-        _rel = sim.get("target_ci_relative")
-        self._vars["sim.target_ci_relative"].set(_fmt(_rel) if _rel is not None else "")
-        self._vars["sim.confidence"].set(_fmt(sim.get("confidence", 0.95)))
-        self._vars["sim.min_errors"].set(str(sim.get("min_errors", 50)))
-        self._vars["sim.max_iterations"].set(str(sim.get("max_iterations", 100)))
-
-        ola = cfg.get("ola", {})
-        self._vars["ola.filter_span"].set(str(ola.get("filter_span", 16)))
-        self._vars["ola.block_size"].set(str(ola.get("block_size", 4096)))
+        # General tab is schema-driven; the rest still uses hand-coded reads.
+        _populate_from_schema(_GENERAL_TAB, cfg, self._vars)
 
         amp = cfg.get("amplifier", {})
 
@@ -778,8 +937,8 @@ class App:
         set_text("amp.am_pm.in",    am_pm.get("input", []))
         set_text("amp.am_pm.phase", am_pm.get("phase_deg", []))
 
+        # sweep.sample_rate is handled by the General-tab schema above.
         sw = cfg.get("sweep", {})
-        self._vars["sweep.sample_rate"].set(_fmt(sw.get("sample_rate", 16)))
         self._vars["sweep.ibo"].set(  ", ".join(_fmt(x) for x in sw.get("ibo_db", [])))
         self._vars["sweep.noise"].set(", ".join(_fmt(x) for x in sw.get("noise_density_dbfs", [])))
 
@@ -794,40 +953,25 @@ class App:
 
     def _collect(self) -> dict:
         def sv(key): return str(self._vars[key].get()).strip()
-        def fv(key): return float(sv(key))
-        def iv(key): return int(float(sv(key)))
         def tv(key): return _parse_float_list(self._texts[key].get("1.0", "end"))
 
-        sim_block: dict = {
-            "seed":                   iv("sim.seed"),
-            "max_block_size_samples": iv("sim.max_block_size_samples"),
-            "target_ci_half_width":   fv("sim.target_ci_half_width"),
-            "confidence":             fv("sim.confidence"),
-            "min_errors":             iv("sim.min_errors"),
-            "max_iterations":         iv("sim.max_iterations"),
-        }
-        rel_str = sv("sim.target_ci_relative")
-        if rel_str:
-            sim_block["target_ci_relative"] = float(rel_str)
+        cfg: dict = {}
+        # General-tab fields populate cfg["simulation"], cfg["ola"], and
+        # cfg["sweep"]["sample_rate"]; the remaining sweep / amplifier /
+        # output / carrier sections are still hand-coded.
+        _collect_from_schema(_GENERAL_TAB, self._vars, cfg)
 
-        cfg: dict = {
-            "simulation": sim_block,
-            "sweep": {
-                "sample_rate":        fv("sweep.sample_rate"),
-                "ibo_db":             _parse_float_list(sv("sweep.ibo")),
-                "noise_density_dbfs": _parse_float_list(sv("sweep.noise")),
-            },
-            "amplifier": {
-                "am_am": {"input": tv("amp.am_am.in"), "output": tv("amp.am_am.out")},
-                "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
-            },
-            "ola":    {"filter_span": iv("ola.filter_span"), "block_size": iv("ola.block_size")},
-            "output": {
-                "output_dir": sv("out.dir") or ".",
-                "plots":      bool(self._vars["out.plots"].get()),
-            },
+        cfg.setdefault("sweep", {})
+        cfg["sweep"]["ibo_db"]             = _parse_float_list(sv("sweep.ibo"))
+        cfg["sweep"]["noise_density_dbfs"] = _parse_float_list(sv("sweep.noise"))
+        cfg["amplifier"] = {
+            "am_am": {"input": tv("amp.am_am.in"), "output": tv("amp.am_am.out")},
+            "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
         }
-
+        cfg["output"] = {
+            "output_dir": sv("out.dir") or ".",
+            "plots":      bool(self._vars["out.plots"].get()),
+        }
         cfg["carrier"] = [cf.to_dict() for cf in self._carriers]
         return cfg
 

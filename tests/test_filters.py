@@ -200,11 +200,11 @@ def test_ola_convolve_chunk_cb():
 
 def test_rational_resample_no_fractional_L_error():
     """
-    A wideband_bpsk_simulation with L_float=62.5 must not raise ValueError.
+    A wideband simulation with L_float=62.5 must not raise ValueError.
 
     sample_rate=500e6, symbol_rate=2e6, sps=4 → L_float=62.5.
     """
-    from sim.simulation import wideband_bpsk_simulation
+    from sim.simulation import simulate
     _am_am = {"input":  [0.0, 0.5, 1.0], "output": [0.0, 0.45, 0.85]}
     _am_pm = {"input":  [0.0, 0.5, 1.0], "phase_deg": [0.0, 1.0, 3.0]}
     carrier = dict(
@@ -212,7 +212,7 @@ def test_rational_resample_no_fractional_L_error():
         filter_span=8, power_db=0.0, freq=0.0,
         modulation="BPSK",
     )
-    result = wideband_bpsk_simulation(
+    result = simulate(
         carriers=[carrier],
         sample_rate=500e6,
         am_am_cfg=_am_am,

@@ -918,7 +918,7 @@ End-to-end smoke test: mocks `load_config` with a minimal two-carrier config, ru
 
 ### `tests/test_simulation.py`
 
-Integration tests on the full `wideband_bpsk_simulation` function: checks that CNR
+Integration tests on the full `simulate` function: checks that CNR
 varies correctly with noise density, CIR varies with IBO, and that disabling
 `demod_carriers` returns NaN placeholders without affecting the wideband signal.
 Also exercises `_derive_block_counts` for both uncoded and LDPC carriers,

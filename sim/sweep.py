@@ -3,7 +3,7 @@ import math
 from collections.abc import Callable
 
 from .modulation import bits_per_symbol
-from .simulation import wideband_bpsk_simulation
+from .simulation import simulate
 from .stats import rule_of_three_upper, wilson_half_width
 
 _PrintCB = Callable[[str], None] | None
@@ -96,7 +96,7 @@ def parameter_sweep(carriers: list[dict],
     meets the Wilson-CI half-width target (or the iteration cap is hit).
 
     Returns (first_sim, results) where `first_sim` is the first sim run's
-    full wideband_bpsk_simulation return dict (used to draw the wideband PSD),
+    full simulate return dict (used to draw the wideband PSD),
     and `results` is a list of compact per-point dicts:
         ibo_db              float
         noise_density_dbfs  float
@@ -179,7 +179,7 @@ def parameter_sweep(carriers: list[dict],
                             f"{msg:<{_aw}}  {_stats_tail()}")
                     inner_print = _iter_chunk_print
 
-                sim = wideband_bpsk_simulation(
+                sim = simulate(
                     carriers=carriers,
                     sample_rate=sample_rate,
                     am_am_cfg=am_am_cfg,

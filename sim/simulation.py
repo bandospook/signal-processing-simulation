@@ -97,7 +97,7 @@ def _derive_block_counts(carr: dict, sps: int, bps: int,
     return syms_per_frame * n_frames, n_frames, code
 
 
-def wideband_bpsk_simulation(carriers: list[dict],
+def simulate(carriers: list[dict],
                               sample_rate: float,
                               am_am_cfg: dict,
                               am_pm_cfg: dict,

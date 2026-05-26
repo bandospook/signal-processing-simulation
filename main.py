@@ -1,4 +1,4 @@
-"""Entry point for the wideband BPSK nonlinear amplifier simulation."""
+"""Entry point for the wideband multi-carrier nonlinear amplifier simulation."""
 
 import math
 import sys

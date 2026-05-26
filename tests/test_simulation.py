@@ -1,8 +1,8 @@
-"""System-level tests for wideband_bpsk_simulation: NL distortion vs drive level."""
+"""System-level tests for simulate: NL distortion vs drive level."""
 import math
 import numpy as np
 import pytest
-from sim.simulation import wideband_bpsk_simulation, _WelchState, _decimate
+from sim.simulation import simulate, _WelchState, _decimate
 
 # Production AM-AM / AM-PM from simulation.toml
 _AM_AM = {
@@ -28,7 +28,7 @@ _BUDGET = 1200
 
 
 def _run_no_noise(ibo_db: float) -> dict:
-    return wideband_bpsk_simulation(
+    return simulate(
         carriers=_CARRIERS,
         sample_rate=_SAMPLE_RATE,
         am_am_cfg=_AM_AM,
@@ -84,7 +84,7 @@ def test_simulation_raises_sample_rate_below_native():
                        rolloff=0.35, filter_span=4,
                        power_db=0.0, freq=0.0)
     with pytest.raises(ValueError, match="sample_rate / native_rate"):
-        wideband_bpsk_simulation(
+        simulate(
             carriers=[bad_carrier],
             sample_rate=4e6,            # 4 MHz < 8 MHz native rate
             am_am_cfg={"input": [0.0, 1.0], "output": [0.0, 1.0]},
@@ -101,7 +101,7 @@ def test_coded_carrier_decodes():
     coded = dict(name="cc", modulation="BPSK", symbol_rate=1e6, sps=4,
                  rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
                  coding=dict(scheme="convolutional", block_length=400))
-    result = wideband_bpsk_simulation(
+    result = simulate(
         carriers=[coded], sample_rate=16e6,
         am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
         max_block_size_samples=7000,
@@ -165,7 +165,7 @@ def test_phase_noise_degrades_evm():
         {**_CARRIERS[0], "phase_noise": pn_cfg},
         {**_CARRIERS[1]},                              # no phase noise on c2
     ]
-    with_pn = wideband_bpsk_simulation(
+    with_pn = simulate(
         carriers=carriers_with_pn, sample_rate=_SAMPLE_RATE,
         am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
         max_block_size_samples=_BUDGET,

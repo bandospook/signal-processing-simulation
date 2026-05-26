@@ -11,7 +11,7 @@ adaptive iteration* below.
 Cut wall-clock time on multi-point sweeps by running independent grid points
 in parallel processes. The unit of parallelism is one `(IBO, noise)` point —
 the full adaptive-iteration loop for that point, not a single
-`wideband_bpsk_simulation` call. Grid points are independent and share no
+`simulate` call. Grid points are independent and share no
 mutable state.
 
 ## Why processes, not Numba
@@ -33,7 +33,7 @@ inner trellis / belief-propagation recursions *are* interpreted loops and
 
 ## What changes
 
-Only `sim/sweep.py`. `wideband_bpsk_simulation` is already a pure function
+Only `sim/sweep.py`. `simulate` is already a pure function
 of its arguments; nothing in `simulation.py`, `filters.py`, or `receiver.py`
 needs to change. `main.py` gains one config-read for `n_workers`.
 
@@ -44,7 +44,7 @@ points 2..N are dispatched to workers.
 ### 1. Worker function (top-level, picklable)
 
 The worker now runs the full adaptive-iteration loop for one grid point, not
-a single `wideband_bpsk_simulation` call. The natural shape is to extract the
+a single `simulate` call. The natural shape is to extract the
 per-point body of `parameter_sweep` into a helper (`_sweep_point`) that takes
 the grid-point parameters plus all the adaptive-iteration knobs, returns the
 aggregated per-carrier dict for that point, and lets the parent process

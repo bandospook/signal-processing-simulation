@@ -57,13 +57,15 @@ For each **enabled** carrier (`enabled = true`):
    filter that adds:
    - Passband amplitude ripple: `1 + r·cos(π · ripple_cycles · f_norm)` in-band.
    - Phase nonlinearity: a polynomial curve up to `max_phase_dev_deg` degrees.
-4b. **Phase noise** *(optional)* — if a top-level `[phase_noise]` block is
-   present and `enabled = true`, the per-carrier baseband is multiplied by
-   `exp(j·φ[n])` where `φ[n]` is a real-valued Gaussian process whose PSD
-   follows the user's `(offset_hz, dbc_per_hz)` mask (log-log interpolation,
-   flat extrapolation past either end).  Applied at the carrier's native
-   sample rate, in the same step as the channel filter, so the noise lives
-   in the carrier's own baseband bandwidth before the OLA upsample.
+4b. **Phase noise** *(optional, per carrier)* — if the carrier has a
+   `[carrier.phase_noise]` block with `enabled = true`, its baseband is
+   multiplied by `exp(j·φ[n])` where `φ[n]` is a real Gaussian process whose
+   PSD follows the user's `(offset_hz, dbc_per_hz)` mask (log-log
+   interpolation, flat extrapolation past either end).  Applied at the
+   carrier's native sample rate, immediately after the channel-impairment
+   filter, so the noise lives in the carrier's own baseband bandwidth before
+   the OLA upsample.  Each carrier carries its own mask, so independent
+   oscillator chains on different links can be modelled separately.
 
 ### 2b. Wideband composite formation
 
@@ -210,6 +212,7 @@ whenever any carrier has `sweep_demod = true`.
 | `wideband.png` | First sweep point's first iteration | `[output].plots` |
 | `amplifier.png` | Config tables (no sim needed) | `[output].plots` |
 | `<name>_channel.png` | Per-carrier with `[carrier.channel]` block | `[output].plots` |
+| `<name>_phase_noise.png` | Per-carrier with enabled `[carrier.phase_noise]` block; mask + cumulative RMS phase | `[output].plots` |
 | `<name>_detector.png` | Per-`sweep_demod` carrier; 2×3 grid (vs IBO and vs CNR) | `[output].plots` |
 | `<name>_detector_<panel>.png` | Same data, one PNG per panel (`ber_vs_ibo`, `evm_vs_ibo`, `db_vs_ibo`, `ber_vs_cnr`, `evm_vs_cnr`, `db_vs_cnr`) | `[output].plots` |
 | Console metrics table | First sweep point's first iteration | Always |

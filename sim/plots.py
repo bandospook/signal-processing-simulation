@@ -116,6 +116,65 @@ def plot_channel_response(sample_rate: float, signal_bw: float,
         fig.savefig(save_path)
 
 
+def plot_phase_noise_response(pn_cfg: dict, native_rate: float,
+                              title: str = "",
+                              save_path: str | None = None) -> None:
+    """Plot a phase-noise mask and the cumulative RMS jitter it implies.
+
+    Left panel: L(f) (dBc/Hz) as a function of offset frequency on a log
+    x-axis.  The dashed curve is the log-log interpolation that
+    ``sim.phase_noise`` uses; the dots are the user's anchor points.
+
+    Right panel: cumulative RMS phase jitter from 0 to f, in degrees.
+    σ_φ(f) = sqrt(2 · ∫_0^f 10^(L/10) df).  The asymptote at f = fs/2 is
+    the total in-band RMS phase noise the carrier actually sees.
+    """
+    from .phase_noise import interp_dbc_mask    # local import → no cycle
+
+    offsets = np.asarray(pn_cfg["offset_hz"], dtype=float)
+    dbc_anchor = np.asarray(pn_cfg["dbc_per_hz"], dtype=float)
+    if offsets.size == 0:
+        return
+
+    # Sample the mask densely across [min(offset)/3, fs/2] for a smooth curve.
+    f_max = max(float(native_rate) / 2.0, float(offsets.max()))
+    f_min = float(offsets.min()) / 3.0
+    f_grid = np.logspace(np.log10(f_min), np.log10(f_max), 400)
+    dbc_grid = interp_dbc_mask(f_grid, offsets, dbc_anchor)
+
+    # Cumulative variance via trapezoid on linear S_phi over the same grid.
+    s_phi = 2.0 * 10.0 ** (dbc_grid / 10.0)              # rad²/Hz
+    cum_var = np.zeros_like(f_grid)
+    cum_var[1:] = np.cumsum(0.5 * (s_phi[1:] + s_phi[:-1]) * np.diff(f_grid))
+    rms_deg = np.sqrt(cum_var) * (180.0 / np.pi)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+    fig.suptitle(f"Phase Noise{' — ' + title if title else ''}")
+
+    ax1.semilogx(f_grid, dbc_grid, color="tab:blue", lw=1.0,
+                 label="interpolated mask")
+    ax1.semilogx(offsets, dbc_anchor, "o", color="tab:red", ms=5,
+                 label="anchors")
+    ax1.set_xlabel("Offset (Hz)")
+    ax1.set_ylabel("L(f) (dBc/Hz)")
+    ax1.set_title("Phase noise mask")
+    ax1.grid(True, which="both", alpha=0.4)
+    ax1.legend(fontsize=8)
+
+    ax2.semilogx(f_grid, rms_deg, color="tab:orange", lw=1.0)
+    ax2.axvline(native_rate / 2.0, color="gray", ls=":", lw=0.8,
+                label=f"fs/2 = {native_rate / 2.0:.2g} Hz")
+    ax2.set_xlabel("Upper integration limit (Hz)")
+    ax2.set_ylabel("Cumulative RMS phase (°)")
+    ax2.set_title(f"Total RMS at fs/2: {float(np.interp(native_rate/2.0, f_grid, rms_deg)):.3f}°")
+    ax2.grid(True, which="both", alpha=0.4)
+    ax2.legend(fontsize=8)
+
+    plt.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path)
+
+
 def print_metrics_table(carriers: list[dict]) -> None:
     """Print per-carrier CNR / CIR / CNIR / EVM / BER to stdout."""
     def _db(v: float) -> str:

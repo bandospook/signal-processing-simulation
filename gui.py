@@ -63,14 +63,6 @@ def build_toml(cfg: dict) -> str:
     ln("[amplifier.am_pm]")
     kva("input    ", amp["am_pm"]["input"]);  kva("phase_deg", amp["am_pm"]["phase_deg"]);  ln()
 
-    pn = cfg.get("phase_noise")
-    if pn is not None:
-        ln("[phase_noise]")
-        kv("enabled   ", bool(pn.get("enabled", True)))
-        kva("offset_hz ", pn.get("offset_hz", []))
-        kva("dbc_per_hz", pn.get("dbc_per_hz", []))
-        ln()
-
     ln("[ola]")
     kv("filter_span", cfg["ola"]["filter_span"], 12)
     kv("block_size ", cfg["ola"]["block_size"],  12)
@@ -98,6 +90,11 @@ def build_toml(cfg: dict) -> str:
             ln();  ln("[carrier.channel]")
             for k, v in ch.items():
                 (kva if isinstance(v, list) else kv)(f"{k:22}", v)
+        pn = carr.get("phase_noise")
+        if pn:
+            ln();  ln("[carrier.phase_noise]")
+            for k, v in pn.items():
+                (kva if isinstance(v, list) else kv)(f"{k:11}", v)
         ln()
 
     return "\n".join(L)
@@ -211,11 +208,14 @@ class CarrierFrame(ttk.LabelFrame):
         self._vars:        dict[str, tk.Variable] = {}
         self._ch_vars:     dict[str, tk.Variable] = {}
         self._coding_vars: dict[str, tk.Variable] = {}
+        self._pn_texts:    dict[str, tk.Text]     = {}
         self._enabled     = tk.BooleanVar(value=data.get("enabled", True))
         self._sweep_demod = tk.BooleanVar(value=data.get("sweep_demod", False))
         self._has_coding  = tk.BooleanVar(value=bool(data.get("coding")))
         ch = data.get("channel", {})
         self._has_ch = tk.BooleanVar(value=bool(ch) and ch.get("enabled", True))
+        pn = data.get("phase_noise", {})
+        self._has_pn = tk.BooleanVar(value=bool(pn) and pn.get("enabled", True))
         self._build(data)
 
     @property
@@ -250,6 +250,7 @@ class CarrierFrame(ttk.LabelFrame):
         check_row   = n_main_rows + 1              # row 6
         cod_row     = check_row + 1                # row 7
         ch_row      = cod_row + 2                  # row 9
+        pn_row      = ch_row + 2                   # row 11
 
         # ── Enable checkboxes ────────────────────────────────────────────────
         ttk.Checkbutton(self, text="Include in wideband",
@@ -279,6 +280,15 @@ class CarrierFrame(ttk.LabelFrame):
         self._ch_frame.grid(row=ch_row + 1, column=0, columnspan=4, sticky="ew")
         if "channel" in d:
             self._populate_ch(d["channel"])
+
+        # ── Phase noise ──────────────────────────────────────────────────────
+        ttk.Checkbutton(self, text="Phase noise", variable=self._has_pn,
+                        command=self._toggle_pn).grid(
+            row=pn_row, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self._pn_frame = ttk.Frame(self, padding=(14, 0, 0, 0))
+        self._pn_frame.grid(row=pn_row + 1, column=0, columnspan=4, sticky="ew")
+        if "phase_noise" in d:
+            self._populate_pn(d["phase_noise"])
 
     def _toggle_coding(self):
         if self._has_coding.get():
@@ -344,6 +354,32 @@ class CarrierFrame(ttk.LabelFrame):
             _lf(self._ch_frame, label + ":", r, c)
             _ent(self._ch_frame, var, r, c + 1, width=14, tip=tip)
 
+    def _toggle_pn(self):
+        if self._has_pn.get():
+            self._populate_pn({})
+        else:
+            for w in self._pn_frame.winfo_children(): w.destroy()
+            self._pn_texts.clear()
+
+    def _populate_pn(self, pn: dict):
+        """Two text widgets — offset_hz and dbc_per_hz — for the per-carrier
+        oscillator mask.  Same units and conventions as the previous
+        global section."""
+        for w in self._pn_frame.winfo_children(): w.destroy()
+        self._pn_texts.clear()
+        for r, (key, label, default) in enumerate((
+            ("offset_hz",  "Offset (Hz, comma-separated):",     pn.get("offset_hz", [])),
+            ("dbc_per_hz", "L(f) (dBc/Hz, comma-separated):",   pn.get("dbc_per_hz", [])),
+        )):
+            ttk.Label(self._pn_frame, text=label, foreground="gray").grid(
+                row=2 * r, column=0, columnspan=4, sticky="w")
+            t = tk.Text(self._pn_frame, height=1, width=64, wrap="word",
+                         font=("Consolas", 9))
+            t.grid(row=2 * r + 1, column=0, columnspan=4, sticky="ew", pady=2)
+            if default:
+                t.insert("1.0", ", ".join(_fmt(x) for x in default))
+            self._pn_texts[key] = t
+
     def to_dict(self) -> dict:
         d = {}
         for key, _, typ, _, _ in self._MAIN:
@@ -377,6 +413,16 @@ class CarrierFrame(ttk.LabelFrame):
                 ch[key] = (int(float(raw)) if typ == "int"
                            else float(raw) if typ == "float" else raw)
             d["channel"] = ch
+
+        if self._has_pn.get() and self._pn_texts:
+            offs = _parse_float_list(self._pn_texts["offset_hz"].get("1.0", "end"))
+            dbcs = _parse_float_list(self._pn_texts["dbc_per_hz"].get("1.0", "end"))
+            if offs or dbcs:
+                d["phase_noise"] = {
+                    "enabled":    True,
+                    "offset_hz":  offs,
+                    "dbc_per_hz": dbcs,
+                }
         return d
 
 
@@ -596,21 +642,6 @@ class App:
             ttk.Label(f, text=f"{olabel} (comma-separated):",
                       foreground="gray").grid(row=r, column=0, columnspan=4, sticky="w");  r += 1
             self._text_widget(f, ok, r);  r += 1
-
-        # Phase Noise (per-carrier oscillator phase fluctuation, applied at
-        # each carrier's native bandwidth right after the channel filter).
-        ttk.Label(f, text="Phase Noise", font=("", 10, "bold")).grid(
-            row=r, column=0, columnspan=4, sticky="w", pady=(14, 2));  r += 1
-        pn_enabled = tk.BooleanVar(value=False)
-        self._vars["pn.enabled"] = pn_enabled
-        ttk.Checkbutton(f, text="Enabled", variable=pn_enabled).grid(
-            row=r, column=0, columnspan=4, sticky="w");  r += 1
-        ttk.Label(f, text="Offset (Hz, comma-separated):",
-                  foreground="gray").grid(row=r, column=0, columnspan=4, sticky="w");  r += 1
-        self._text_widget(f, "pn.offset", r);  r += 1
-        ttk.Label(f, text="L(f) (dBc/Hz, comma-separated):",
-                  foreground="gray").grid(row=r, column=0, columnspan=4, sticky="w");  r += 1
-        self._text_widget(f, "pn.dbc", r);  r += 1
         f.columnconfigure(0, weight=1)
 
     def _build_sweep_output_tab(self, nb):
@@ -747,11 +778,6 @@ class App:
         set_text("amp.am_pm.in",    am_pm.get("input", []))
         set_text("amp.am_pm.phase", am_pm.get("phase_deg", []))
 
-        pn = cfg.get("phase_noise", {})
-        self._vars["pn.enabled"].set(bool(pn.get("enabled", bool(pn))))
-        set_text("pn.offset", pn.get("offset_hz", []))
-        set_text("pn.dbc",    pn.get("dbc_per_hz", []))
-
         sw = cfg.get("sweep", {})
         self._vars["sweep.sample_rate"].set(_fmt(sw.get("sample_rate", 16)))
         self._vars["sweep.ibo"].set(  ", ".join(_fmt(x) for x in sw.get("ibo_db", [])))
@@ -795,12 +821,6 @@ class App:
                 "am_am": {"input": tv("amp.am_am.in"), "output": tv("amp.am_am.out")},
                 "am_pm": {"input": tv("amp.am_pm.in"), "phase_deg": tv("amp.am_pm.phase")},
             },
-            **({"phase_noise": {
-                "enabled":    bool(self._vars["pn.enabled"].get()),
-                "offset_hz":  tv("pn.offset"),
-                "dbc_per_hz": tv("pn.dbc"),
-             }} if (bool(self._vars["pn.enabled"].get())
-                    or tv("pn.offset") or tv("pn.dbc")) else {}),
             "ola":    {"filter_span": iv("ola.filter_span"), "block_size": iv("ola.block_size")},
             "output": {
                 "output_dir": sv("out.dir") or ".",

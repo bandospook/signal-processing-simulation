@@ -11,6 +11,7 @@ from pathlib import Path
 from sim.plots import (
     psd_db,
     plot_carrier_detector,
+    plot_phase_noise_response,
     write_report,
     _fmt_metric,
     _enabled_carrier_names,
@@ -110,6 +111,31 @@ def test_plot_carrier_detector_zero_ber_with_inf_cnr():
                        "cir_db": 40.0, "ber": 0.0, "evm_rms": 3.0}]},
     ]
     plot_carrier_detector(sweep, "c1", save_path=None)
+
+
+# ── plot_phase_noise_response ─────────────────────────────────────────────────
+
+def test_plot_phase_noise_writes_png(tmp_path):
+    """The phase-noise plot helper writes a PNG when given a save_path."""
+    cfg = {
+        "enabled":    True,
+        "offset_hz":  [1e2, 1e3, 1e4, 1e5, 1e6],
+        "dbc_per_hz": [-60.0, -80.0, -100.0, -120.0, -140.0],
+    }
+    out = tmp_path / "phase_noise.png"
+    plot_phase_noise_response(cfg, native_rate=4e6, title="c1",
+                               save_path=str(out))
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_plot_phase_noise_empty_mask_early_return(tmp_path):
+    """Empty offset list → no plot file, no exception."""
+    out = tmp_path / "phase_noise.png"
+    plot_phase_noise_response(
+        {"enabled": True, "offset_hz": [], "dbc_per_hz": []},
+        native_rate=4e6, save_path=str(out),
+    )
+    assert not out.exists()
 
 
 # ── write_report ──────────────────────────────────────────────────────────────

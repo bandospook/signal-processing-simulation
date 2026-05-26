@@ -278,13 +278,18 @@ existing CNR/CIR/CNIR columns — no need to bake it into the report.
 
 ## Phase noise: mask-driven, applied at per-carrier native rate
 
-**Decision (2026-05-25):** `[phase_noise]` is a top-level optional config
-section consumed by `sim.simulation`.  The mask is a list of
-`(offset_hz, dbc_per_hz)` anchor points; `sim/phase_noise.py` interpolates
-in log-log space (linear in `log10(offset_Hz)`, linear in `dBc/Hz`) with
-flat extrapolation past either end, then generates a real Gaussian phase
-process via frequency-domain coloring (white → `rfft` → multiply by
-`sqrt(2 · 10^(L/10) · fs)` → `irfft`).
+**Decision (2026-05-25):** Phase noise is a *per-carrier* optional config
+block (`[carrier.phase_noise]`) consumed by `sim.simulation`.  The mask is a
+list of `(offset_hz, dbc_per_hz)` anchor points; `sim/phase_noise.py`
+interpolates in log-log space (linear in `log10(offset_Hz)`, linear in
+`dBc/Hz`) with flat extrapolation past either end, then generates a real
+Gaussian phase process via frequency-domain coloring (white → `rfft` →
+multiply by `sqrt(2 · 10^(L/10) · fs)` → `irfft`).
+
+Each carrier carries its own mask so independent TX/RX oscillator chains on
+different links can be modelled separately.  An earlier (2026-05-25)
+version exposed this as a single top-level `[phase_noise]` section; it was
+moved to per-carrier the same day before any field use.
 
 ### Where in the chain
 

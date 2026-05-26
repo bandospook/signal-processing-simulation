@@ -69,19 +69,21 @@ def test_main_runs(tmp_path):
         assert (tmp_path / f"c1_detector_{panel}.png").exists()
 
 
-def test_main_skips_disabled_phase_noise(tmp_path):
-    """A `[phase_noise]` block with enabled=False is dropped before being
-    handed to the sweep — the run should look identical to one with no block."""
+def test_main_writes_phase_noise_plot(tmp_path):
+    """A carrier with a `[carrier.phase_noise]` block triggers a
+    `<name>_phase_noise.png` next to the channel and detector plots."""
     cfg = _make_cfg(tmp_path)
-    cfg["phase_noise"] = {
-        "enabled":    False,
-        "offset_hz":  [1e3, 1e5],
-        "dbc_per_hz": [-60.0, -100.0],
+    cfg["carrier"][0]["phase_noise"] = {
+        "enabled":    True,
+        "offset_hz":  [1e3, 1e4, 1e5, 1e6],
+        "dbc_per_hz": [-60.0, -80.0, -100.0, -120.0],
     }
     with patch("main.load_config", return_value=cfg), \
          patch("matplotlib.pyplot.show"):
         main_module.main()
-    assert (tmp_path / "report.md").exists()
+    assert (tmp_path / "c1_phase_noise.png").exists()
+    # Disabled-or-absent carriers don't get a plot.
+    assert not (tmp_path / "c2_phase_noise.png").exists()
 
 
 def test_main_plots_disabled(tmp_path):

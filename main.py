@@ -13,7 +13,8 @@ from sim.config import load_config
 from sim.modulation import bits_per_symbol
 from sim.theory import ebn0_for_ber
 from sim.plots import (plot_wideband_results, plot_nl_tables, plot_channel_response,
-                       print_metrics_table, plot_carrier_detector, write_report)
+                       plot_phase_noise_response, print_metrics_table,
+                       plot_carrier_detector, write_report)
 from sim.sweep import parameter_sweep
 
 _ProgressCB = Callable[[float, str], None] | None
@@ -45,9 +46,6 @@ def main(config_path: str = "simulation.toml",
     ola = cfg["ola"]
     sim = cfg["simulation"]
     out = cfg["output"]
-    phase_noise_cfg = cfg.get("phase_noise")
-    if phase_noise_cfg is not None and not phase_noise_cfg.get("enabled", True):
-        phase_noise_cfg = None
 
     out_dir = Path(out.get("output_dir", "."))
     out_dir.mkdir(exist_ok=True)
@@ -110,7 +108,6 @@ def main(config_path: str = "simulation.toml",
         ola_filter_span           = ola["filter_span"],
         ola_block_size            = ola["block_size"],
         seed                      = sim["seed"],
-        phase_noise_cfg           = phase_noise_cfg,
         chunk_print               = _chunk_print,
         point_cb                  = _sweep_pt_cb,
     )
@@ -138,6 +135,14 @@ def main(config_path: str = "simulation.toml",
                     native_rate, signal_bw, ch_cfg,
                     title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
                     save_path=plot_path(f"{carrier_slug(carr['name'])}_channel.png"),
+                )
+            pn_cfg = carr.get("phase_noise")
+            if pn_cfg and pn_cfg.get("enabled", True):
+                native_rate = carr["sps"] * carr["symbol_rate"]
+                plot_phase_noise_response(
+                    pn_cfg, native_rate=native_rate,
+                    title=f"{carr['name']}  ({carr['symbol_rate']/1e6:.3g} MHz sym/s)",
+                    save_path=plot_path(f"{carrier_slug(carr['name'])}_phase_noise.png"),
                 )
 
         for cname in demod_names:

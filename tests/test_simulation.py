@@ -148,29 +148,40 @@ def test_phase_noise_degrades_evm():
     through every branch.  The projection-based CIR therefore cannot see it
     (both ref and NL carry the same φ(t) and cancel in the projection); EVM
     measures actual deviation from the ideal constellation and does pick it up.
+
+    Phase noise lives in each carrier's own config block.  Only one of the
+    two carriers gets it here so the per-carrier wiring is exercised — the
+    untouched carrier should keep its baseline EVM.
     """
     base = _run_no_noise(ibo_db=12.0)
-    base_evms = [cr["evm_rms"] for cr in base["carriers"]]
+    base_evms = {cr["name"]: cr["evm_rms"] for cr in base["carriers"]}
 
     pn_cfg = {
         "enabled":    True,
         "offset_hz":  [1e3, 1e4, 1e5, 1e6],
         "dbc_per_hz": [-40.0, -60.0, -80.0, -100.0],   # aggressive mask
     }
+    carriers_with_pn = [
+        {**_CARRIERS[0], "phase_noise": pn_cfg},
+        {**_CARRIERS[1]},                              # no phase noise on c2
+    ]
     with_pn = wideband_bpsk_simulation(
-        carriers=_CARRIERS, sample_rate=_SAMPLE_RATE,
+        carriers=carriers_with_pn, sample_rate=_SAMPLE_RATE,
         am_am_cfg=_AM_AM, am_pm_cfg=_AM_PM,
         max_block_size_samples=_BUDGET,
         input_backoff_db=12.0, noise_density_dbfs=None,
-        phase_noise_cfg=pn_cfg,
         ola_filter_span=8, ola_block_size=1024, seed=42,
     )
-    pn_evms = [cr["evm_rms"] for cr in with_pn["carriers"]]
-    for base_evm, pn_evm, cr in zip(base_evms, pn_evms, with_pn["carriers"]):
-        assert pn_evm > base_evm * 2.0, (
-            f"Phase noise should at least double EVM on '{cr['name']}': "
-            f"baseline {base_evm:.2f}% -> with phase noise {pn_evm:.2f}%"
-        )
+    pn_evms = {cr["name"]: cr["evm_rms"] for cr in with_pn["carriers"]}
+    assert pn_evms["c1"] > base_evms["c1"] * 2.0, (
+        f"Phase noise should at least double EVM on c1: "
+        f"baseline {base_evms['c1']:.2f}% -> with PN {pn_evms['c1']:.2f}%"
+    )
+    # c2 has no [phase_noise] block → its EVM stays at the baseline.
+    assert abs(pn_evms["c2"] - base_evms["c2"]) < 0.5, (
+        f"c2 has no phase_noise block and should match baseline EVM: "
+        f"baseline {base_evms['c2']:.2f}% vs got {pn_evms['c2']:.2f}%"
+    )
 
 
 def test_distortion_increases_with_drive():

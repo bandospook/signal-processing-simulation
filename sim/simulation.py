@@ -104,7 +104,6 @@ def wideband_bpsk_simulation(carriers: list[dict],
                               max_block_size_samples: int,
                               input_backoff_db: float = 0.0,
                               noise_density_dbfs: float | None = None,
-                              phase_noise_cfg: dict | None = None,
                               ola_filter_span: int = 16,
                               ola_block_size: int = 4096,
                               seed: int | None = None,
@@ -202,11 +201,14 @@ def wideband_bpsk_simulation(carriers: list[dict],
         # the carrier's own native bandwidth right after the channel filter
         # and before the OLA upsample / wideband stage.  Reproducible via a
         # per-carrier-derived RNG so reruns of the same seed see the same φ(t).
-        if phase_noise_cfg is not None:
+        # The spec is part of the carrier config — each carrier can have its
+        # own oscillator characteristic.
+        pn_cfg = carr.get("phase_noise")
+        if pn_cfg is not None and pn_cfg.get("enabled", True):
             pn_rng = np.random.default_rng(int(per_carrier_seeds[i]) ^ 0x5A5A_5A5A)
             bb_ch = apply_phase_noise(
                 bb_ch, native_rate,
-                phase_noise_cfg["offset_hz"], phase_noise_cfg["dbc_per_hz"],
+                pn_cfg["offset_hz"], pn_cfg["dbc_per_hz"],
                 pn_rng,
             )
 

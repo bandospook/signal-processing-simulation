@@ -41,19 +41,23 @@ class Field:
       "float"             StringVar + Entry, parsed as float.
       "float_optional"    StringVar + Entry; blank → omitted from cfg.
       "str" / "path"      StringVar + Entry; "path" adds a Browse… button.
+      "str_enum"          StringVar + Combobox limited to ``options``.
       "bool"              BooleanVar + Checkbutton (label is button text).
       "float_list"        StringVar + Entry of comma-separated floats.
       "float_list_text"   tk.Text widget (label above, multi-line capable).
 
-    ``default`` is used by populate when the cfg value is missing; for
-    "float_optional" a missing / None value maps to an empty input instead.
+    ``options`` is the allowed value list for ``"str_enum"`` (ignored for
+    other types).  ``default`` is used by populate when the cfg value is
+    missing; for "float_optional" a missing / None value maps to an empty
+    input instead.
     """
     path:    tuple[str, ...]
     label:   str
     type:    str
-    default: object = None
-    tip:     str    = ""
-    width:   int    = 20
+    default: object         = None
+    tip:     str            = ""
+    width:   int            = 20
+    options: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -67,13 +71,17 @@ class Section:
     ``description`` renders as a gray paragraph between the title and the
     fields.  ``separator`` toggles the horizontal rule under the title:
     True for the General / Sweep style, False for the Amplifier style
-    (bold title only, no rule).
+    (bold title only, no rule).  ``right_col_padx`` overrides the padx
+    applied to the right-column label in two-column layouts; the General
+    tab uses (16, 4) for a wider gap between groups, the Carrier sub-grid
+    uses (0, 4) for a tighter look.
     """
-    title:       str
-    fields:      tuple[Field, ...]
-    columns:     int  = 2     # 1 = stacked, 2 = label/entry pairs side by side
-    description: str  = ""
-    separator:   bool = True
+    title:          str
+    fields:         tuple[Field, ...]
+    columns:        int             = 2
+    description:    str             = ""
+    separator:      bool            = True
+    right_col_padx: tuple[int, int] = (16, 4)
 
 
 @dataclass(frozen=True)
@@ -233,9 +241,6 @@ def _scrollable(parent) -> ttk.Frame:
 
 # ── Schema-driven rendering and (de)serialisation ────────────────────────────
 
-_L_PAD_RIGHT = (16, 4)   # padx on right-column labels (separates the two groups)
-
-
 def _make_browse_cb(var: tk.StringVar):
     """Standard directory-picker callback for "path"-typed fields."""
     def _cb():
@@ -245,15 +250,41 @@ def _make_browse_cb(var: tk.StringVar):
     return _cb
 
 
+def _render_scalar(parent, fld: Field, row: int, col: int,
+                   variables: dict[str, tk.Variable],
+                   *, right_col_padx: tuple[int, int] = (16, 4)) -> None:
+    """Render one single-row label+widget pair at (row, col..col+1).
+
+    Supports every "scalar" field type — int / float / float_optional / str /
+    path / str_enum / float_list (all use a StringVar).  Used by both the
+    columns=2 layout in `_render_section` and the single-row branch of
+    `_render_field`.
+    """
+    padx_kw = {} if col == 0 else {"padx": right_col_padx}
+    _lf(parent, fld.label + ":", row, col, **padx_kw)
+    var = tk.StringVar()
+    variables[fld.key] = var
+    if fld.type == "str_enum":
+        cb = ttk.Combobox(parent, textvariable=var, values=list(fld.options),
+                           state="readonly", width=fld.width)
+        cb.grid(row=row, column=col + 1, sticky="w", pady=2)
+        if fld.tip: _Tip(cb, fld.tip)
+        return
+    if fld.type == "path":
+        row_frame = ttk.Frame(parent)
+        row_frame.grid(row=row, column=col + 1, sticky="w")
+        _ent(row_frame, var, 0, 0, width=fld.width, tip=fld.tip)
+        ttk.Button(row_frame, text="Browse…", width=8,
+                   command=_make_browse_cb(var)).grid(row=0, column=1, padx=4)
+        return
+    _ent(parent, var, row, col + 1, width=fld.width, tip=fld.tip)
+
+
 def _render_field(parent, fld: Field, row: int,
                   variables: dict[str, tk.Variable],
                   texts: dict[str, tk.Text]) -> int:
     """Create the widget(s) for one Field, register the binding, and return
-    the next free row.  Variables/Texts dicts are mutated.
-
-    Used by the columns=1 layout in `_render_section`; the columns=2 layout
-    is restricted to single-row scalar fields and inlines its own creation.
-    """
+    the next free row.  Used by columns=1 sections."""
     if fld.type == "bool":
         var = tk.BooleanVar(value=bool(fld.default))
         variables[fld.key] = var
@@ -272,21 +303,7 @@ def _render_field(parent, fld: Field, row: int,
         if fld.tip: _Tip(t, fld.tip)
         return row + 2
 
-    # All remaining types (int/float/float_optional/str/path/float_list)
-    # use a StringVar + Entry.  "path" adds a Browse… button to the right.
-    var = tk.StringVar()
-    variables[fld.key] = var
-    if fld.type == "path":
-        _lf(parent, fld.label + ":", row, 0)
-        row_frame = ttk.Frame(parent)
-        row_frame.grid(row=row, column=1, sticky="w")
-        _ent(row_frame, var, 0, 0, width=fld.width, tip=fld.tip)
-        ttk.Button(row_frame, text="Browse…", width=8,
-                   command=_make_browse_cb(var)).grid(row=0, column=1, padx=4)
-        return row + 1
-
-    _lf(parent, fld.label + ":", row, 0)
-    _ent(parent, var, row, 1, width=fld.width, tip=fld.tip)
+    _render_scalar(parent, fld, row, 0, variables)
     return row + 1
 
 
@@ -298,21 +315,12 @@ def _render_section(parent, sec: Section, section_row: int,
     by `_render_tab`; this only handles the fields."""
     if sec.columns == 2:
         # Pair scalar fields into (label, entry) (label, entry) on one row.
-        # This layout only accepts single-row scalar types; verified at the
-        # schema layer by the field type set used in _GENERAL_TAB.
         for i in range(0, len(sec.fields), 2):
-            left = sec.fields[i]
-            var_l = tk.StringVar()
-            variables[left.key] = var_l
-            _lf(parent, left.label + ":", section_row, 0)
-            _ent(parent, var_l, section_row, 1, width=left.width, tip=left.tip)
+            _render_scalar(parent, sec.fields[i], section_row, 0, variables,
+                           right_col_padx=sec.right_col_padx)
             if i + 1 < len(sec.fields):
-                right = sec.fields[i + 1]
-                var_r = tk.StringVar()
-                variables[right.key] = var_r
-                _lf(parent, right.label + ":", section_row, 2, padx=_L_PAD_RIGHT)
-                _ent(parent, var_r, section_row, 3,
-                     width=right.width, tip=right.tip)
+                _render_scalar(parent, sec.fields[i + 1], section_row, 2,
+                               variables, right_col_padx=sec.right_col_padx)
             section_row += 1
         return section_row
     # columns=1: dispatch each field to _render_field, which knows how to
@@ -351,10 +359,18 @@ def _render_tab(nb, schema: Tab,
         inner.columnconfigure(3, weight=1)
 
 
-def _walk_fields(schema: Tab):
-    """Yield every Field in a Tab schema, flattening across sections."""
-    for sec in schema.sections:
-        yield from sec.fields
+def _walk_fields(schema):
+    """Yield every Field in a Tab or Section schema.
+
+    Accepting either lets the same populate / collect helpers walk a
+    full tab (Tab → many sections) and a single carrier sub-section
+    (Section → its fields).
+    """
+    if hasattr(schema, "sections"):
+        for sec in schema.sections:
+            yield from sec.fields
+    else:
+        yield from schema.fields
 
 
 def _cfg_get(cfg: dict, path: tuple[str, ...]):
@@ -375,7 +391,7 @@ def _cfg_set(cfg: dict, path: tuple[str, ...], value) -> None:
     d[path[-1]] = value
 
 
-def _populate_from_schema(schema: Tab, cfg: dict,
+def _populate_from_schema(schema, cfg: dict,
                           variables: dict[str, tk.Variable],
                           texts: dict[str, tk.Text]) -> None:
     """Read each field's cfg value and push the formatted form into its
@@ -415,7 +431,7 @@ def _populate_from_schema(schema: Tab, cfg: dict,
             var.set(str(raw))
 
 
-def _collect_from_schema(schema: Tab,
+def _collect_from_schema(schema,
                          variables: dict[str, tk.Variable],
                          texts: dict[str, tk.Text],
                          cfg: dict) -> None:
@@ -584,38 +600,97 @@ _AMPLIFIER_TAB = Tab(
 )
 
 
+# ── Carrier sub-schemas ──────────────────────────────────────────────────────
+#
+# CarrierFrame is one tk.LabelFrame per [[carrier]] block in the TOML.  Its
+# main scalar fields and the optional Channel / Phase-noise sub-sections all
+# flow through the schema helpers; only the FEC sub-section is still
+# hand-coded (the LDPC-matrix field's dynamic visibility doesn't fit the
+# schema's flat Field model yet).
+#
+# Field paths are single-element because they live inside the carrier dict
+# (e.g. the carrier name is at ``carr_dict["name"]``, not at any deeper path).
+
+_MODULATIONS: tuple[str, ...] = (
+    "BPSK", "DBPSK", "MSK", "QPSK", "OQPSK",
+    "8PSK", "16QAM", "16APSK", "32APSK",
+)
+
+_CARRIER_MAIN_FIELDS = Section(
+    title="(carrier main fields — title is set per-instance)",
+    columns=2, separator=False, right_col_padx=(0, 4),
+    fields=(
+        Field(("name",), "Name", "str", default="carrier", width=14,
+              tip="Unique identifier for this carrier. "
+                  "Used in output reports and seeker results."),
+        Field(("modulation",), "Modulation", "str_enum", default="BPSK", width=12,
+              options=_MODULATIONS,
+              tip="Modulation scheme: BPSK, DBPSK, MSK, QPSK, OQPSK, "
+                  "8PSK, 16QAM, 16APSK, 32APSK"),
+        Field(("symbol_rate",), "Symbol Rate (MHz)", "float", default=1.0, width=14,
+              tip="Symbol rate in MHz (megabaud). "
+                  "Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
+        Field(("sps",), "SPS", "int", default=4, width=14,
+              tip="Samples per symbol at the wideband composite sample rate. "
+                  "Integer ≥ 2; typical value: 4."),
+        Field(("rolloff",), "Roll-off", "float", default=0.35, width=14,
+              tip="RRC filter roll-off factor α (0 – 1). "
+                  "Higher = wider occupied bandwidth, lower peak ISI."),
+        Field(("filter_span",), "Filter Span", "int", default=8, width=14,
+              tip="RRC filter half-span in symbols. "
+                  "Total taps = filter_span × sps + 1."),
+        Field(("power_db",), "Power (dB)", "float", default=0.0, width=14,
+              tip="Carrier power in dBFS relative to the wideband composite "
+                  "full-scale."),
+        Field(("freq",), "Freq (MHz)", "float", default=0.0, width=14,
+              tip="Carrier centre frequency offset from DC (MHz). "
+                  "Negative = below centre frequency."),
+    ),
+)
+
+_CARRIER_CHANNEL_FIELDS = Section(
+    title="(channel impairments)",
+    columns=2, separator=False, right_col_padx=(0, 4),
+    fields=(
+        Field(("ripple_db",), "Ripple (dB)", "float", default=0.5, width=14,
+              tip="Peak-to-peak amplitude ripple across the carrier "
+                  "bandwidth (dB)."),
+        Field(("ripple_cycles",), "Ripple Cycles", "float", default=2.0, width=14,
+              tip="Number of full ripple cycles across the carrier bandwidth."),
+        Field(("max_phase_dev_deg",), "Max Phase (°)", "float",
+              default=5.0, width=14,
+              tip="Maximum deviation from linear phase across the carrier "
+                  "bandwidth (degrees)."),
+        Field(("phase_poly_order",), "Phase Poly Order", "int",
+              default=2, width=14,
+              tip="Order of the polynomial used to model the phase-vs-"
+                  "frequency distortion."),
+    ),
+)
+
+_CARRIER_PHASE_NOISE_FIELDS = Section(
+    title="(phase noise mask)",
+    columns=1, separator=False,
+    fields=(
+        Field(("offset_hz",), "Offset (Hz, comma-separated)",
+              "float_list_text"),
+        Field(("dbc_per_hz",), "L(f) (dBc/Hz, comma-separated)",
+              "float_list_text"),
+    ),
+)
+
+
 # ── CarrierFrame ──────────────────────────────────────────────────────────────
 
 class CarrierFrame(ttk.LabelFrame):
-    _MAIN = [
-        ("name",        "Name",             "str",   "carrier",
-         "Unique identifier for this carrier. Used in output reports and seeker results."),
-        ("modulation",  "Modulation",       "str",   "BPSK",
-         "Modulation scheme: BPSK, DBPSK, MSK, QPSK, OQPSK, 8PSK, 16QAM, 16APSK, 32APSK"),
-        ("symbol_rate", "Symbol Rate (MHz)", "float", "1",
-         "Symbol rate in MHz (megabaud). Occupied bandwidth ≈ symbol_rate × (1 + rolloff)."),
-        ("sps",         "SPS",              "int",   "4",
-         "Samples per symbol at the wideband composite sample rate. Integer ≥ 2; typical value: 4."),
-        ("rolloff",     "Roll-off",         "float", "0.35",
-         "RRC filter roll-off factor α (0 – 1). Higher = wider occupied bandwidth, lower peak ISI."),
-        ("filter_span", "Filter Span",      "int",   "8",
-         "RRC filter half-span in symbols. Total taps = filter_span × sps + 1."),
-        ("power_db",    "Power (dB)",       "float", "0.0",
-         "Carrier power in dBFS relative to the wideband composite full-scale."),
-        ("freq",        "Freq (MHz)",       "float", "0.0",
-         "Carrier centre frequency offset from DC (MHz). Negative = below centre frequency."),
-    ]
+    """One [[carrier]] block, rendered as a tk.LabelFrame.
+
+    Main scalar fields and the optional Channel / Phase-noise sub-sections
+    are driven by the schemas at module scope; FEC coding is still
+    hand-coded because the LDPC-matrix field's dynamic visibility doesn't
+    fit the schema's flat Field model.
+    """
     _CODING_SCHEMES = ["convolutional", "concatenated", "turbo", "ldpc"]
-    _CH = [
-        ("ripple_db",         "Ripple (dB)",      "float", "0.5",
-         "Peak-to-peak amplitude ripple across the carrier bandwidth (dB)."),
-        ("ripple_cycles",     "Ripple Cycles",    "float", "2.0",
-         "Number of full ripple cycles across the carrier bandwidth."),
-        ("max_phase_dev_deg", "Max Phase (°)",    "float", "5.0",
-         "Maximum deviation from linear phase across the carrier bandwidth (degrees)."),
-        ("phase_poly_order",  "Phase Poly Order", "int",   "2",
-         "Order of the polynomial used to model the phase-vs-frequency distortion."),
-    ]
 
     def __init__(self, parent, on_remove, data: dict, **kw):
         super().__init__(parent, text=data.get("name", "carrier"), padding=6, **kw)
@@ -647,31 +722,20 @@ class CarrierFrame(ttk.LabelFrame):
         ttk.Button(self, text="Remove", command=self._on_remove,
                    width=8).grid(row=0, column=3, sticky="ne", padx=2)
 
-        # Main parameter fields (2-column grid)
-        _MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
-        for i, (key, label, _, dflt, tip) in enumerate(self._MAIN):
-            raw = d.get(key, dflt)
-            var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
-            self._vars[key] = var
-            r, c = (i // 2) + 1, (i % 2) * 2
-            _lf(self, label + ":", r, c)
-            if key == "modulation":
-                cb = ttk.Combobox(self, textvariable=var, values=_MODS,
-                                  state="readonly", width=12)
-                cb.grid(row=r, column=c + 1, sticky="w", pady=2)
-                if tip:
-                    _Tip(cb, tip)
-            else:
-                _ent(self, var, r, c + 1, width=14, tip=tip)
-            if key == "name":
-                var.trace_add("write",
-                              lambda *_, v=var: self.configure(text=v.get() or "carrier"))
+        # Main parameter fields — schema-driven 2-column grid starting at row 1.
+        # No float_list_text fields here, so the texts dict slot stays empty.
+        next_row = _render_section(self, _CARRIER_MAIN_FIELDS, 1, self._vars, {})
+        _populate_from_schema(_CARRIER_MAIN_FIELDS, d, self._vars, {})
+        # Carrier-specific behavior: name field updates the LabelFrame title.
+        name_var = self._vars["name"]
+        name_var.trace_add("write",
+                            lambda *_, v=name_var: self.configure(
+                                text=str(v.get()) or "carrier"))
 
-        n_main_rows = (len(self._MAIN) + 1) // 2  # ceil(9/2) = 5
-        check_row   = n_main_rows + 1              # row 6
-        cod_row     = check_row + 1                # row 7
-        ch_row      = cod_row + 2                  # row 9
-        pn_row      = ch_row + 2                   # row 11
+        check_row = next_row + 1                   # blank row above checkboxes
+        cod_row   = check_row + 1
+        ch_row    = cod_row + 2
+        pn_row    = ch_row + 2
 
         # ── Enable checkboxes ────────────────────────────────────────────────
         ttk.Checkbutton(self, text="Include in wideband",
@@ -788,29 +852,32 @@ class CarrierFrame(ttk.LabelFrame):
             self._ch_frame.grid_remove()
 
     def _snapshot_ch(self) -> dict:
-        """Read current channel-impairment widget values into a dict."""
+        """Read current channel-impairment widget values into a dict.
+
+        Lenient: empty or unparseable fields are skipped so toggling the
+        section off mid-edit can never crash.
+        """
         out: dict = {}
-        for key, _, typ, _, _ in self._CH:
-            if key not in self._ch_vars: continue
-            raw = self._ch_vars[key].get().strip()
+        for fld in _walk_fields(_CARRIER_CHANNEL_FIELDS):
+            if fld.key not in self._ch_vars: continue
+            raw = str(self._ch_vars[fld.key].get()).strip()
             if not raw: continue
             try:
-                out[key] = (int(float(raw)) if typ == "int"
-                            else float(raw) if typ == "float" else raw)
+                out[fld.path[0]] = (int(float(raw)) if fld.type == "int"
+                                     else float(raw) if fld.type == "float"
+                                     else raw)
             except ValueError:
-                out[key] = raw       # keep bad value verbatim for re-display
+                out[fld.path[0]] = raw     # keep bad value verbatim for re-display
         return out
 
     def _populate_ch(self, ch: dict):
         for w in self._ch_frame.winfo_children(): w.destroy()
         self._ch_vars.clear()
-        for i, (key, label, _, dflt, tip) in enumerate(self._CH):
-            raw = ch.get(key, dflt)
-            var = tk.StringVar(value=_fmt(raw) if isinstance(raw, (int, float)) else str(raw))
-            self._ch_vars[key] = var
-            r, c = (i // 2) + 1, (i % 2) * 2
-            _lf(self._ch_frame, label + ":", r, c)
-            _ent(self._ch_frame, var, r, c + 1, width=14, tip=tip)
+        # Schema-driven render starting at row 1 (matches the original
+        # one-row top padding inside _ch_frame).
+        _render_section(self._ch_frame, _CARRIER_CHANNEL_FIELDS, 1,
+                         self._ch_vars, {})
+        _populate_from_schema(_CARRIER_CHANNEL_FIELDS, ch, self._ch_vars, {})
 
     def _toggle_pn(self):
         if self._has_pn.get():
@@ -825,12 +892,10 @@ class CarrierFrame(ttk.LabelFrame):
     def _snapshot_pn(self) -> dict:
         """Read current phase-noise mask values into a dict."""
         out: dict = {}
-        if "offset_hz" in self._pn_texts:
-            offs = _parse_float_list(self._pn_texts["offset_hz"].get("1.0", "end"))
-            if offs: out["offset_hz"] = offs
-        if "dbc_per_hz" in self._pn_texts:
-            dbcs = _parse_float_list(self._pn_texts["dbc_per_hz"].get("1.0", "end"))
-            if dbcs: out["dbc_per_hz"] = dbcs
+        for fld in _walk_fields(_CARRIER_PHASE_NOISE_FIELDS):
+            if fld.key not in self._pn_texts: continue
+            val = _parse_float_list(self._pn_texts[fld.key].get("1.0", "end"))
+            if val: out[fld.path[0]] = val
         return out
 
     def _populate_pn(self, pn: dict):
@@ -839,38 +904,27 @@ class CarrierFrame(ttk.LabelFrame):
         global section."""
         for w in self._pn_frame.winfo_children(): w.destroy()
         self._pn_texts.clear()
-        for r, (key, label, default) in enumerate((
-            ("offset_hz",  "Offset (Hz, comma-separated):",     pn.get("offset_hz", [])),
-            ("dbc_per_hz", "L(f) (dBc/Hz, comma-separated):",   pn.get("dbc_per_hz", [])),
-        )):
-            ttk.Label(self._pn_frame, text=label, foreground="gray").grid(
-                row=2 * r, column=0, columnspan=4, sticky="w")
-            t = tk.Text(self._pn_frame, height=1, width=64, wrap="word",
-                         font=("Consolas", 9))
-            t.grid(row=2 * r + 1, column=0, columnspan=4, sticky="ew", pady=2)
-            if default:
-                t.insert("1.0", ", ".join(_fmt(x) for x in default))
-            self._pn_texts[key] = t
+        _render_section(self._pn_frame, _CARRIER_PHASE_NOISE_FIELDS, 0,
+                         {}, self._pn_texts)
+        _populate_from_schema(_CARRIER_PHASE_NOISE_FIELDS, pn,
+                              {}, self._pn_texts)
 
     def to_dict(self) -> dict:
-        d = {}
-        for key, _, typ, _, _ in self._MAIN:
-            raw = self._vars[key].get().strip()
-            d[key] = (int(float(raw)) if typ == "int"
-                      else float(raw) if typ == "float" else raw)
+        d: dict = {}
+        _collect_from_schema(_CARRIER_MAIN_FIELDS, self._vars, {}, d)
         d["enabled"]     = bool(self._enabled.get())
         d["sweep_demod"] = bool(self._sweep_demod.get())
 
+        # FEC coding — still hand-coded; the LDPC-matrix dynamic visibility
+        # doesn't fit the schema's flat Field model yet.
         if self._has_coding.get() and self._coding_vars:
             cod: dict = {}
             scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
             if scheme:
                 cod["scheme"] = scheme
             raw = self._coding_vars.get("block_length", tk.StringVar()).get().strip()
-            try:
-                cod["block_length"] = int(float(raw))
-            except ValueError:
-                pass
+            try:               cod["block_length"] = int(float(raw))
+            except ValueError: pass
             matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
             if matrix:
                 cod["matrix"] = matrix
@@ -879,22 +933,15 @@ class CarrierFrame(ttk.LabelFrame):
 
         if self._has_ch.get() and self._ch_vars:
             ch: dict = {}
-            for key, _, typ, _, _ in self._CH:
-                if key not in self._ch_vars: continue
-                raw = self._ch_vars[key].get().strip()
-                ch[key] = (int(float(raw)) if typ == "int"
-                           else float(raw) if typ == "float" else raw)
+            _collect_from_schema(_CARRIER_CHANNEL_FIELDS, self._ch_vars, {}, ch)
             d["channel"] = ch
 
         if self._has_pn.get() and self._pn_texts:
-            offs = _parse_float_list(self._pn_texts["offset_hz"].get("1.0", "end"))
-            dbcs = _parse_float_list(self._pn_texts["dbc_per_hz"].get("1.0", "end"))
-            if offs or dbcs:
-                d["phase_noise"] = {
-                    "enabled":    True,
-                    "offset_hz":  offs,
-                    "dbc_per_hz": dbcs,
-                }
+            pn: dict = {}
+            _collect_from_schema(_CARRIER_PHASE_NOISE_FIELDS,
+                                  {}, self._pn_texts, pn)
+            if pn.get("offset_hz") or pn.get("dbc_per_hz"):
+                d["phase_noise"] = {"enabled": True, **pn}
         return d
 
 

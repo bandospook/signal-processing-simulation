@@ -110,70 +110,66 @@ def _lit(v) -> str:
 def _arr(lst) -> str:
     return "[" + ", ".join(_lit(x) for x in lst) + "]"
 
+
+# Top-level table emission order: (TOML header, cfg path).  Tables absent
+# from cfg are skipped.
+_TOML_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("simulation",      ("simulation",)),
+    ("sweep",           ("sweep",)),
+    ("amplifier.am_am", ("amplifier", "am_am")),
+    ("amplifier.am_pm", ("amplifier", "am_pm")),
+    ("ola",             ("ola",)),
+    ("output",          ("output",)),
+)
+
+# Carrier scalar keys, in emission order, followed by the optional sub-tables.
+_CARRIER_MAIN_KEYS: tuple[str, ...] = (
+    "name", "modulation", "symbol_rate", "sps", "rolloff",
+    "filter_span", "power_db", "freq", "enabled", "sweep_demod",
+)
+_CARRIER_SUB_TABLES: tuple[str, ...] = ("coding", "channel", "phase_noise")
+
+
+def _emit_table(L: list[str], header: str, d: dict,
+                keys: tuple[str, ...] | None = None) -> None:
+    """Append a `header` line followed by ``key = value`` lines, with keys
+    padded so the ``=`` signs align within the table.  None-valued keys are
+    skipped; `keys` (when given) restricts and orders the emitted keys,
+    otherwise the dict's own key order is used.  List values render as
+    inline arrays."""
+    chosen = [k for k in (keys or tuple(d.keys()))
+              if k in d and d[k] is not None]
+    L.append(header)
+    width = max((len(k) for k in chosen), default=0)
+    for k in chosen:
+        v = d[k]
+        rhs = _arr(v) if isinstance(v, list) else _lit(v)
+        L.append(f"{k:<{width}} = {rhs}")
+
+
 def build_toml(cfg: dict) -> str:
-    L = []
-    def ln(s=""): L.append(s)
-    def kv(k, v, w=0): L.append(f"{k:<{w}} = {_lit(v)}")
-    def kva(k, v, w=0): L.append(f"{k:<{w}} = {_arr(v)}")
+    """Serialise a config dict to TOML text with aligned, sectioned output.
 
-    sim = cfg["simulation"]
-    ln("[simulation]")
-    kv("seed                  ", sim["seed"])
-    kv("max_block_size_samples", sim["max_block_size_samples"])
-    kv("target_ci_half_width  ", sim["target_ci_half_width"])
-    if sim.get("target_ci_relative") is not None:
-        kv("target_ci_relative    ", sim["target_ci_relative"])
-    kv("confidence            ", sim["confidence"])
-    kv("min_errors            ", sim["min_errors"])
-    kv("max_iterations        ", sim["max_iterations"])
-    ln()
-
-    sw = cfg["sweep"]
-    ln("[sweep]")
-    kv("sample_rate       ", sw["sample_rate"])
-    kva("ibo_db            ", sw.get("ibo_db", []))
-    kva("noise_density_dbfs", sw.get("noise_density_dbfs", []))
-    ln()
-
-    amp = cfg["amplifier"]
-    ln("[amplifier.am_am]")
-    kva("input ", amp["am_am"]["input"]);  kva("output", amp["am_am"]["output"]);  ln()
-    ln("[amplifier.am_pm]")
-    kva("input    ", amp["am_pm"]["input"]);  kva("phase_deg", amp["am_pm"]["phase_deg"]);  ln()
-
-    ln("[ola]")
-    kv("filter_span", cfg["ola"]["filter_span"], 12)
-    kv("block_size ", cfg["ola"]["block_size"],  12)
-    ln()
-
-    o = cfg.get("output", {})
-    ln("[output]")
-    kv("output_dir", o.get("output_dir", "."), 10)
-    kv("plots     ", bool(o.get("plots", True)))
-    ln()
+    Emits the fixed top-level tables (in `_TOML_TABLES` order) followed by
+    one `[[carrier]]` block per carrier, each with its optional
+    `[carrier.coding]` / `[carrier.channel]` / `[carrier.phase_noise]`
+    sub-tables.  Generic over the cfg contents — no per-field code.
+    """
+    L: list[str] = []
+    for header, path in _TOML_TABLES:
+        section = _cfg_get(cfg, path)
+        if isinstance(section, dict):
+            _emit_table(L, f"[{header}]", section)
+            L.append("")
 
     for carr in cfg.get("carrier", []):
-        ln("[[carrier]]")
-        for k in ("name", "modulation", "symbol_rate", "sps", "rolloff", "filter_span",
-                  "power_db", "freq", "enabled", "sweep_demod"):
-            if k in carr:
-                kv(f"{k:12}", carr[k])
-        cod = carr.get("coding")
-        if cod:
-            ln();  ln("[carrier.coding]")
-            for k, v in cod.items():
-                kv(f"{k:14}", v)
-        ch = carr.get("channel")
-        if ch:
-            ln();  ln("[carrier.channel]")
-            for k, v in ch.items():
-                (kva if isinstance(v, list) else kv)(f"{k:22}", v)
-        pn = carr.get("phase_noise")
-        if pn:
-            ln();  ln("[carrier.phase_noise]")
-            for k, v in pn.items():
-                (kva if isinstance(v, list) else kv)(f"{k:11}", v)
-        ln()
+        _emit_table(L, "[[carrier]]", carr, _CARRIER_MAIN_KEYS)
+        for sub in _CARRIER_SUB_TABLES:
+            sub_d = carr.get(sub)
+            if isinstance(sub_d, dict) and sub_d:
+                L.append("")
+                _emit_table(L, f"[carrier.{sub}]", sub_d)
+        L.append("")
 
     return "\n".join(L)
 

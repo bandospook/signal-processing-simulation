@@ -50,14 +50,22 @@ class Field:
     other types).  ``default`` is used by populate when the cfg value is
     missing; for "float_optional" a missing / None value maps to an empty
     input instead.
+
+    ``visible_when`` gates rendering on another field's current value.
+    Format: ``(controller_path, allowed_values)`` — e.g.
+    ``(("scheme",), ("ldpc",))`` means "show only when the field at path
+    ``('scheme',)`` in the same section holds the value ``'ldpc'``".  The
+    renderer wires a trace on the controller var so the gated widgets
+    show/hide live.  ``None`` (the default) means always visible.
     """
     path:    tuple[str, ...]
     label:   str
     type:    str
-    default: object         = None
-    tip:     str            = ""
-    width:   int            = 20
-    options: tuple[str, ...] = ()
+    default: object                                                       = None
+    tip:     str                                                          = ""
+    width:   int                                                          = 20
+    options: tuple[str, ...]                                              = ()
+    visible_when: tuple[tuple[str, ...], tuple[str, ...]] | None          = None
 
     @property
     def key(self) -> str:
@@ -213,7 +221,9 @@ class _Tip:
 def _lf(parent, text, row, col, **kw):
     kw.setdefault("padx", (0, 4))
     kw.setdefault("pady", 2)
-    ttk.Label(parent, text=text).grid(row=row, column=col, sticky="w", **kw)
+    lbl = ttk.Label(parent, text=text)
+    lbl.grid(row=row, column=col, sticky="w", **kw)
+    return lbl
 
 def _ent(parent, var, row, col, width=18, tip="", **kw):
     e = ttk.Entry(parent, textvariable=var, width=width)
@@ -252,16 +262,21 @@ def _make_browse_cb(var: tk.StringVar):
 
 def _render_scalar(parent, fld: Field, row: int, col: int,
                    variables: dict[str, tk.Variable],
-                   *, right_col_padx: tuple[int, int] = (16, 4)) -> None:
+                   *, right_col_padx: tuple[int, int] = (16, 4),
+                   tracker: dict[str, tuple[tk.Widget, ...]] | None = None) -> None:
     """Render one single-row label+widget pair at (row, col..col+1).
 
     Supports every "scalar" field type — int / float / float_optional / str /
     path / str_enum / float_list (all use a StringVar).  Used by both the
     columns=2 layout in `_render_section` and the single-row branch of
     `_render_field`.
+
+    If ``tracker`` is provided, the field's (label, input-widget) pair is
+    stored at ``tracker[fld.key]`` so `_wire_visibility` can grid_remove() /
+    grid() them when a controlling field changes.
     """
     padx_kw = {} if col == 0 else {"padx": right_col_padx}
-    _lf(parent, fld.label + ":", row, col, **padx_kw)
+    lbl = _lf(parent, fld.label + ":", row, col, **padx_kw)
     var = tk.StringVar()
     variables[fld.key] = var
     if fld.type == "str_enum":
@@ -269,6 +284,7 @@ def _render_scalar(parent, fld: Field, row: int, col: int,
                            state="readonly", width=fld.width)
         cb.grid(row=row, column=col + 1, sticky="w", pady=2)
         if fld.tip: _Tip(cb, fld.tip)
+        if tracker is not None: tracker[fld.key] = (lbl, cb)
         return
     if fld.type == "path":
         row_frame = ttk.Frame(parent)
@@ -276,8 +292,10 @@ def _render_scalar(parent, fld: Field, row: int, col: int,
         _ent(row_frame, var, 0, 0, width=fld.width, tip=fld.tip)
         ttk.Button(row_frame, text="Browse…", width=8,
                    command=_make_browse_cb(var)).grid(row=0, column=1, padx=4)
+        if tracker is not None: tracker[fld.key] = (lbl, row_frame)
         return
-    _ent(parent, var, row, col + 1, width=fld.width, tip=fld.tip)
+    ent = _ent(parent, var, row, col + 1, width=fld.width, tip=fld.tip)
+    if tracker is not None: tracker[fld.key] = (lbl, ent)
 
 
 def _render_field(parent, fld: Field, row: int,
@@ -307,26 +325,52 @@ def _render_field(parent, fld: Field, row: int,
     return row + 1
 
 
+def _wire_visibility(sec: Section, variables: dict[str, tk.Variable],
+                     tracker: dict[str, tuple[tk.Widget, ...]]) -> None:
+    """For each gated field, set up a trace on the controlling var so the
+    field's widgets show/hide live as the controller's value changes."""
+    for fld in _walk_fields(sec):
+        if fld.visible_when is None:
+            continue
+        ctrl_path, allowed = fld.visible_when
+        ctrl_key = ".".join(ctrl_path)
+        widgets = tracker.get(fld.key)
+        if ctrl_key not in variables or not widgets:
+            continue
+        def _update(*_, _ws=widgets, _ctrl=ctrl_key, _allowed=allowed):
+            value = str(variables[_ctrl].get())
+            for w in _ws:
+                if value in _allowed: w.grid()
+                else:                 w.grid_remove()
+        variables[ctrl_key].trace_add("write", _update)
+        _update()    # apply initial visibility
+
+
 def _render_section(parent, sec: Section, section_row: int,
                     variables: dict[str, tk.Variable],
                     texts: dict[str, tk.Text]) -> int:
     """Render one Section onto `parent` starting at `section_row`; return
     the next free row.  Section title / separator / description are drawn
-    by `_render_tab`; this only handles the fields."""
+    by `_render_tab`; this only handles the fields and any visible_when
+    gating defined on them."""
+    tracker: dict[str, tuple[tk.Widget, ...]] = {}
     if sec.columns == 2:
         # Pair scalar fields into (label, entry) (label, entry) on one row.
         for i in range(0, len(sec.fields), 2):
             _render_scalar(parent, sec.fields[i], section_row, 0, variables,
-                           right_col_padx=sec.right_col_padx)
+                           right_col_padx=sec.right_col_padx, tracker=tracker)
             if i + 1 < len(sec.fields):
                 _render_scalar(parent, sec.fields[i + 1], section_row, 2,
-                               variables, right_col_padx=sec.right_col_padx)
+                               variables, right_col_padx=sec.right_col_padx,
+                               tracker=tracker)
             section_row += 1
+        _wire_visibility(sec, variables, tracker)
         return section_row
     # columns=1: dispatch each field to _render_field, which knows how to
     # lay out every supported type (including multi-row text widgets).
     for fld in sec.fields:
         section_row = _render_field(parent, fld, section_row, variables, texts)
+    _wire_visibility(sec, variables, tracker)
     return section_row
 
 
@@ -438,9 +482,16 @@ def _collect_from_schema(schema,
     """Read each binding, parse per the field's type, and write into `cfg`.
 
     Empty ``float_optional`` values are omitted from `cfg` so the caller's
-    TOML writer doesn't emit a key the user left blank.
+    TOML writer doesn't emit a key the user left blank.  A gated field whose
+    ``visible_when`` controller doesn't currently match is skipped entirely —
+    a hidden field never contributes to the output.
     """
     for fld in _walk_fields(schema):
+        if fld.visible_when is not None:
+            ctrl_path, allowed = fld.visible_when
+            ctrl_key = ".".join(ctrl_path)
+            if ctrl_key in variables and str(variables[ctrl_key].get()) not in allowed:
+                continue
         if fld.type == "float_list_text":
             _cfg_set(cfg, fld.path,
                      _parse_float_list(texts[fld.key].get("1.0", "end")))
@@ -679,6 +730,25 @@ _CARRIER_PHASE_NOISE_FIELDS = Section(
     ),
 )
 
+_CODING_SCHEMES: tuple[str, ...] = ("convolutional", "concatenated", "turbo", "ldpc")
+
+_CARRIER_CODING_FIELDS = Section(
+    title="(FEC parameters)",
+    columns=2, separator=False, right_col_padx=(0, 4),
+    fields=(
+        Field(("scheme",), "Scheme", "str_enum", default="convolutional",
+              width=14, options=_CODING_SCHEMES,
+              tip="FEC scheme: convolutional, concatenated, turbo, or ldpc."),
+        Field(("block_length",), "Block Length", "int", default=1024, width=10,
+              tip="Data bits per frame (convolutional and turbo). "
+                  "Ignored for concatenated/ldpc."),
+        Field(("matrix",), "LDPC Matrix", "str", default="", width=32,
+              visible_when=(("scheme",), ("ldpc",)),
+              tip="Path to .alist file for LDPC code.  Leave blank to use "
+                  "the bundled default (data/ldpc/mackay_13298.alist)."),
+    ),
+)
+
 
 # ── CarrierFrame ──────────────────────────────────────────────────────────────
 
@@ -690,7 +760,6 @@ class CarrierFrame(ttk.LabelFrame):
     hand-coded because the LDPC-matrix field's dynamic visibility doesn't
     fit the schema's flat Field model.
     """
-    _CODING_SCHEMES = ["convolutional", "concatenated", "turbo", "ldpc"]
 
     def __init__(self, parent, on_remove, data: dict, **kw):
         super().__init__(parent, text=data.get("name", "carrier"), padding=6, **kw)
@@ -790,56 +859,33 @@ class CarrierFrame(ttk.LabelFrame):
             self._coding_frame.grid_remove()
 
     def _snapshot_coding(self) -> dict:
-        """Read current FEC widget values into a dict for cache."""
+        """Read current FEC widget values into a dict for cache.
+
+        Lenient: empty or unparseable fields are skipped so toggling
+        off mid-edit can never crash.
+        """
         out: dict = {}
-        scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
-        if scheme:
-            out["scheme"] = scheme
-        raw = self._coding_vars.get("block_length", tk.StringVar()).get().strip()
-        if raw:
-            try:               out["block_length"] = int(float(raw))
-            except ValueError: pass
-        matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
-        if matrix:
-            out["matrix"] = matrix
+        for fld in _walk_fields(_CARRIER_CODING_FIELDS):
+            if fld.key not in self._coding_vars: continue
+            raw = str(self._coding_vars[fld.key].get()).strip()
+            if not raw: continue
+            try:
+                out[fld.path[0]] = (int(float(raw)) if fld.type == "int"
+                                     else float(raw) if fld.type == "float"
+                                     else raw)
+            except ValueError:
+                out[fld.path[0]] = raw   # keep bad value verbatim for re-display
         return out
 
     def _populate_coding(self, cod: dict):
         for w in self._coding_frame.winfo_children(): w.destroy()
         self._coding_vars.clear()
-        _lf(self._coding_frame, "Scheme:", 0, 0)
-        scheme_var = tk.StringVar(value=cod.get("scheme", "convolutional"))
-        self._coding_vars["scheme"] = scheme_var
-        cb = ttk.Combobox(self._coding_frame, textvariable=scheme_var,
-                          values=self._CODING_SCHEMES, state="readonly", width=14)
-        cb.grid(row=0, column=1, sticky="w", pady=2)
-        _Tip(cb, "FEC scheme: convolutional, concatenated, turbo, or ldpc.")
-        _lf(self._coding_frame, "Block Length:", 0, 2)
-        bl_var = tk.StringVar(value=_fmt(cod.get("block_length", 1024)))
-        self._coding_vars["block_length"] = bl_var
-        _ent(self._coding_frame, bl_var, 0, 3, width=10,
-             tip="Data bits per frame (convolutional and turbo). Ignored for concatenated/ldpc.")
-
-        # LDPC matrix row: only shown when scheme == "ldpc".
-        self._ldpc_label = ttk.Label(self._coding_frame, text="LDPC Matrix:")
-        self._ldpc_label.grid(row=1, column=0, sticky="w", padx=(0, 4), pady=2)
-        lm_var = tk.StringVar(value=cod.get("matrix", ""))
-        self._coding_vars["matrix"] = lm_var
-        self._ldpc_entry = _ent(self._coding_frame, lm_var, 1, 1, width=32,
-            tip="Path to .alist file for LDPC code. "
-                "Leave blank to use the bundled default (data/ldpc/mackay_13298.alist).")
-        cb.bind("<<ComboboxSelected>>",
-                lambda _e: self._update_ldpc_visibility(), add="+")
-        self._update_ldpc_visibility()
-
-    def _update_ldpc_visibility(self):
-        scheme = self._coding_vars.get("scheme", tk.StringVar()).get()
-        if scheme == "ldpc":
-            self._ldpc_label.grid()
-            self._ldpc_entry.grid()
-        else:
-            self._ldpc_label.grid_remove()
-            self._ldpc_entry.grid_remove()
+        # The LDPC-matrix field's visible_when=(("scheme",), ("ldpc",))
+        # is wired automatically by _render_section.
+        _render_section(self._coding_frame, _CARRIER_CODING_FIELDS, 0,
+                         self._coding_vars, {})
+        _populate_from_schema(_CARRIER_CODING_FIELDS, cod,
+                              self._coding_vars, {})
 
     def _toggle_ch(self):
         if self._has_ch.get():
@@ -915,19 +961,16 @@ class CarrierFrame(ttk.LabelFrame):
         d["enabled"]     = bool(self._enabled.get())
         d["sweep_demod"] = bool(self._sweep_demod.get())
 
-        # FEC coding — still hand-coded; the LDPC-matrix dynamic visibility
-        # doesn't fit the schema's flat Field model yet.
         if self._has_coding.get() and self._coding_vars:
             cod: dict = {}
-            scheme = self._coding_vars.get("scheme", tk.StringVar()).get().strip()
-            if scheme:
-                cod["scheme"] = scheme
-            raw = self._coding_vars.get("block_length", tk.StringVar()).get().strip()
-            try:               cod["block_length"] = int(float(raw))
-            except ValueError: pass
-            matrix = self._coding_vars.get("matrix", tk.StringVar()).get().strip()
-            if matrix:
-                cod["matrix"] = matrix
+            _collect_from_schema(_CARRIER_CODING_FIELDS,
+                                  self._coding_vars, {}, cod)
+            # Don't write an empty `matrix` key — the simulator's loader treats
+            # absence as "use the bundled default", which is the desired
+            # behavior when the user leaves the field blank or the scheme
+            # isn't ldpc (in which case the field isn't shown at all).
+            if not cod.get("matrix"):
+                cod.pop("matrix", None)
             if cod:
                 d["coding"] = cod
 

@@ -12,104 +12,26 @@ import sys
 import threading
 import time
 import tkinter as tk
-from dataclasses import dataclass
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import tomllib
+
+from tkconfig import (
+    Field, Section, Tab,
+    render_tab, render_section,
+    populate_from_schema, collect_from_schema, walk_fields,
+    cfg_get, emit_table, scrollable, parse_float_list,
+)
 from misc.gen_icon import build_icon as _build_icon
 
 _ICON_B64 = base64.b64encode(_build_icon()).decode()
 
 
-# ── Form schema ──────────────────────────────────────────────────────────────
+# ── TOML serializer ─────────────────────────────────────
 #
-# Tabs/Sections/Fields are plain data; a Tab is rendered onto a scrollable
-# Frame by `_render_tab()` and read/written by `_populate_from_schema()` /
-# `_collect_from_schema()` (defined further down once their helpers exist).
-# Step 1 ports just the General tab — Sweep, Output, Amplifier, and Carriers
-# still use the hand-coded methods.
-
-@dataclass(frozen=True)
-class Field:
-    """One labelled input bound to a TOML path.
-
-    ``path`` is the nested-key tuple inside the cfg dict (e.g.
-    ``("simulation", "seed")`` → ``cfg["simulation"]["seed"]``).  The
-    internal var key is ``path`` joined by ``"."``.  ``type`` is one of:
-
-      "int"               StringVar + Entry, parsed as int.
-      "float"             StringVar + Entry, parsed as float.
-      "float_optional"    StringVar + Entry; blank → omitted from cfg.
-      "str" / "path"      StringVar + Entry; "path" adds a Browse… button.
-      "str_enum"          StringVar + Combobox limited to ``options``.
-      "bool"              BooleanVar + Checkbutton (label is button text).
-      "float_list"        StringVar + Entry of comma-separated floats.
-      "float_list_text"   tk.Text widget (label above, multi-line capable).
-
-    ``options`` is the allowed value list for ``"str_enum"`` (ignored for
-    other types).  ``default`` is used by populate when the cfg value is
-    missing; for "float_optional" a missing / None value maps to an empty
-    input instead.
-
-    ``visible_when`` gates rendering on another field's current value.
-    Format: ``(controller_path, allowed_values)`` — e.g.
-    ``(("scheme",), ("ldpc",))`` means "show only when the field at path
-    ``('scheme',)`` in the same section holds the value ``'ldpc'``".  The
-    renderer wires a trace on the controller var so the gated widgets
-    show/hide live.  ``None`` (the default) means always visible.
-    """
-    path:    tuple[str, ...]
-    label:   str
-    type:    str
-    default: object                                                       = None
-    tip:     str                                                          = ""
-    width:   int                                                          = 20
-    options: tuple[str, ...]                                              = ()
-    visible_when: tuple[tuple[str, ...], tuple[str, ...]] | None          = None
-
-    @property
-    def key(self) -> str:
-        return ".".join(self.path)
-
-
-@dataclass(frozen=True)
-class Section:
-    """A titled group of fields.
-
-    ``description`` renders as a gray paragraph between the title and the
-    fields.  ``separator`` toggles the horizontal rule under the title:
-    True for the General / Sweep style, False for the Amplifier style
-    (bold title only, no rule).  ``right_col_padx`` overrides the padx
-    applied to the right-column label in two-column layouts; the General
-    tab uses (16, 4) for a wider gap between groups, the Carrier sub-grid
-    uses (0, 4) for a tighter look.
-    """
-    title:          str
-    fields:         tuple[Field, ...]
-    columns:        int             = 2
-    description:    str             = ""
-    separator:      bool            = True
-    right_col_padx: tuple[int, int] = (16, 4)
-
-
-@dataclass(frozen=True)
-class Tab:
-    name:     str
-    sections: tuple[Section, ...]
-
-
-# ── TOML serializer ───────────────────────────────────────────────────────────
-
-def _lit(v) -> str:
-    if isinstance(v, bool):  return "true" if v else "false"
-    if isinstance(v, str):   return f'"{v}"'
-    if isinstance(v, float): return f"{int(v):_}" if v == int(v) else f"{v:g}"
-    if isinstance(v, int):   return f"{v:_}"
-    return str(v)
-
-def _arr(lst) -> str:
-    return "[" + ", ".join(_lit(x) for x in lst) + "]"
-
+# build_toml stays here because the table order and the [[carrier]] sub-table
+# layout are specific to this project; the generic emission primitives
+# (emit_table / lit / arr) live in tkconfig.toml_writer.
 
 # Top-level table emission order: (TOML header, cfg path).  Tables absent
 # from cfg are skipped.
@@ -130,387 +52,31 @@ _CARRIER_MAIN_KEYS: tuple[str, ...] = (
 _CARRIER_SUB_TABLES: tuple[str, ...] = ("coding", "channel", "phase_noise")
 
 
-def _emit_table(L: list[str], header: str, d: dict,
-                keys: tuple[str, ...] | None = None) -> None:
-    """Append a `header` line followed by ``key = value`` lines, with keys
-    padded so the ``=`` signs align within the table.  None-valued keys are
-    skipped; `keys` (when given) restricts and orders the emitted keys,
-    otherwise the dict's own key order is used.  List values render as
-    inline arrays."""
-    chosen = [k for k in (keys or tuple(d.keys()))
-              if k in d and d[k] is not None]
-    L.append(header)
-    width = max((len(k) for k in chosen), default=0)
-    for k in chosen:
-        v = d[k]
-        rhs = _arr(v) if isinstance(v, list) else _lit(v)
-        L.append(f"{k:<{width}} = {rhs}")
-
-
 def build_toml(cfg: dict) -> str:
     """Serialise a config dict to TOML text with aligned, sectioned output.
 
     Emits the fixed top-level tables (in `_TOML_TABLES` order) followed by
     one `[[carrier]]` block per carrier, each with its optional
     `[carrier.coding]` / `[carrier.channel]` / `[carrier.phase_noise]`
-    sub-tables.  Generic over the cfg contents — no per-field code.
+    sub-tables.  Generic key alignment is delegated to tkconfig.emit_table.
     """
     L: list[str] = []
     for header, path in _TOML_TABLES:
-        section = _cfg_get(cfg, path)
+        section = cfg_get(cfg, path)
         if isinstance(section, dict):
-            _emit_table(L, f"[{header}]", section)
+            emit_table(L, f"[{header}]", section)
             L.append("")
 
     for carr in cfg.get("carrier", []):
-        _emit_table(L, "[[carrier]]", carr, _CARRIER_MAIN_KEYS)
+        emit_table(L, "[[carrier]]", carr, _CARRIER_MAIN_KEYS)
         for sub in _CARRIER_SUB_TABLES:
             sub_d = carr.get(sub)
             if isinstance(sub_d, dict) and sub_d:
                 L.append("")
-                _emit_table(L, f"[carrier.{sub}]", sub_d)
+                emit_table(L, f"[carrier.{sub}]", sub_d)
         L.append("")
 
     return "\n".join(L)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _parse_float_list(text: str) -> list[float]:
-    cleaned = text.strip().strip("[]")
-    return [float(x) for x in cleaned.split(",") if x.strip()] if cleaned else []
-
-def _fmt(v) -> str:
-    if isinstance(v, float): return str(int(v)) if v == int(v) else f"{v:g}"
-    return str(v) if v is not None else ""
-
-class _Tip:
-    """Lightweight hover tooltip attached to any widget."""
-    def __init__(self, widget: tk.Widget, text: str):
-        self._w   = widget
-        self._txt = text
-        self._win: tk.Toplevel | None = None
-        widget.bind("<Enter>",   self._show, add="+")
-        widget.bind("<Leave>",   self._hide, add="+")
-        widget.bind("<Destroy>", self._hide, add="+")
-
-    def _show(self, _=None):
-        if self._win or not self._txt:
-            return
-        x = self._w.winfo_rootx() + self._w.winfo_width() + 6
-        y = self._w.winfo_rooty() + 2
-        self._win = tw = tk.Toplevel(self._w)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        tk.Label(tw, text=self._txt, justify="left",
-                 background="#ffffc0", foreground="#1a1a1a",
-                 relief="solid", borderwidth=1,
-                 wraplength=380, font=("", 8),
-                 padx=5, pady=3).pack()
-
-    def _hide(self, _=None):
-        if self._win:
-            self._win.destroy()
-            self._win = None
-
-
-def _lf(parent, text, row, col, **kw):
-    kw.setdefault("padx", (0, 4))
-    kw.setdefault("pady", 2)
-    lbl = ttk.Label(parent, text=text)
-    lbl.grid(row=row, column=col, sticky="w", **kw)
-    return lbl
-
-def _ent(parent, var, row, col, width=18, tip="", **kw):
-    e = ttk.Entry(parent, textvariable=var, width=width)
-    e.grid(row=row, column=col, sticky="w", pady=2, **kw)
-    if tip:
-        _Tip(e, tip)
-    return e
-
-def _scrollable(parent) -> ttk.Frame:
-    """Wrap a Frame in a Canvas+Scrollbar; return the inner Frame."""
-    canvas = tk.Canvas(parent, highlightthickness=0)
-    vsb = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-    inner = ttk.Frame(canvas, padding=12)
-    canvas.configure(yscrollcommand=vsb.set)
-    vsb.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    win = canvas.create_window((0, 0), window=inner, anchor="nw")
-    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
-    def _wheel(e): canvas.yview_scroll(-1 * (e.delta // 120), "units")
-    canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
-    canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
-    return inner
-
-
-# ── Schema-driven rendering and (de)serialisation ────────────────────────────
-
-def _make_browse_cb(var: tk.StringVar):
-    """Standard directory-picker callback for "path"-typed fields."""
-    def _cb():
-        path = filedialog.askdirectory(initialdir=var.get() or ".")
-        if path:
-            var.set(path)
-    return _cb
-
-
-def _render_scalar(parent, fld: Field, row: int, col: int,
-                   variables: dict[str, tk.Variable],
-                   *, right_col_padx: tuple[int, int] = (16, 4),
-                   tracker: dict[str, tuple[tk.Widget, ...]] | None = None) -> None:
-    """Render one single-row label+widget pair at (row, col..col+1).
-
-    Supports every "scalar" field type — int / float / float_optional / str /
-    path / str_enum / float_list (all use a StringVar).  Used by both the
-    columns=2 layout in `_render_section` and the single-row branch of
-    `_render_field`.
-
-    If ``tracker`` is provided, the field's (label, input-widget) pair is
-    stored at ``tracker[fld.key]`` so `_wire_visibility` can grid_remove() /
-    grid() them when a controlling field changes.
-    """
-    padx_kw = {} if col == 0 else {"padx": right_col_padx}
-    lbl = _lf(parent, fld.label + ":", row, col, **padx_kw)
-    var = tk.StringVar()
-    variables[fld.key] = var
-    if fld.type == "str_enum":
-        cb = ttk.Combobox(parent, textvariable=var, values=list(fld.options),
-                           state="readonly", width=fld.width)
-        cb.grid(row=row, column=col + 1, sticky="w", pady=2)
-        if fld.tip: _Tip(cb, fld.tip)
-        if tracker is not None: tracker[fld.key] = (lbl, cb)
-        return
-    if fld.type == "path":
-        row_frame = ttk.Frame(parent)
-        row_frame.grid(row=row, column=col + 1, sticky="w")
-        _ent(row_frame, var, 0, 0, width=fld.width, tip=fld.tip)
-        ttk.Button(row_frame, text="Browse…", width=8,
-                   command=_make_browse_cb(var)).grid(row=0, column=1, padx=4)
-        if tracker is not None: tracker[fld.key] = (lbl, row_frame)
-        return
-    ent = _ent(parent, var, row, col + 1, width=fld.width, tip=fld.tip)
-    if tracker is not None: tracker[fld.key] = (lbl, ent)
-
-
-def _render_field(parent, fld: Field, row: int,
-                  variables: dict[str, tk.Variable],
-                  texts: dict[str, tk.Text]) -> int:
-    """Create the widget(s) for one Field, register the binding, and return
-    the next free row.  Used by columns=1 sections."""
-    if fld.type == "bool":
-        var = tk.BooleanVar(value=bool(fld.default))
-        variables[fld.key] = var
-        cb = ttk.Checkbutton(parent, text=fld.label, variable=var)
-        cb.grid(row=row, column=0, columnspan=4, sticky="w", pady=(6, 0))
-        if fld.tip: _Tip(cb, fld.tip)
-        return row + 1
-
-    if fld.type == "float_list_text":
-        ttk.Label(parent, text=fld.label + ":", foreground="gray").grid(
-            row=row, column=0, columnspan=4, sticky="w")
-        t = tk.Text(parent, height=1, width=64, wrap="word",
-                    font=("Consolas", 9))
-        t.grid(row=row + 1, column=0, columnspan=4, sticky="ew", pady=2)
-        texts[fld.key] = t
-        if fld.tip: _Tip(t, fld.tip)
-        return row + 2
-
-    _render_scalar(parent, fld, row, 0, variables)
-    return row + 1
-
-
-def _wire_visibility(sec: Section, variables: dict[str, tk.Variable],
-                     tracker: dict[str, tuple[tk.Widget, ...]]) -> None:
-    """For each gated field, set up a trace on the controlling var so the
-    field's widgets show/hide live as the controller's value changes."""
-    for fld in _walk_fields(sec):
-        if fld.visible_when is None:
-            continue
-        ctrl_path, allowed = fld.visible_when
-        ctrl_key = ".".join(ctrl_path)
-        widgets = tracker.get(fld.key)
-        if ctrl_key not in variables or not widgets:
-            continue
-        def _update(*_, _ws=widgets, _ctrl=ctrl_key, _allowed=allowed):
-            value = str(variables[_ctrl].get())
-            for w in _ws:
-                if value in _allowed: w.grid()
-                else:                 w.grid_remove()
-        variables[ctrl_key].trace_add("write", _update)
-        _update()    # apply initial visibility
-
-
-def _render_section(parent, sec: Section, section_row: int,
-                    variables: dict[str, tk.Variable],
-                    texts: dict[str, tk.Text]) -> int:
-    """Render one Section onto `parent` starting at `section_row`; return
-    the next free row.  Section title / separator / description are drawn
-    by `_render_tab`; this only handles the fields and any visible_when
-    gating defined on them."""
-    tracker: dict[str, tuple[tk.Widget, ...]] = {}
-    if sec.columns == 2:
-        # Pair scalar fields into (label, entry) (label, entry) on one row.
-        for i in range(0, len(sec.fields), 2):
-            _render_scalar(parent, sec.fields[i], section_row, 0, variables,
-                           right_col_padx=sec.right_col_padx, tracker=tracker)
-            if i + 1 < len(sec.fields):
-                _render_scalar(parent, sec.fields[i + 1], section_row, 2,
-                               variables, right_col_padx=sec.right_col_padx,
-                               tracker=tracker)
-            section_row += 1
-        _wire_visibility(sec, variables, tracker)
-        return section_row
-    # columns=1: dispatch each field to _render_field, which knows how to
-    # lay out every supported type (including multi-row text widgets).
-    for fld in sec.fields:
-        section_row = _render_field(parent, fld, section_row, variables, texts)
-    _wire_visibility(sec, variables, tracker)
-    return section_row
-
-
-def _render_tab(nb, schema: Tab,
-                variables: dict[str, tk.Variable],
-                texts: dict[str, tk.Text]) -> None:
-    """Build a Tab from its schema onto a Notebook.  Each section gets a
-    bold title, optional horizontal separator, optional gray description,
-    then its fields.  Columns 1 and 3 expand if extra width is available."""
-    frame = ttk.Frame(nb); nb.add(frame, text=schema.name)
-    inner = _scrollable(frame)
-    r = 0
-    for sec in schema.sections:
-        title_pady = (12, 0) if sec.separator else (10, 2)
-        ttk.Label(inner, text=sec.title, font=("", 10, "bold")).grid(
-            row=r, column=0, columnspan=4, sticky="w", pady=title_pady)
-        r += 1
-        if sec.separator:
-            ttk.Separator(inner, orient="horizontal").grid(
-                row=r, column=0, columnspan=4, sticky="ew", pady=(0, 4))
-            r += 1
-        if sec.description:
-            ttk.Label(inner, text=sec.description, foreground="gray",
-                      justify="left").grid(
-                row=r, column=0, columnspan=3, sticky="w")
-            r += 1
-        r = _render_section(inner, sec, r, variables, texts)
-    inner.columnconfigure(1, weight=1)
-    if any(s.columns == 2 for s in schema.sections):
-        inner.columnconfigure(3, weight=1)
-
-
-def _walk_fields(schema):
-    """Yield every Field in a Tab or Section schema.
-
-    Accepting either lets the same populate / collect helpers walk a
-    full tab (Tab → many sections) and a single carrier sub-section
-    (Section → its fields).
-    """
-    if hasattr(schema, "sections"):
-        for sec in schema.sections:
-            yield from sec.fields
-    else:
-        yield from schema.fields
-
-
-def _cfg_get(cfg: dict, path: tuple[str, ...]):
-    """Navigate cfg by path; return None if any intermediate key is missing."""
-    d = cfg
-    for k in path:
-        if not isinstance(d, dict) or k not in d:
-            return None
-        d = d[k]
-    return d
-
-
-def _cfg_set(cfg: dict, path: tuple[str, ...], value) -> None:
-    """Insert `value` at `path` in `cfg`, creating intermediate dicts."""
-    d = cfg
-    for k in path[:-1]:
-        d = d.setdefault(k, {})
-    d[path[-1]] = value
-
-
-def _populate_from_schema(schema, cfg: dict,
-                          variables: dict[str, tk.Variable],
-                          texts: dict[str, tk.Text]) -> None:
-    """Read each field's cfg value and push the formatted form into its
-    binding (StringVar / BooleanVar / Text widget) — dispatched by type.
-
-    For ``float_optional``: a missing / None cfg value → empty string in the
-    var (which collect interprets as "omit").  For every other type, a
-    missing value substitutes the field's ``default``.
-    """
-    for fld in _walk_fields(schema):
-        raw = _cfg_get(cfg, fld.path)
-
-        if fld.type == "float_list_text":
-            t = texts[fld.key]
-            t.delete("1.0", "end")
-            if raw:
-                t.insert("1.0", ", ".join(_fmt(x) for x in raw))
-            continue
-        if fld.type == "bool":
-            variables[fld.key].set(bool(raw) if raw is not None
-                                    else bool(fld.default))
-            continue
-        if fld.type == "float_list":
-            variables[fld.key].set(
-                ", ".join(_fmt(x) for x in (raw or [])))
-            continue
-
-        var = variables[fld.key]
-        if fld.type == "float_optional":
-            var.set(_fmt(raw) if raw is not None else "")
-        elif raw is None:
-            d = fld.default
-            var.set(_fmt(d) if isinstance(d, (int, float)) else str(d))
-        elif isinstance(raw, (int, float)):
-            var.set(_fmt(raw))
-        else:
-            var.set(str(raw))
-
-
-def _collect_from_schema(schema,
-                         variables: dict[str, tk.Variable],
-                         texts: dict[str, tk.Text],
-                         cfg: dict) -> None:
-    """Read each binding, parse per the field's type, and write into `cfg`.
-
-    Empty ``float_optional`` values are omitted from `cfg` so the caller's
-    TOML writer doesn't emit a key the user left blank.  A gated field whose
-    ``visible_when`` controller doesn't currently match is skipped entirely —
-    a hidden field never contributes to the output.
-    """
-    for fld in _walk_fields(schema):
-        if fld.visible_when is not None:
-            ctrl_path, allowed = fld.visible_when
-            ctrl_key = ".".join(ctrl_path)
-            if ctrl_key in variables and str(variables[ctrl_key].get()) not in allowed:
-                continue
-        if fld.type == "float_list_text":
-            _cfg_set(cfg, fld.path,
-                     _parse_float_list(texts[fld.key].get("1.0", "end")))
-            continue
-        if fld.type == "bool":
-            _cfg_set(cfg, fld.path, bool(variables[fld.key].get()))
-            continue
-
-        raw = str(variables[fld.key].get()).strip()
-        if fld.type == "float_optional":
-            if raw:
-                _cfg_set(cfg, fld.path, float(raw))
-            continue
-        if fld.type == "float_list":
-            _cfg_set(cfg, fld.path, _parse_float_list(raw))
-            continue
-        if fld.type == "int":
-            value = int(float(raw))
-        elif fld.type == "float":
-            value = float(raw)
-        else:
-            value = raw   # "str" or "path"
-        _cfg_set(cfg, fld.path, value)
 
 
 # ── General-tab schema ───────────────────────────────────────────────────────
@@ -789,8 +355,8 @@ class CarrierFrame(ttk.LabelFrame):
 
         # Main parameter fields — schema-driven 2-column grid starting at row 1.
         # No float_list_text fields here, so the texts dict slot stays empty.
-        next_row = _render_section(self, _CARRIER_MAIN_FIELDS, 1, self._vars, {})
-        _populate_from_schema(_CARRIER_MAIN_FIELDS, d, self._vars, {})
+        next_row = render_section(self, _CARRIER_MAIN_FIELDS, 1, self._vars, {})
+        populate_from_schema(_CARRIER_MAIN_FIELDS, d, self._vars, {})
         # Carrier-specific behavior: name field updates the LabelFrame title.
         name_var = self._vars["name"]
         name_var.trace_add("write",
@@ -861,7 +427,7 @@ class CarrierFrame(ttk.LabelFrame):
         off mid-edit can never crash.
         """
         out: dict = {}
-        for fld in _walk_fields(_CARRIER_CODING_FIELDS):
+        for fld in walk_fields(_CARRIER_CODING_FIELDS):
             if fld.key not in self._coding_vars: continue
             raw = str(self._coding_vars[fld.key].get()).strip()
             if not raw: continue
@@ -877,10 +443,10 @@ class CarrierFrame(ttk.LabelFrame):
         for w in self._coding_frame.winfo_children(): w.destroy()
         self._coding_vars.clear()
         # The LDPC-matrix field's visible_when=(("scheme",), ("ldpc",))
-        # is wired automatically by _render_section.
-        _render_section(self._coding_frame, _CARRIER_CODING_FIELDS, 0,
+        # is wired automatically by render_section.
+        render_section(self._coding_frame, _CARRIER_CODING_FIELDS, 0,
                          self._coding_vars, {})
-        _populate_from_schema(_CARRIER_CODING_FIELDS, cod,
+        populate_from_schema(_CARRIER_CODING_FIELDS, cod,
                               self._coding_vars, {})
 
     def _toggle_ch(self):
@@ -900,7 +466,7 @@ class CarrierFrame(ttk.LabelFrame):
         section off mid-edit can never crash.
         """
         out: dict = {}
-        for fld in _walk_fields(_CARRIER_CHANNEL_FIELDS):
+        for fld in walk_fields(_CARRIER_CHANNEL_FIELDS):
             if fld.key not in self._ch_vars: continue
             raw = str(self._ch_vars[fld.key].get()).strip()
             if not raw: continue
@@ -917,9 +483,9 @@ class CarrierFrame(ttk.LabelFrame):
         self._ch_vars.clear()
         # Schema-driven render starting at row 1 (matches the original
         # one-row top padding inside _ch_frame).
-        _render_section(self._ch_frame, _CARRIER_CHANNEL_FIELDS, 1,
+        render_section(self._ch_frame, _CARRIER_CHANNEL_FIELDS, 1,
                          self._ch_vars, {})
-        _populate_from_schema(_CARRIER_CHANNEL_FIELDS, ch, self._ch_vars, {})
+        populate_from_schema(_CARRIER_CHANNEL_FIELDS, ch, self._ch_vars, {})
 
     def _toggle_pn(self):
         if self._has_pn.get():
@@ -934,9 +500,9 @@ class CarrierFrame(ttk.LabelFrame):
     def _snapshot_pn(self) -> dict:
         """Read current phase-noise mask values into a dict."""
         out: dict = {}
-        for fld in _walk_fields(_CARRIER_PHASE_NOISE_FIELDS):
+        for fld in walk_fields(_CARRIER_PHASE_NOISE_FIELDS):
             if fld.key not in self._pn_texts: continue
-            val = _parse_float_list(self._pn_texts[fld.key].get("1.0", "end"))
+            val = parse_float_list(self._pn_texts[fld.key].get("1.0", "end"))
             if val: out[fld.path[0]] = val
         return out
 
@@ -946,20 +512,20 @@ class CarrierFrame(ttk.LabelFrame):
         global section."""
         for w in self._pn_frame.winfo_children(): w.destroy()
         self._pn_texts.clear()
-        _render_section(self._pn_frame, _CARRIER_PHASE_NOISE_FIELDS, 0,
+        render_section(self._pn_frame, _CARRIER_PHASE_NOISE_FIELDS, 0,
                          {}, self._pn_texts)
-        _populate_from_schema(_CARRIER_PHASE_NOISE_FIELDS, pn,
+        populate_from_schema(_CARRIER_PHASE_NOISE_FIELDS, pn,
                               {}, self._pn_texts)
 
     def to_dict(self) -> dict:
         d: dict = {}
-        _collect_from_schema(_CARRIER_MAIN_FIELDS, self._vars, {}, d)
+        collect_from_schema(_CARRIER_MAIN_FIELDS, self._vars, {}, d)
         d["enabled"]     = bool(self._enabled.get())
         d["sweep_demod"] = bool(self._sweep_demod.get())
 
         if self._has_coding.get() and self._coding_vars:
             cod: dict = {}
-            _collect_from_schema(_CARRIER_CODING_FIELDS,
+            collect_from_schema(_CARRIER_CODING_FIELDS,
                                   self._coding_vars, {}, cod)
             # Don't write an empty `matrix` key — the simulator's loader treats
             # absence as "use the bundled default", which is the desired
@@ -972,12 +538,12 @@ class CarrierFrame(ttk.LabelFrame):
 
         if self._has_ch.get() and self._ch_vars:
             ch: dict = {}
-            _collect_from_schema(_CARRIER_CHANNEL_FIELDS, self._ch_vars, {}, ch)
+            collect_from_schema(_CARRIER_CHANNEL_FIELDS, self._ch_vars, {}, ch)
             d["channel"] = ch
 
         if self._has_pn.get() and self._pn_texts:
             pn: dict = {}
-            _collect_from_schema(_CARRIER_PHASE_NOISE_FIELDS,
+            collect_from_schema(_CARRIER_PHASE_NOISE_FIELDS,
                                   {}, self._pn_texts, pn)
             if pn.get("offset_hz") or pn.get("dbc_per_hz"):
                 d["phase_noise"] = {"enabled": True, **pn}
@@ -1114,13 +680,13 @@ class App:
         return row + 2
 
     def _build_general_tab(self, nb):
-        _render_tab(nb, _GENERAL_TAB, self._vars, self._texts)
+        render_tab(nb, _GENERAL_TAB, self._vars, self._texts)
 
     def _build_amplifier_tab(self, nb):
-        _render_tab(nb, _AMPLIFIER_TAB, self._vars, self._texts)
+        render_tab(nb, _AMPLIFIER_TAB, self._vars, self._texts)
 
     def _build_sweep_output_tab(self, nb):
-        _render_tab(nb, _SWEEP_OUTPUT_TAB, self._vars, self._texts)
+        render_tab(nb, _SWEEP_OUTPUT_TAB, self._vars, self._texts)
 
     def _build_carriers_tab(self, nb):
         tab = ttk.Frame(nb);  nb.add(tab, text="Carriers")
@@ -1136,7 +702,7 @@ class App:
         self._focus_combo.pack(side="left", padx=4)
         self._focus_combo.bind("<<ComboboxSelected>>", self._apply_focus)
 
-        self._carr_inner = _scrollable(tab)
+        self._carr_inner = scrollable(tab)
 
     # ── Carrier management ────────────────────────────────────────────────────
 
@@ -1190,7 +756,7 @@ class App:
         # General / Sweep & Output / Amplifier tabs are schema-driven;
         # carriers are still hand-coded.
         for schema in (_GENERAL_TAB, _SWEEP_OUTPUT_TAB, _AMPLIFIER_TAB):
-            _populate_from_schema(schema, cfg, self._vars, self._texts)
+            populate_from_schema(schema, cfg, self._vars, self._texts)
 
         for cf in self._carriers: cf.destroy()
         self._carriers.clear()
@@ -1200,7 +766,7 @@ class App:
     def _collect(self) -> dict:
         cfg: dict = {}
         for schema in (_GENERAL_TAB, _SWEEP_OUTPUT_TAB, _AMPLIFIER_TAB):
-            _collect_from_schema(schema, self._vars, self._texts, cfg)
+            collect_from_schema(schema, self._vars, self._texts, cfg)
         # Mirror the legacy behavior: empty output_dir → "."
         if not cfg.get("output", {}).get("output_dir"):
             cfg.setdefault("output", {})["output_dir"] = "."

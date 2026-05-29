@@ -23,8 +23,8 @@ and is the single source of truth across all machines.
 - Python (Windows): `.venv\Scripts\python.exe`
 - Python (Linux/Mac): `.venv/bin/python`
 - Tests + coverage: `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing`
-- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
-- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
+- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tkconfig/ tests/`
+- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tkconfig/ tests/`
 - Line length: 110 chars (configured in pyproject.toml)
 
 **Shell: always use PowerShell (not Bash) for project commands on Windows.**

@@ -87,6 +87,6 @@ all images. There are no longer per-file filename entries.
 - Package manager: `uv`; venv at `.venv/`
 - Python: `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Linux/Mac)
 - Run tests: `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing`
-- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
-- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
+- Type check: `.venv\Scripts\pyright.exe gui.py main.py sim/ tkconfig/ tests/`
+- Lint: `.venv\Scripts\ruff.exe check gui.py main.py sim/ tkconfig/ tests/`
 - Git remote: https://github.com/bandospook/signal-processing-simulation.git, branch master

@@ -32,7 +32,11 @@ sim/            Core simulation library
                     build_code(), encode_frames(), decode_frames()
 
 main.py         CLI entry point — runs full sim + optional sweep + writes outputs
-gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI)
+gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI).
+                Project-specific only: form schemas, App, CarrierFrame, build_toml.
+tkconfig/       Reusable, project-agnostic schema-driven tkinter form toolkit
+                (schema dataclasses, render, serde, widgets, toml_writer).
+                gui.py builds its tabs from Field/Section/Tab schemas via this.
 simulation.toml Example / default configuration
 tests/          203 tests, all passing, 100% coverage
 misc/
@@ -53,8 +57,8 @@ memory/
 - **Tests:** 203 passing, 0 failing
 - **Coverage:** 100% (1360 statements, 0 missed)
 - Tools installed in venv: `pyright`, `ruff`, `pytest-cov`
-- Run quality checks: `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/`
-  and `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/`
+- Run quality checks: `.venv\Scripts\pyright.exe gui.py main.py sim/ tkconfig/ tests/`
+  and `.venv\Scripts\ruff.exe check gui.py main.py sim/ tkconfig/ tests/`
 - Run tests with coverage: `.venv\Scripts\python.exe -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing`
 
 ---

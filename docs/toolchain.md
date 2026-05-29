@@ -33,16 +33,16 @@ are available as executables in the venv's binary directory.
 | Task | Command |
 |---|---|
 | Tests + coverage | `.venv/bin/python -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing` |
-| Type check | `.venv/bin/pyright gui.py main.py sim/ tests/` |
-| Lint | `.venv/bin/ruff check gui.py main.py sim/ tests/` |
+| Type check | `.venv/bin/pyright gui.py main.py sim/ tkconfig/ tests/` |
+| Lint | `.venv/bin/ruff check gui.py main.py sim/ tkconfig/ tests/` |
 
 ### Windows (PowerShell)
 
 | Task | Command |
 |---|---|
 | Tests + coverage | `.venv\Scripts\python.exe -m pytest tests/ -v --cov=sim --cov=main --cov-report=term-missing` |
-| Type check | `.venv\Scripts\pyright.exe gui.py main.py sim/ tests/` |
-| Lint | `.venv\Scripts\ruff.exe check gui.py main.py sim/ tests/` |
+| Type check | `.venv\Scripts\pyright.exe gui.py main.py sim/ tkconfig/ tests/` |
+| Lint | `.venv\Scripts\ruff.exe check gui.py main.py sim/ tkconfig/ tests/` |
 
 Use the explicit `.venv` path rather than relying on the activated environment so
 that the correct interpreter is used regardless of shell state. This is particularly

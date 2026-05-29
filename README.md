@@ -80,8 +80,8 @@ python gui.py         # GUI — load, edit, and run simulation.toml interactivel
 
 ```bash
 python -m pytest tests/ -v     # 116 tests, all should pass
-python -m pyright gui.py main.py sim/ tests/  # 0 type errors
-python -m ruff check gui.py main.py sim/ tests/  # 0 lint errors
+python -m pyright gui.py main.py sim/ tkconfig/ tests/  # 0 type errors
+python -m ruff check gui.py main.py sim/ tkconfig/ tests/  # 0 lint errors
 ```
 
 > **IDE note (VS Code / PyCharm):** point your editor's Python interpreter at

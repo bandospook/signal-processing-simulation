@@ -194,23 +194,31 @@ signal-processing-simulation/
 │   ├── config.py             ← TOML loader
 │   ├── filters.py            ← RRC, OLA convolution, upsample/downsample, channel impairment
 │   ├── nonlinear_amplifier.py← memoryless AM-AM + AM-PM model
+│   ├── phase_noise.py        ← per-carrier oscillator phase noise (mask + apply)
 │   ├── plots.py              ← all visualisation, sweep report, detector results table
 │   ├── receiver.py           ← matched filter, decisions, BER (phase-ambiguity resolved), EVM
-│   ├── simulation.py         ← full wideband signal chain, per-carrier metric extraction
+│   ├── simulation.py         ← simulate() entry point + named-phase helpers
 │   ├── stats.py              ← Wilson CI half-width and rule-of-three upper bound
 │   ├── sweep.py              ← 2-D IBO × noise sweep with adaptive CI-driven iteration
-│   ├── theory.py             ← closed-form BER curves and numerical Eb/N0 inverse
+│   ├── theory.py             ← closed-form + APSK numerical-table BER curves and inverse
 │   └── coding/               ← forward error correction (FEC)
 │       ├── convolutional.py  ← rate-1/2 K=7 code with soft-decision Viterbi
 │       ├── concatenated.py   ← RS(255,223) outer + convolutional inner
 │       ├── turbo.py          ← rate-1/3 PCCC with iterative max-log-MAP BCJR
 │       └── ldpc.py           ← LDPC with normalized min-sum belief propagation
+├── tkconfig/                 ← reusable schema-driven tkinter form toolkit (§11)
+│   ├── schema.py             ← Field / Section / Tab dataclasses
+│   ├── widgets.py            ← Tip, scrollable, labeled, entry, fmt, parse_float_list
+│   ├── serde.py              ← populate/collect schema↔cfg, walk_fields, cfg_get/set
+│   ├── render.py             ← render_tab / render_section (+ visible_when wiring)
+│   └── toml_writer.py        ← lit / arr / emit_table (aligned key=value emission)
 ├── tests/
 │   ├── test_awgn_performance.py     ← BER vs theory (see §12)
 │   ├── test_modulations.py          ← constellation + baseband/receive round-trip
-│   ├── test_theory.py               ← closed-form BER and Eb/N0 inverse
+│   ├── test_theory.py               ← closed-form BER and Eb/N0 inverse (+APSK tables)
 │   ├── test_filters.py              ← RRC and OLA correctness
 │   ├── test_nonlinear_amplifier.py
+│   ├── test_phase_noise.py          ← mask interpolation + variance + envelope/phase
 │   ├── test_main.py                 ← end-to-end smoke test
 │   ├── test_simulation.py           ← wideband simulation integration
 │   ├── test_coding.py               ← FEC unit tests: encode/decode round-trip
@@ -218,6 +226,12 @@ signal-processing-simulation/
 │   ├── test_plots.py                ← plot and table output functions
 │   ├── test_stats.py                ← Wilson CI and rule-of-three helpers
 │   └── test_sweep.py                ← adaptive accumulation and convergence logic
+├── tools/                    ← stand-alone scripts (not part of sim/)
+│   ├── generate_theory_curves.py    ← direct-AWGN BER curves → data/theory/*.npz
+│   └── benchmark_coding.py          ← FEC decoder throughput benchmark
+├── data/
+│   ├── ldpc/                 ← bundled .alist matrices for LDPCCode
+│   └── theory/               ← committed APSK reference tables (ber_awgn_*.npz)
 ├── docs/
 │   ├── GUIDE.md              ← this file
 │   ├── simulation_overview.md← execution paths and output files (§13)
@@ -228,7 +242,7 @@ signal-processing-simulation/
 │   ├── msk_modulation.md     ← MSK matched-filter implementation (§18)
 │   └── synchronization.md    ← genie-aided sync design decision (§19)
 ├── output/                   ← generated files (git-ignored)
-├── gui.py                    ← standalone TOML editor + launcher with live progress
+├── gui.py                    ← standalone TOML editor + launcher (schema-driven; §11)
 ├── main.py                   ← CLI entry point
 ├── simulation.toml           ← configuration
 └── pyproject.toml
@@ -240,13 +254,16 @@ signal-processing-simulation/
 | `sim/modulation.py` | Constellation definitions, Gray coding, APSK ring ratios, `bits_per_symbol()`. All constellations normalised to unit average power. |
 | `sim/filters.py` | RRC coefficients, OLA convolution, OLA upsample/downsample (anti-alias Kaiser sinc), per-carrier channel impairments. |
 | `sim/nonlinear_amplifier.py` | Memoryless AM-AM + AM-PM model; piecewise linear interpolation of user-supplied lookup tables. |
-| `sim/simulation.py` | Orchestrates the full signal chain. AWGN added after amp. Per-carrier demod controlled by `demod_carriers` set (carriers not in the set contribute to the IM environment but skip the expensive receiver chain). Returns CNR/CIR/CNIR per carrier via projection method. |
+| `sim/phase_noise.py` | Per-carrier oscillator phase noise from a `(offset_hz, dbc_per_hz)` mask. Log-log interpolated, flat extrapolation; realised by frequency-domain coloring of white noise; applied as `exp(j·φ[n])` at the carrier's native rate, right after the channel filter. |
+| `sim/simulation.py` | Entry point is `simulate()` — orchestrates the full signal chain (AWGN added after amp). Built from named-phase helpers: `_prepare_carrier`, `_ChunkState` dataclass, `_process_chunk`, `_demod_carrier`. Per-carrier demod controlled by `demod_carriers` set. Returns CNR/CIR/CNIR per carrier via projection method. |
 | `sim/receiver.py` | `matched_filter`, `receive` (chains filter → sampling → decisions → BER with rotational ambiguity resolution → EVM). Returns raw `n_bits` and `n_errors` alongside the BER ratio so the sweep layer can aggregate across iterations. Uses `np.real()`/`np.imag()` throughout (Pylance compatible). |
 | `sim/stats.py` | `wilson_half_width(k, n, confidence)` — symmetric radius of the Wilson score interval for a binomial proportion. `rule_of_three_upper(n, confidence)` — upper bound `−ln(1−c)/n` reported when zero errors are observed. |
-| `sim/sweep.py` | 2-D sweep over IBO × noise with adaptive accumulation: each grid point reruns the full chunk pipeline (independent seeds) until the Wilson CI half-width on BER meets the target with at least `min_errors` observed, or `max_iterations` is hit. Aggregated counts and Wilson half-widths flow into `report.md`. Honours `sweep_demod` per carrier. |
-| `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/MSK/QPSK/OQPSK/8PSK/16QAM (returns `None` for APSK). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection. |
+| `sim/sweep.py` | 2-D sweep over IBO × noise with adaptive accumulation: each grid point reruns the full chunk pipeline (independent seeds) until the Wilson CI half-width on BER meets either the absolute (`target_ci_half_width`) or the optional relative (`target_ci_relative`, e.g. ±1% of BER) target, with at least `min_errors` observed, or `max_iterations` is hit. Aggregated counts and Wilson half-widths flow into `report.md`. |
+| `sim/theory.py` | `ber_awgn(mod, EsN0_dB)` — closed-form BER for BPSK/DBPSK/MSK/QPSK/OQPSK/8PSK/16QAM, plus log-linear lookup of `data/theory/ber_awgn_<MOD>.npz` for 16APSK/32APSK (non-default APSK gammas return `None`). `ebn0_for_ber(mod, target_ber)` — numerical inverse by bisection (closed-form) or table inversion (APSK). |
 | `sim/coding/` | Four FEC codecs: `ConvolutionalCode` (rate-1/2, K=7, soft Viterbi), `ConcatenatedCode` (RS + convolutional, random interleaver), `TurboCode` (rate-1/3 PCCC, max-log-MAP BCJR), `LDPCCode` (normalized min-sum BP). `build_code(cfg)` factory, `encode_frames` / `decode_frames` helpers. |
-| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, the 2×3 per-carrier detector plot (BER/EVM/CNR-family vs IBO and vs CNR), and `write_report` (flat markdown table of iteration counts, accumulated counts, BER, CI, Eb/N0, and implementation loss per `(carrier, IBO, noise)`). |
+| `sim/plots.py` | Wideband PSD (capped at 16384-point FFT), amplifier curves, channel response, per-carrier phase-noise mask + cumulative-RMS-jitter plot, the 2×3 detector plot (BER/EVM/CNR-family vs IBO and vs CNR) plus standalone PNGs for each panel, and `write_report` (flat markdown table of iteration counts, accumulated counts, BER, CI, Eb/N0, and implementation loss per `(carrier, IBO, noise)`). |
+| `tkconfig/` | Project-agnostic schema-driven tkinter form toolkit. `Field`/`Section`/`Tab` dataclasses describe a TOML-backed form; `render_tab`/`render_section` build widgets; `populate_from_schema`/`collect_from_schema` ferry values between the cfg dict and the widgets; `emit_table` writes aligned TOML. Reusable in other projects without modification. |
+| `tools/generate_theory_curves.py` | Generates the APSK BER reference tables in `data/theory/` using the direct-AWGN chain (no OLA, no NLA — matches `tests/test_awgn_performance.py`). Adaptive iteration to a ±5% relative half-width target. |
 
 ---
 
@@ -698,6 +715,15 @@ The frame count is computed automatically: with `max_block_size_samples =
 
 `gui.py` is a standalone tkinter application. It does not import any `sim/` modules —
 it reads and writes `.toml` files directly and launches `main.py` as a subprocess.
+
+**Architecture (for maintainers):** every tab is described as data in a
+`Field`/`Section`/`Tab` schema and rendered by the reusable `tkconfig/` package
+(`render_tab`, `populate_from_schema`, `collect_from_schema`, `emit_table`).
+`gui.py` itself contains only the project-specific schemas (`_GENERAL_TAB`,
+`_SWEEP_OUTPUT_TAB`, `_AMPLIFIER_TAB`, plus three carrier sub-schemas), the
+`App` and `CarrierFrame` classes, and `build_toml`. Adding a field is usually
+a one-line `Field(...)` addition; the renderer, populator, collector, and TOML
+writer all flow through it automatically.
 
 ### Layout
 

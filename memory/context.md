@@ -1,5 +1,5 @@
 # SO-WAT — Session Context
-**Last updated: 2026-05-23 (adaptive CI-driven iteration replaces fixed num_symbols/num_frames)**
+**Last updated: 2026-05-31 (after the schema-driven GUI refactor + tkconfig package)**
 
 ---
 
@@ -8,8 +8,9 @@
 SO-WAT (Simulation Orchestrator – Waveform Analysis Tool) is a Python satellite
 communications link simulator. It models a wideband downlink: multiple carriers through a
 shared nonlinear amplifier (AM-AM/AM-PM), OLA-based resampling, optional per-carrier
-channel impairments, AWGN (added after the amp — see TECHNICAL_NOTES.md), and optional
-FEC coding (convolutional, concatenated, turbo, LDPC).
+channel impairments, optional per-carrier oscillator phase noise, AWGN (added after the
+amp — see technical_notes.md), and optional FEC coding (convolutional, concatenated,
+turbo, LDPC).
 
 ---
 
@@ -20,25 +21,48 @@ sim/            Core simulation library
   baseband.py       RRC pulse shaping, modulation symbol generation
   filters.py        FFT OLA up/downsample, channel impairments
   nonlinear_amplifier.py  AM-AM / AM-PM memoryless model
-  simulation.py     N-carrier wideband simulation (returns CNR/CIR/CNIR)
+  phase_noise.py    Per-carrier oscillator phase noise (mask + apply exp(jφ))
+  simulation.py     N-carrier wideband simulation; entry point is simulate()
+                    (built from _prepare_carrier / _ChunkState / _process_chunk /
+                     _demod_carrier helpers)
   sweep.py          2D IBO × noise density sweep with adaptive CI-driven iteration
+                    (target_ci_half_width OR target_ci_relative — either-or stop rule)
   stats.py          Wilson CI half-width and rule-of-three upper bound helpers
   receiver.py       Matched filter, hard decisions, BER, EVM, soft_demap
   modulation.py     Constellations, Gray coding, APSK ratios
-  plots.py          All figure generation + markdown reports
+  plots.py          All figure generation + markdown reports (incl. detector
+                    panel splits and phase-noise mask plot)
   config.py         TOML loader (tomllib)
-  theory.py         Closed-form BER curves + numerical inverse
+  theory.py         Closed-form BER curves + numerical inverse; loads APSK
+                    reference npz tables for 16APSK/32APSK IL
   coding/           FEC: ConvolutionalCode, ConcatenatedCode, TurboCode, LDPCCode
                     build_code(), encode_frames(), decode_frames()
+
+tkconfig/       Reusable, project-agnostic schema-driven tkinter form toolkit
+  schema.py         Field / Section / Tab dataclasses (with str_enum, bool,
+                    float_list, float_list_text, path, visible_when, etc.)
+  widgets.py        Tip, scrollable, labeled, entry, fmt, parse_float_list,
+                    make_browse_cb
+  serde.py          walk_fields, cfg_get/set, populate_from_schema,
+                    collect_from_schema (honors visible_when when collecting)
+  render.py         render_tab / render_section (+ visibility wiring)
+  toml_writer.py    lit / arr / emit_table (aligned key=value emission)
+  __init__.py       Public API re-exports
+
+tools/          Stand-alone scripts (not part of the sim package)
+  generate_theory_curves.py  Direct-AWGN BER curves for APSK → data/theory/*.npz
+  benchmark_coding.py        FEC decoder throughput benchmark
+
+data/
+  ldpc/             Bundled .alist matrices for LDPCCode
+  theory/           Committed APSK reference tables (ber_awgn_*.npz)
 
 main.py         CLI entry point — runs full sim + optional sweep + writes outputs
 gui.py          Standalone tkinter TOML editor and sim launcher (SO-WAT GUI).
                 Project-specific only: form schemas, App, CarrierFrame, build_toml.
-tkconfig/       Reusable, project-agnostic schema-driven tkinter form toolkit
-                (schema dataclasses, render, serde, widgets, toml_writer).
-                gui.py builds its tabs from Field/Section/Tab schemas via this.
+                Imports tkconfig for render/populate/collect/emit_table.
 simulation.toml Example / default configuration
-tests/          203 tests, all passing, 100% coverage
+tests/          232 tests, all passing, 100% coverage on sim/ and main
 misc/
   __init__.py   Makes misc a package (importable by gui.py)
   gen_icon.py   build_icon() generates the app icon PNG; imported by gui.py at startup.
@@ -46,6 +70,8 @@ misc/
 memory/
   context.md    This file
   technical_notes.md  Key implementation decisions
+  feedback.md   User preferences and corrections
+  project_state.md    Current implementation state and next task
 ```
 
 ---
@@ -54,8 +80,8 @@ memory/
 
 - **Pyright:** 0 errors
 - **Ruff:** 0 errors (E701/E702 suppressed — intentional compact GUI style)
-- **Tests:** 203 passing, 0 failing
-- **Coverage:** 100% (1360 statements, 0 missed)
+- **Tests:** 232 passing, 0 failing
+- **Coverage:** 100% on sim/ + main.py (1574 statements, 0 missed)
 - Tools installed in venv: `pyright`, `ruff`, `pytest-cov`
 - Run quality checks: `.venv\Scripts\pyright.exe gui.py main.py sim/ tkconfig/ tests/`
   and `.venv\Scripts\ruff.exe check gui.py main.py sim/ tkconfig/ tests/`

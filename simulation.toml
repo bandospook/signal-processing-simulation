@@ -10,7 +10,7 @@ max_iterations         = 20
 [sweep]
 sample_rate        = 800
 ibo_db             = [0]
-noise_density_dbfs = [-85]
+noise_density_dbfs = [-100]
 
 [amplifier.am_am]
 input  = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
@@ -30,7 +30,7 @@ plots      = true
 
 [[carrier]]
 name         = "LDR_16APSK"
-modulation   = "16QAM"
+modulation   = "16APSK"
 symbol_rate  = 0.1
 sps          = 4
 rolloff      = 0.35
@@ -40,35 +40,14 @@ freq         = 0
 enabled      = true
 sweep_demod  = true
 
-[carrier.channel]
-ripple_db              = 0.5
-ripple_cycles          = 2
-max_phase_dev_deg      = 5
-phase_poly_order       = 2
-
 [[carrier]]
 name         = "HDR_16APSK"
-modulation   = "16APSK"
+modulation   = "16QAM"
 symbol_rate  = 100
 sps          = 4
 rolloff      = 0.35
 filter_span  = 8
 power_db     = 30
-freq         = -67.5
+freq         = -80
 enabled      = true
 sweep_demod  = false
-
-[carrier.channel]
-ripple_db              = 0.5
-ripple_cycles          = 2
-max_phase_dev_deg      = 5
-phase_poly_order       = 2
-
-# Optional per-carrier oscillator phase noise.  Applied at this carrier's
-# native sample rate, immediately after the channel-impairment filter.
-# Mask is interpolated log-log; flat extrapolation past the last anchor.
-# Omit the section (or set enabled = false) to disable.
-[carrier.phase_noise]
-enabled    = false
-offset_hz  = [1e2, 1e3, 1e4, 1e5, 1e6]
-dbc_per_hz = [-60, -80, -100, -120, -140]

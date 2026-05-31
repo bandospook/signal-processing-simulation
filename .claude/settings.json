@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.venv\\\\Scripts\\\\python.exe -m pytest tests/ --cov=sim --cov=main --cov-report=term-missing 2>&1)",
+      "PowerShell(.venv\\\\Scripts\\\\python.exe _compare.py 2>&1)"
+    ]
+  }
+}

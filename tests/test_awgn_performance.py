@@ -11,6 +11,7 @@ import pytest
 from sim.baseband import rrc_baseband
 from sim.modulation import bits_per_symbol
 from sim.receiver import matched_filter, receive
+from sim.theory import ber_awgn
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,12 @@ def simulate_awgn(mod: str, EsN0_dB: float, n_sym: int = 2000,
     return receive(bb + noise, mod, rolloff, filter_span, sps, reference_bits=bits)
 
 
+def _reference_ber(mod: str, EsN0_dB: float) -> float | None:
+    """Closed-form BER for mods with formulas; table lookup for APSK."""
+    r = ber_theory(mod, EsN0_dB)
+    return r if r is not None else ber_awgn(mod, EsN0_dB)
+
+
 def _interp_ebn0_at_ber(ebn0: np.ndarray, ber: np.ndarray, target: float) -> float | None:
     """Find Eb/N0 where BER crosses target via log-linear inverse interpolation."""
     lb = np.log10(np.maximum(ber, 1e-15))
@@ -137,10 +144,33 @@ def test_ber_matches_theory(mod, EsN0_dB):
     )
 
 
+# Eb/N0 chosen per APSK modulation so the table BER ≈ 3–4 %
+_APSK_TABLE_POINTS = [
+    ("16APSK", 7.0),   # table BER ≈ 3.2 %
+    ("32APSK", 8.5),   # table BER ≈ 3.5 %
+]
+
+
+@pytest.mark.parametrize("mod,ebn0_dB", _APSK_TABLE_POINTS)
+def test_ber_matches_table(mod, ebn0_dB):
+    """Measured BER must be within a factor of 2 of the precomputed npz table reference."""
+    bps = bits_per_symbol(mod.upper())
+    EsN0_dB = ebn0_dB + 10.0 * math.log10(bps)
+    result = simulate_awgn(mod, EsN0_dB, n_sym=5_000, seed=42)
+    measured = result["ber"]
+    reference = ber_awgn(mod, EsN0_dB)
+    assert reference is not None, f"{mod}: no reference table found in data/theory/"
+    assert measured > 0, f"{mod}: zero bit errors at Eb/N0={ebn0_dB} dB — SNR too high"
+    ratio = measured / reference
+    assert 0.5 <= ratio <= 2.0, (
+        f"{mod}: measured BER {measured:.4f} is {ratio:.2f}× table reference {reference:.4f}"
+    )
+
+
 # ── Theory comparison table ───────────────────────────────────────────────────
 
 _TARGET_BERS = [0.10, 0.05, 0.02, 0.01, 0.005]
-_THEORY_MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM"]
+_THEORY_MODS = ["BPSK", "DBPSK", "MSK", "QPSK", "OQPSK", "8PSK", "16QAM", "16APSK", "32APSK"]
 
 
 def test_ber_theory_table():
@@ -156,7 +186,7 @@ def test_ber_theory_table():
         esn0_arr = ebn0_arr + 10.0 * np.log10(bps)
 
         n_sym = _N_BITS_PLOT // bps
-        theory_bers = np.array([ber_theory(mod, es) for es in esn0_arr], dtype=float)
+        theory_bers = np.array([_reference_ber(mod, es) for es in esn0_arr], dtype=float)
         meas_bers = np.array([
             simulate_awgn(mod, es, n_sym=n_sym, seed=42)["ber"] for es in esn0_arr
         ])
@@ -270,8 +300,8 @@ def _plot_ber(sweep: dict) -> None:
             pass  # already drawn for this family
         else:
             theory_color = "C0" if in_bpsk_family else color
-            pairs = [(e, ber_theory(mod, es)) for e, es in zip(ebn0, esn0_arr)
-                     if ber_theory(mod, es) is not None]
+            pairs = [(e, _reference_ber(mod, es)) for e, es in zip(ebn0, esn0_arr)
+                     if _reference_ber(mod, es) is not None]
             if pairs:
                 tx, ty = zip(*pairs)
                 ax.semilogy(tx, ty, "--", color=theory_color, alpha=0.55, linewidth=1)

@@ -60,10 +60,7 @@ def test_interp_dbc_mask_rejects_nonpositive_offsets():
 # ── generate_phase_noise ─────────────────────────────────────────────────────
 
 def test_generate_phase_noise_variance_matches_integrated_psd():
-    """The realized phase noise variance is within a few % of the analytical.
-
-    σ²_φ = ∫ S_φ(f) df = 2·∫_0^{fs/2} S_φ(f) df.
-    """
+    """Realized phase noise variance matches the analytical σ²_φ = ∫ S_φ(f) df within a few %."""
     fs = 1e6
     n  = 1 << 17                        # 131072 samples for tight sample-variance CI
     # Flat mask: L(f) = -60 dBc/Hz over [10 Hz, fs/2 + slack].  S_φ = 2e-6 rad²/Hz.

@@ -29,9 +29,8 @@ def test_upsample_output_length():
 
 
 def test_upsample_image_rejection():
-    """After upsampling by L, spectral images at f0 + k*fs_orig (k≥1) must be.
+    """After upsampling by L, spectral images at f0 + k*fs_orig (k≥1) must be attenuated by at least 40 dB.
 
-    attenuated by at least 40 dB relative to the signal.
     The N-point FFT of x_up has signal at bin round(f0*N) and the first image
     at bin round((f0+1)*N); the filter should suppress the image.
     """
@@ -57,10 +56,7 @@ def test_downsample_output_length():
 
 
 def test_downsample_alias_rejection():
-    """A tone above the new Nyquist (fs_orig / (2*L)) must be attenuated >35 dB.
-
-    after downsampling.
-    """
+    """A tone above the new Nyquist (fs_orig / (2*L)) must be attenuated >35 dB after downsampling."""
     N, L = 1024, 4          # new Nyquist = 0.5/4 = 0.125 (normalised)
     f_alias = 0.30           # well above new Nyquist, below original Nyquist
     x = np.exp(1j * 2*np.pi*f_alias * np.arange(N)).astype(complex)

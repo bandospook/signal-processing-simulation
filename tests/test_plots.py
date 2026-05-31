@@ -120,7 +120,8 @@ def test_plot_carrier_detector_single_ibo():
 def test_plot_carrier_detector_zero_ber_with_inf_cnr():
     """CNR-row zero-BER annotation skips points where cnr_db is non-finite.
 
-    (e.g. zero-noise → CNR = inf), avoiding an inf x-coordinate annotation.
+    For example, zero-noise → CNR = inf, which would otherwise produce an
+    inf x-coordinate annotation.
     """
     sweep = [
         {"ibo_db": 3.0, "noise_density_dbfs": -160.0,

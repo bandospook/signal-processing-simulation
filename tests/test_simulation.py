@@ -142,9 +142,7 @@ def test_derive_block_counts_ldpc():
 
 
 def test_phase_noise_degrades_evm():
-    """Adding phase noise rotates received symbols off the constellation,.
-
-    raising EVM relative to the same point without phase noise.
+    """Adding phase noise rotates received symbols off the constellation, raising EVM vs. the baseline.
 
     Phase noise is intentionally applied to bb_ch BEFORE the chunk pipeline
     forks into reference / NL / noisy branches, so it travels with the signal
@@ -188,10 +186,9 @@ def test_phase_noise_degrades_evm():
 
 
 def test_distortion_increases_with_drive():
-    """CIR must decrease monotonically as input backoff decreases (harder drive.
+    """CIR must decrease monotonically as input backoff decreases.
 
-    → more NL compression → more inter-carrier IM distortion).
-
+    Harder drive → more NL compression → more inter-carrier IM distortion.
     Runs the wideband simulation at 5 IBO levels with no AWGN so that only
     NL-induced distortion contributes to CIR.
     """

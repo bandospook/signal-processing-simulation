@@ -129,9 +129,7 @@ def _composite_norm_factor(carriers: list[dict],
 def _prepare_carrier(carr: dict, sample_rate: float,
                      max_block_size_samples: int,
                      per_carrier_seed: int) -> tuple[np.ndarray, dict]:
-    """Generate one carrier's native-rate baseband and return the state dict.
-
-    consumed by the chunk pipeline.
+    """Generate one carrier's native-rate baseband and return the state dict consumed by the chunk pipeline.
 
     Steps: derive sample-rate ratios → derive symbol/frame counts from the
     memory budget → modulate (FEC-encoded or random uncoded bits) → optional

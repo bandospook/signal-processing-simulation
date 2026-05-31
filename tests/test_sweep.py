@@ -79,10 +79,7 @@ def test_accumulator_relative_target_inert_when_zero_errors():
 
 
 def test_parameter_sweep_capped_iterations():
-    """When the BER is too low to reach min_errors, the loop exits at max_iterations.
-
-    and the result is flagged with converged=False.
-    """
+    """When BER is too low to reach min_errors, the loop exits at max_iterations with converged=False."""
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -212,9 +209,9 @@ def test_parameter_sweep_tally_flags_target_met_when_converged():
 
 
 def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
-    """At a high-BER operating point the relative target can be met long.
+    """At a high-BER point the relative target can be met long before the absolute target.
 
-    before the absolute target — the sweep exits as soon as either fires.
+    The sweep exits as soon as either target fires.
     """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
@@ -248,10 +245,7 @@ def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
 
 
 def test_parameter_sweep_point_summary_carries_ber_ci_ebn0(capsys):
-    """The per-point summary line printed at each sweep point includes the.
-
-    carrier name, BER (or rule-of-three bound), CI half-width, and Eb/N0.
-    """
+    """Each per-point summary line includes name, BER (or rule-of-three bound), CI half-width, and Eb/N0."""
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -291,10 +285,7 @@ def test_parameter_sweep_point_summary_carries_ber_ci_ebn0(capsys):
 
 
 def test_parameter_sweep_converges_in_one_iteration_with_iter_cb():
-    """Permissive CI target converges in iteration 1; iter_cb is called with the.
-
-    iteration index and grid position.
-    """
+    """Permissive CI target converges in iteration 1; iter_cb sees the iteration index and grid position."""
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,

@@ -51,10 +51,7 @@ def _render_scalar(parent, fld: Field, row: int, col: int,
 def _render_field(parent, fld: Field, row: int,
                   variables: dict[str, tk.Variable],
                   texts: dict[str, tk.Text]) -> int:
-    """Create the widget(s) for one Field in a columns=1 layout; return the.
-
-    next free row.
-    """
+    """Create the widget(s) for one Field in a columns=1 layout; return the next free row."""
     if fld.type == "bool":
         var = tk.BooleanVar(value=bool(fld.default))
         variables[fld.key] = var
@@ -79,10 +76,7 @@ def _render_field(parent, fld: Field, row: int,
 
 def _wire_visibility(sec: Section, variables: dict[str, tk.Variable],
                      tracker: dict[str, tuple[tk.Widget, ...]]) -> None:
-    """For each gated field, trace the controlling var so the field's widgets.
-
-    show/hide live as the controller's value changes.
-    """
+    """Trace each gated field's controlling var so its widgets show/hide as the controller value changes."""
     for fld in walk_fields(sec):
         if fld.visible_when is None:
             continue
@@ -129,10 +123,11 @@ def render_section(parent, sec: Section, section_row: int,
 def render_tab(nb, schema: Tab,
                variables: dict[str, tk.Variable],
                texts: dict[str, tk.Text]) -> None:
-    """Build a Tab from its schema onto a Notebook.  Each section gets a bold.
+    """Build a Tab from its schema onto a Notebook.
 
-    title, optional separator, optional gray description, then its fields.
-    Columns 1 and 3 expand if extra width is available.
+    Each section gets a bold title, optional separator, optional gray
+    description, then its fields.  Columns 1 and 3 expand if extra width
+    is available.
     """
     frame = ttk.Frame(nb); nb.add(frame, text=schema.name)
     inner = scrollable(frame)

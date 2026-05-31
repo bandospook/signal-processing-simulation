@@ -70,10 +70,7 @@ def test_main_runs(tmp_path):
 
 
 def test_main_writes_phase_noise_plot(tmp_path):
-    """A carrier with a `[carrier.phase_noise]` block triggers a.
-
-    `<name>_phase_noise.png` next to the channel and detector plots.
-    """
+    """A carrier `[phase_noise]` block triggers `<name>_phase_noise.png` next to the other plots."""
     cfg = _make_cfg(tmp_path)
     cfg["carrier"][0]["phase_noise"] = {
         "enabled":    True,

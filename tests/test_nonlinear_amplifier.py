@@ -57,9 +57,7 @@ def test_identity_for_linear_amplifier():
 
 
 def test_two_tone_imd_increases_with_drive():
-    """Third-order IM product power relative to carrier must rise monotonically as.
-
-    drive level increases toward saturation.
+    """Third-order IM products must rise relative to the carrier as drive level approaches saturation.
 
     Two-tone test: x(t) = cos(2π f1 t) + cos(2π f2 t), normalised to peak=drive.
     IM3 products appear at 2f1-f2 and 2f2-f1; their ratio to carrier grows with drive.

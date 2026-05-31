@@ -43,11 +43,10 @@ def cfg_set(cfg: dict, path: tuple[str, ...], value) -> None:
 def populate_from_schema(schema, cfg: dict,
                          variables: dict[str, tk.Variable],
                          texts: dict[str, tk.Text]) -> None:
-    """Read each field's cfg value and push the formatted form into its.
+    """Read each field's cfg value and push the formatted form into its binding.
 
-    binding (StringVar / BooleanVar / Text widget) — dispatched by type.
-
-    For ``float_optional``: a missing / None cfg value → empty string in the
+    Dispatched by type (StringVar / BooleanVar / Text widget).  For
+    ``float_optional``: a missing / None cfg value → empty string in the
     var (which collect interprets as "omit").  For every other type, a
     missing value substitutes the field's ``default``.
     """

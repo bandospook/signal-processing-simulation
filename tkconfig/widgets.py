@@ -1,19 +1,15 @@
-"""Reusable tkinter widget helpers — tooltips, scrollable frames, the.
+"""Reusable tkinter widget helpers.
 
-labelled-entry primitive, value formatting, and a directory-picker callback.
-
-None of these know about the schema; they are the low-level building blocks
-that ``tkconfig.render`` composes.
+Tooltips, scrollable frames, the labelled-entry primitive, value formatting,
+and a directory-picker callback.  None of these know about the schema; they
+are the low-level building blocks that ``tkconfig.render`` composes.
 """
 import tkinter as tk
 from tkinter import ttk, filedialog
 
 
 def fmt(v) -> str:
-    """Format a scalar for display: integral floats lose the trailing .0,.
-
-    None becomes an empty string.
-    """
+    """Format a scalar for display: integral floats lose the trailing .0, None becomes an empty string."""
     if isinstance(v, float): return str(int(v)) if v == int(v) else f"{v:g}"
     return str(v) if v is not None else ""
 

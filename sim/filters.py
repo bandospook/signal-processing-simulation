@@ -131,9 +131,7 @@ def ola_convolve(x: np.ndarray, h: np.ndarray, block_size: int = 4096,
 def fft_ola_upsample(x: np.ndarray, L: int,
                      filter_span: int = 16, block_size: int = 4096,
                      chunk_cb: _ChunkCB = None) -> np.ndarray:
-    """Upsample x by integer L via zero-insertion and Kaiser-windowed sinc filter.
-
-    applied with OLA convolution.
+    """Upsample x by integer L via zero-insertion + Kaiser-windowed sinc, OLA-convolved.
 
     Filter satisfies the Nyquist criterion at original sample locations:
       h[n] = sinc(n/L) * kaiser(n, β=8)
@@ -157,8 +155,7 @@ def fft_ola_downsample(x: np.ndarray, L: int,
                        chunk_cb: _ChunkCB = None) -> np.ndarray:
     """Downsample x by integer L via anti-alias Kaiser-windowed sinc LPF.
 
-    (cutoff at the new Nyquist) applied with OLA, then decimate.
-
+    Cutoff is at the new Nyquist; OLA-convolved, then decimated.
     Filter has unity passband gain:
       h[n] = sinc(n/L) * kaiser(n, β=8) / L
     """

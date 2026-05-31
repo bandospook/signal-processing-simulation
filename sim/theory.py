@@ -33,10 +33,9 @@ _TABLE_CACHE: dict[str, dict | None] = {}
 
 
 def _load_table(modulation: str) -> dict | None:
-    """Return the cached AWGN reference table for `modulation`, or None when.
+    """Return the cached AWGN reference table for `modulation`, or None when the npz is absent.
 
-    the npz is absent.  The negative case is cached too so we don't stat the
-    filesystem on every call.
+    The negative case is cached too so we don't stat the filesystem on every call.
     """
     if modulation in _TABLE_CACHE:
         return _TABLE_CACHE[modulation]

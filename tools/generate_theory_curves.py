@@ -94,10 +94,7 @@ def _measure_iter(modulation: str, ebn0_db: float, mod_kwargs: dict,
 
 def _measure_point(modulation: str, ebn0_db: float, mod_kwargs: dict,
                    seed: int) -> dict:
-    """Accumulate iterations until the running BER's Wilson half-width is.
-
-    within ``_TARGET_CI_REL`` of the BER, or until ``_MAX_ITER`` is hit.
-    """
+    """Iterate until Wilson half-width is within ``_TARGET_CI_REL`` of the running BER, or ``_MAX_ITER``."""
     rng = np.random.default_rng(seed)
     n_bits = 0
     n_errors = 0

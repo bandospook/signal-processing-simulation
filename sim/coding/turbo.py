@@ -139,6 +139,7 @@ class TurboCode:
     """
 
     def __init__(self, k: int, interleaver_seed: int = 0xC0DE) -> None:
+        """Build a rate-1/3 PCCC for `k`-bit data frames with a seeded interleaver."""
         self.k = k
         self.n_states = 8
         self.rate = 1.0 / 3.0

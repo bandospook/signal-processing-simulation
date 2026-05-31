@@ -18,6 +18,7 @@ def _apply(x):
 
 
 def test_zero_input_gives_zero_output():
+    """Zero input gives zero output."""
     assert np.allclose(_apply(np.zeros(10, dtype=complex)), 0)
 
 
@@ -56,8 +57,8 @@ def test_identity_for_linear_amplifier():
 
 
 def test_two_tone_imd_increases_with_drive():
-    """
-    Third-order IM product power relative to carrier must rise monotonically as
+    """Third-order IM product power relative to carrier must rise monotonically as.
+
     drive level increases toward saturation.
 
     Two-tone test: x(t) = cos(2π f1 t) + cos(2π f2 t), normalised to peak=drive.

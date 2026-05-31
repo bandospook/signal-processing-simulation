@@ -1,3 +1,9 @@
+"""Digital-filter primitives for the simulator.
+
+RRC pulse shaping, FFT-based overlap-add convolution and resampling, and
+per-carrier channel impairments (amplitude ripple + phase nonlinearity
+applied in the frequency domain).
+"""
 import math
 from collections.abc import Callable
 
@@ -8,8 +14,7 @@ _CHUNK_REPORT = 64
 
 
 class OLAState:
-    """
-    Stateful overlap-add convolution processor.
+    """Stateful overlap-add convolution processor.
 
     Each call to process() feeds one block of input samples and returns
     block_size output samples, maintaining the overlap tail between calls.
@@ -17,6 +22,7 @@ class OLAState:
     """
 
     def __init__(self, h: np.ndarray, block_size: int) -> None:
+        """Cache the FFT of `h` and pre-zero the overlap tail."""
         M = len(h)
         self._N_fft = 2 ** int(np.ceil(np.log2(block_size + M - 1)))
         self._H    = np.fft.fft(h.astype(complex), self._N_fft)
@@ -53,8 +59,7 @@ class OLAState:
 
 
 def x_up_block(bb: np.ndarray, L: int, block_start: int, block_size: int) -> np.ndarray:
-    """
-    One block of the zero-inserted upsampled signal without allocating the full array.
+    """One block of the zero-inserted upsampled signal without allocating the full array.
 
     Equivalent to x_up[block_start : block_start + block_size] where
     x_up = zeros(len(bb) * L) with x_up[::L] = bb, but only the block is built.
@@ -98,8 +103,8 @@ def rrc_coeffs(filter_span: int, rolloff: float, sps: int) -> np.ndarray:
 
 def ola_convolve(x: np.ndarray, h: np.ndarray, block_size: int = 4096,
                  chunk_cb: _ChunkCB = None) -> np.ndarray:
-    """
-    Linear convolution of x with h using FFT overlap-and-add.
+    """Linear convolution of x with h using FFT overlap-and-add.
+
     Output length: len(x) + len(h) - 1.
     chunk_cb(done, total) is called every _CHUNK_REPORT blocks if provided.
     """
@@ -126,8 +131,8 @@ def ola_convolve(x: np.ndarray, h: np.ndarray, block_size: int = 4096,
 def fft_ola_upsample(x: np.ndarray, L: int,
                      filter_span: int = 16, block_size: int = 4096,
                      chunk_cb: _ChunkCB = None) -> np.ndarray:
-    """
-    Upsample x by integer L via zero-insertion and Kaiser-windowed sinc filter
+    """Upsample x by integer L via zero-insertion and Kaiser-windowed sinc filter.
+
     applied with OLA convolution.
 
     Filter satisfies the Nyquist criterion at original sample locations:
@@ -150,8 +155,8 @@ def fft_ola_upsample(x: np.ndarray, L: int,
 def fft_ola_downsample(x: np.ndarray, L: int,
                        filter_span: int = 16, block_size: int = 4096,
                        chunk_cb: _ChunkCB = None) -> np.ndarray:
-    """
-    Downsample x by integer L via anti-alias Kaiser-windowed sinc LPF
+    """Downsample x by integer L via anti-alias Kaiser-windowed sinc LPF.
+
     (cutoff at the new Nyquist) applied with OLA, then decimate.
 
     Filter has unity passband gain:
@@ -171,8 +176,7 @@ def fft_ola_downsample(x: np.ndarray, L: int,
 
 def apply_channel_impairment(signal: np.ndarray, sample_rate: float,
                               signal_bw: float, channel_cfg: dict) -> np.ndarray:
-    """
-    Apply passband amplitude ripple and phase nonlinearity in the frequency domain.
+    """Apply passband amplitude ripple and phase nonlinearity in the frequency domain.
 
     H(f) = A(f) * exp(j * phi(f))
       A(f)   = 1 + r * cos(pi * ripple_cycles * f_norm)   [in-band only]

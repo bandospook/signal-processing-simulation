@@ -1,4 +1,4 @@
-"""Generate AWGN-only BER reference curves for APSK modulations.
+r"""Generate AWGN-only BER reference curves for APSK modulations.
 
 Uses the same direct-AWGN chain as ``tests/test_awgn_performance.py``: generate
 RRC-shaped baseband at the carrier's native sample rate, add complex Gaussian
@@ -19,9 +19,9 @@ means deep BER points (~1e-6) finish in tens of seconds rather than minutes.
 
 Run from the repo root:
 
-    .venv\\Scripts\\python.exe tools/generate_theory_curves.py                 # both
-    .venv\\Scripts\\python.exe tools/generate_theory_curves.py --modulation 16APSK
-    .venv\\Scripts\\python.exe tools/generate_theory_curves.py --smoke         # 2 pts each
+    .venv\Scripts\python.exe tools/generate_theory_curves.py                 # both
+    .venv\Scripts\python.exe tools/generate_theory_curves.py --modulation 16APSK
+    .venv\Scripts\python.exe tools/generate_theory_curves.py --smoke         # 2 pts each
 """
 import argparse
 import math
@@ -94,8 +94,10 @@ def _measure_iter(modulation: str, ebn0_db: float, mod_kwargs: dict,
 
 def _measure_point(modulation: str, ebn0_db: float, mod_kwargs: dict,
                    seed: int) -> dict:
-    """Accumulate iterations until the running BER's Wilson half-width is
-    within ``_TARGET_CI_REL`` of the BER, or until ``_MAX_ITER`` is hit."""
+    """Accumulate iterations until the running BER's Wilson half-width is.
+
+    within ``_TARGET_CI_REL`` of the BER, or until ``_MAX_ITER`` is hit.
+    """
     rng = np.random.default_rng(seed)
     n_bits = 0
     n_errors = 0
@@ -173,6 +175,7 @@ def generate(modulation: str, seed: int = 0, smoke: bool = False) -> Path:
 
 
 def main() -> None:
+    """Main."""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--modulation", choices=("all", "16APSK", "32APSK"),
                    default="all")

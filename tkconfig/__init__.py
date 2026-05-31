@@ -1,4 +1,5 @@
-"""tkconfig — a small, project-agnostic toolkit for building tkinter TOML
+"""tkconfig — a small, project-agnostic toolkit for building tkinter TOML.
+
 configuration editors from a declarative schema.
 
 Define a form as `Tab`/`Section`/`Field` data, then:

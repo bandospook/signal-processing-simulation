@@ -18,17 +18,19 @@ def test_ola_convolve_matches_numpy():
 # ── fft_ola_upsample ──────────────────────────────────────────────────────────
 
 def test_upsample_factor_1_is_identity():
+    """Upsample factor 1 is identity."""
     x = np.array([1+0j, 2+0j, 3+0j, 4+0j])
     assert np.allclose(fft_ola_upsample(x, 1), x)
 
 
 def test_upsample_output_length():
+    """Upsample output length."""
     assert len(fft_ola_upsample(np.ones(64, dtype=complex), 4)) == 256
 
 
 def test_upsample_image_rejection():
-    """
-    After upsampling by L, spectral images at f0 + k*fs_orig (k≥1) must be
+    """After upsampling by L, spectral images at f0 + k*fs_orig (k≥1) must be.
+
     attenuated by at least 40 dB relative to the signal.
     The N-point FFT of x_up has signal at bin round(f0*N) and the first image
     at bin round((f0+1)*N); the filter should suppress the image.
@@ -44,17 +46,19 @@ def test_upsample_image_rejection():
 # ── fft_ola_downsample ────────────────────────────────────────────────────────
 
 def test_downsample_factor_1_is_identity():
+    """Downsample factor 1 is identity."""
     x = np.array([1+0j, 2+0j, 3+0j, 4+0j])
     assert np.allclose(fft_ola_downsample(x, 1), x)
 
 
 def test_downsample_output_length():
+    """Downsample output length."""
     assert len(fft_ola_downsample(np.ones(64, dtype=complex), 4)) == 16
 
 
 def test_downsample_alias_rejection():
-    """
-    A tone above the new Nyquist (fs_orig / (2*L)) must be attenuated >35 dB
+    """A tone above the new Nyquist (fs_orig / (2*L)) must be attenuated >35 dB.
+
     after downsampling.
     """
     N, L = 1024, 4          # new Nyquist = 0.5/4 = 0.125 (normalised)
@@ -65,8 +69,7 @@ def test_downsample_alias_rejection():
 
 
 def test_upsample_downsample_roundtrip():
-    """
-    Upsample by L then downsample by L must recover a band-limited signal.
+    """Upsample by L then downsample by L must recover a band-limited signal.
 
     A broadband random signal contains content near the Nyquist where the
     Kaiser-sinc filter rolls off, so we use a signal limited to the bottom
@@ -86,6 +89,7 @@ def test_upsample_downsample_roundtrip():
 # ── apply_channel_impairment ──────────────────────────────────────────────────
 
 def test_channel_disabled_is_identity():
+    """Channel disabled is identity."""
     rng = np.random.default_rng(0)
     x = rng.standard_normal(256) + 1j * rng.standard_normal(256)
     out = apply_channel_impairment(x, sample_rate=1e6, signal_bw=0.4e6,
@@ -130,8 +134,8 @@ def test_pure_phase_preserves_amplitude():
 
 
 def test_pure_phase_does_not_change_out_of_band():
-    """
-    Out-of-band content is left untouched (H=1 outside the signal bandwidth).
+    """Out-of-band content is left untouched (H=1 outside the signal bandwidth).
+
     Use a tone well above bw/2; its power should survive downsampling unchanged.
     """
     N = 512
@@ -164,9 +168,7 @@ def test_resample_poly_upsample_2_samples():
 
 
 def test_resample_poly_roundtrip_3_2():
-    """
-    Roundtrip by 3/2 then 2/3 must recover a band-limited signal.
-    """
+    """Roundtrip by 3/2 then 2/3 must recover a band-limited signal."""
     rng = np.random.default_rng(42)
     N = 512
     X = np.zeros(N, dtype=complex)
@@ -179,8 +181,10 @@ def test_resample_poly_roundtrip_3_2():
 
 
 def test_rrc_singularity_rolloff_025():
-    """rolloff=0.25 puts the Nyquist singularity at t=1.0; with sps=4 that sample
-    is always present, exercising the special-case branch in rrc_coeffs."""
+    """rolloff=0.25 puts the Nyquist singularity at t=1.0; with sps=4 that sample.
+
+    is always present, exercising the special-case branch in rrc_coeffs.
+    """
     h = rrc_coeffs(filter_span=2, rolloff=0.25, sps=4)
     assert len(h) > 0
     assert np.all(np.isfinite(h))
@@ -199,8 +203,7 @@ def test_ola_convolve_chunk_cb():
 
 
 def test_rational_resample_no_fractional_L_error():
-    """
-    A wideband simulation with L_float=62.5 must not raise ValueError.
+    """A wideband simulation with L_float=62.5 must not raise ValueError.
 
     sample_rate=500e6, symbol_rate=2e6, sps=4 → L_float=62.5.
     """

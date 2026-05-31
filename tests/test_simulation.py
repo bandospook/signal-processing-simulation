@@ -96,8 +96,10 @@ def test_simulation_raises_sample_rate_below_native():
 
 def test_coded_carrier_decodes():
     """A convolutionally-coded carrier is FEC-encoded into the chain and decoded out.
+
     block_length=400 → coded_bits=(400+6)*2=812 per frame; sps=4 → ~3248 samples/frame.
-    Budget of 7000 fits 2 frames."""
+    Budget of 7000 fits 2 frames.
+    """
     coded = dict(name="cc", modulation="BPSK", symbol_rate=1e6, sps=4,
                  rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
                  coding=dict(scheme="convolutional", block_length=400))
@@ -140,7 +142,8 @@ def test_derive_block_counts_ldpc():
 
 
 def test_phase_noise_degrades_evm():
-    """Adding phase noise rotates received symbols off the constellation,
+    """Adding phase noise rotates received symbols off the constellation,.
+
     raising EVM relative to the same point without phase noise.
 
     Phase noise is intentionally applied to bb_ch BEFORE the chunk pipeline
@@ -185,8 +188,8 @@ def test_phase_noise_degrades_evm():
 
 
 def test_distortion_increases_with_drive():
-    """
-    CIR must decrease monotonically as input backoff decreases (harder drive
+    """CIR must decrease monotonically as input backoff decreases (harder drive.
+
     → more NL compression → more inter-carrier IM distortion).
 
     Runs the wideband simulation at 5 IBO levels with no AWGN so that only

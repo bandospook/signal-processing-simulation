@@ -1,5 +1,4 @@
-"""
-Constellation definitions and symbol-level utilities for all supported modulations.
+"""Constellation definitions and symbol-level utilities for all supported modulations.
 
 Supported modulations
 ---------------------
@@ -42,6 +41,7 @@ _ROTATIONAL_SYMMETRY: dict[str, int] = {
 
 
 def bits_per_symbol(mod: str) -> int:
+    """Return the number of bits carried by one symbol of `mod`."""
     try:
         return _BITS_PER_SYMBOL[mod.upper()]
     except KeyError:
@@ -67,8 +67,8 @@ def _gray_decode(g: int) -> int:
 # ── Constellation builders ────────────────────────────────────────────────────
 
 def _psk_constellation(M: int, offset: float = 0.0) -> np.ndarray:
-    """
-    Gray-coded M-PSK indexed by bit pattern 0..M-1.
+    """Gray-coded M-PSK indexed by bit pattern 0..M-1.
+
     Symbol for bit pattern p is at angle: gray_decode(p) * 2π/M + offset.
     Unit average power (all symbols on the unit circle).
     """
@@ -77,8 +77,8 @@ def _psk_constellation(M: int, offset: float = 0.0) -> np.ndarray:
 
 
 def _qam16_constellation() -> np.ndarray:
-    """
-    Standard Gray-coded 16QAM indexed by bit pattern 0..15.
+    """Standard Gray-coded 16QAM indexed by bit pattern 0..15.
+
     Bits split as [b3 b2] → I axis, [b1 b0] → Q axis, each 2-bit Gray coded.
     Normalised to unit average power (divisor √10).
     """
@@ -90,8 +90,8 @@ def _qam16_constellation() -> np.ndarray:
 
 
 def _apsk16_constellation(gamma: float = 2.57) -> np.ndarray:
-    """
-    16APSK on 2 rings (4 inner + 12 outer), unit average power.
+    """16APSK on 2 rings (4 inner + 12 outer), unit average power.
+
     gamma = r2/r1 (outer/inner radius ratio, default 2.57 per DVB-S2).
 
     Bit mapping: patterns 0–3  → inner ring, Gray-coded by angle (4 = 2²).
@@ -110,8 +110,8 @@ def _apsk16_constellation(gamma: float = 2.57) -> np.ndarray:
 
 
 def _apsk32_constellation(gamma1: float = 2.84, gamma2: float = 5.27) -> np.ndarray:
-    """
-    32APSK on 3 rings (4 inner + 12 mid + 16 outer), unit average power.
+    """32APSK on 3 rings (4 inner + 12 mid + 16 outer), unit average power.
+
     gamma1 = r2/r1, gamma2 = r3/r1 (defaults per DVB-S2).
 
     Bit mapping: patterns  0–3  → ring 1 (4 pts, Gray-coded, 4 = 2²).
@@ -130,8 +130,7 @@ def _apsk32_constellation(gamma1: float = 2.84, gamma2: float = 5.27) -> np.ndar
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def constellation(mod: str, **kwargs) -> np.ndarray:
-    """
-    Return the complex symbol alphabet for the given modulation, indexed by bit pattern.
+    """Return the complex symbol alphabet for the given modulation, indexed by bit pattern.
 
     kwargs for APSK:
         apsk_gamma        float  r2/r1 for 16APSK (default 2.57)
@@ -156,8 +155,8 @@ def constellation(mod: str, **kwargs) -> np.ndarray:
 
 
 def map_bits(bits: np.ndarray, mod: str, **kwargs) -> np.ndarray:
-    """
-    Map a flat integer bit array (values 0/1, length = N × bits_per_symbol) to
+    """Map a flat integer bit array (values 0/1, length = N × bits_per_symbol) to.
+
     N complex symbols.  Bits are packed MSB-first within each symbol.
     """
     bps = bits_per_symbol(mod)
@@ -170,13 +169,13 @@ def map_bits(bits: np.ndarray, mod: str, **kwargs) -> np.ndarray:
 
 
 def decide(samples: np.ndarray, mod: str, **kwargs) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Nearest-neighbour hard decision for the given modulation.
+    """Nearest-neighbour hard decision for the given modulation.
 
     Returns
     -------
     symbol_decisions : complex ndarray  — nearest constellation point per sample
     bit_decisions    : int ndarray      — decoded bits (flat, 0/1, length N×bps)
+
     """
     C = constellation(mod, **kwargs)
     bps = bits_per_symbol(mod)
@@ -191,8 +190,7 @@ def decide(samples: np.ndarray, mod: str, **kwargs) -> tuple[np.ndarray, np.ndar
 # ── Differential encode / decode (DBPSK) ─────────────────────────────────────
 
 def differential_encode(bits: np.ndarray) -> np.ndarray:
-    """
-    DBPSK differential encoder.
+    """DBPSK differential encoder.
 
     d[n] = d[n-1] XOR b[n],  d[-1] = 0.
     Equivalently: d[n] = XOR of b[0..n] = cumulative XOR.
@@ -201,8 +199,7 @@ def differential_encode(bits: np.ndarray) -> np.ndarray:
 
 
 def differential_decode(sym_decisions: np.ndarray) -> np.ndarray:
-    """
-    DBPSK differential decoder.
+    """DBPSK differential decoder.
 
     Input:  N BPSK symbol decisions ∈ {−1, +1}.
     Output: N−1 decoded bits ∈ {0, 1}.

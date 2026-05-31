@@ -46,11 +46,13 @@ def test_interp_dbc_mask_accepts_unsorted_offsets():
 
 
 def test_interp_dbc_mask_rejects_mismatched_lengths():
+    """Interp dbc mask rejects mismatched lengths."""
     with pytest.raises(ValueError):
         interp_dbc_mask(np.array([1e3]), [1e2, 1e4], [-60])
 
 
 def test_interp_dbc_mask_rejects_nonpositive_offsets():
+    """Interp dbc mask rejects nonpositive offsets."""
     with pytest.raises(ValueError):
         interp_dbc_mask(np.array([1e3]), [0.0, 1e4], [-60, -100])
 
@@ -58,8 +60,10 @@ def test_interp_dbc_mask_rejects_nonpositive_offsets():
 # ── generate_phase_noise ─────────────────────────────────────────────────────
 
 def test_generate_phase_noise_variance_matches_integrated_psd():
-    """The realized phase noise variance is within a few % of the analytical
-    σ²_φ = ∫ S_φ(f) df = 2·∫_0^{fs/2} S_φ(f) df."""
+    """The realized phase noise variance is within a few % of the analytical.
+
+    σ²_φ = ∫ S_φ(f) df = 2·∫_0^{fs/2} S_φ(f) df.
+    """
     fs = 1e6
     n  = 1 << 17                        # 131072 samples for tight sample-variance CI
     # Flat mask: L(f) = -60 dBc/Hz over [10 Hz, fs/2 + slack].  S_φ = 2e-6 rad²/Hz.
@@ -74,6 +78,7 @@ def test_generate_phase_noise_variance_matches_integrated_psd():
 
 
 def test_generate_phase_noise_rejects_short_arrays():
+    """Generate phase noise rejects short arrays."""
     rng = np.random.default_rng(0)
     with pytest.raises(ValueError):
         generate_phase_noise(1, 1e6, [1e3], [-100.0], rng)

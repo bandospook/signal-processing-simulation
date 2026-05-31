@@ -70,6 +70,7 @@ class ConvolutionalCode:
 
     def __init__(self, generators: tuple[int, ...] = (0o171, 0o133), K: int = 7,
                  block_length: int = 1024) -> None:
+        """Construct a convolutional code with the given generators and K."""
         self.K = K
         self.generators = tuple(generators)
         self.n = len(self.generators)            # coded bits per input bit

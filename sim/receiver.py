@@ -6,8 +6,7 @@ from .modulation import bits_per_symbol, constellation, decide, differential_dec
 
 def matched_filter(signal: np.ndarray, rolloff: float,
                    filter_span: int, sps: int) -> np.ndarray:
-    """
-    Apply receive-side RRC matched filter via OLA convolution.
+    """Apply receive-side RRC matched filter via OLA convolution.
 
     Strips the filter group delay so that symbol centres align with
     the same indices they occupied in the transmit baseband (i.e. 0, sps, 2*sps …).
@@ -20,8 +19,7 @@ def matched_filter(signal: np.ndarray, rolloff: float,
 
 
 def measure_evm_rms(samples: np.ndarray, ideal: np.ndarray) -> float:
-    """
-    RMS EVM as a percentage of the RMS constellation radius.
+    """RMS EVM as a percentage of the RMS constellation radius.
 
     samples : complex received samples (one per symbol)
     ideal   : complex ideal constellation points (nearest decision)
@@ -48,8 +46,7 @@ def _logsumexp(values: np.ndarray, axis: int) -> np.ndarray:
 
 def soft_demap(samples: np.ndarray, modulation: str, noise_var: float,
                **mod_kwargs) -> np.ndarray:
-    """
-    Exact per-bit log-likelihood ratios (LLRs) for constellation-mapped symbols.
+    """Exact per-bit log-likelihood ratios (LLRs) for constellation-mapped symbols.
 
     Returns one LLR per coded bit, MSB-first within each symbol (matching
     map_bits / decide), flattened to length n_symbols * bits_per_symbol.
@@ -85,31 +82,22 @@ def receive(signal: np.ndarray,
             sps: int,
             reference_bits: np.ndarray | None = None,
             **mod_kwargs) -> dict:
-    """
-    Full receive chain for any supported modulation.
+    """Full receive chain for any supported modulation.
 
-    Steps
-    -----
-    1. RRC matched filter (group-delay compensated)
-    2. Symbol sampling  — I at [0::sps]; for OQPSK also Q at [sps//2::sps]
-    3. Nearest-neighbour hard decision
-    4. For DBPSK: differential decode
-    5. Phase-ambiguity-resolved BER (tries all rotationally symmetric equivalents)
-    6. RMS EVM
+    Pipeline: RRC matched filter (group-delay compensated) → symbol sampling
+    (I at [0::sps]; for OQPSK also Q at [sps//2::sps]) → nearest-neighbour
+    hard decision → for DBPSK, differential decode → phase-ambiguity-resolved
+    BER (tries all rotationally symmetric equivalents) → RMS EVM.
 
-    Parameters
-    ----------
-    signal         : complex baseband at native sample rate
-    modulation     : modulation name string
-    rolloff        : RRC rolloff factor
-    filter_span    : RRC filter half-span in symbols
-    sps            : samples per symbol
-    reference_bits : transmitted data bits for BER (None → BER not computed)
-    **mod_kwargs   : passed to constellation/decide (e.g. apsk_gamma)
+    Inputs: `signal` is the complex baseband at native sample rate;
+    `modulation` is the modulation name; `rolloff` and `filter_span`
+    configure the RRC matched filter; `sps` is samples per symbol;
+    `reference_bits` is the transmitted data bits used for BER (None
+    skips BER); `**mod_kwargs` are forwarded to the constellation /
+    decide helpers (e.g. `apsk_gamma`).
 
-    Returns
-    -------
-    dict with keys: samples, decisions, ber, evm_rms
+    Returns a dict with keys ``samples``, ``decisions``, ``ber``,
+    ``evm_rms``, ``n_bits``, ``n_errors``.
     """
     mod = modulation.upper()
     if mod == "MSK":
@@ -161,8 +149,7 @@ def receive(signal: np.ndarray,
 
 def _msk_receive(signal: np.ndarray, sps: int,
                  reference_bits: np.ndarray | None) -> dict:
-    """
-    Coherent MSK receiver via the offset-QPSK / half-sine matched filter.
+    """Coherent MSK receiver via the offset-QPSK / half-sine matched filter.
 
     MSK is offset-QPSK with a half-sine pulse (see sim.baseband._msk_baseband):
     the in-phase rail carries even-indexed bits, the quadrature rail (delayed
@@ -213,8 +200,7 @@ def _msk_receive(signal: np.ndarray, sps: int,
 
 def _ber_with_ambiguity(samples: np.ndarray, reference_bits: np.ndarray,
                         mod: str, **mod_kwargs) -> tuple[float, int, int]:
-    """
-    BER with phase-ambiguity resolution.
+    """BER with phase-ambiguity resolution.
 
     Tries all N rotationally equivalent orientations of the received samples
     (where N = rotational_symmetry(mod)) and returns (best_ber, n_bits, best_errors)

@@ -9,7 +9,7 @@ _AM_PM = {"input":  [0.0, 0.5, 1.0], "phase_deg": [0.0, 1.0, 3.0]}
 
 
 def test_accumulator_ber_none_when_empty():
-    """ber is None when no bits have been accumulated."""
+    """Ber is None when no bits have been accumulated."""
     a = _ErrorAccumulator()
     assert a.ber is None
     assert a.uncoded_ber is None
@@ -42,8 +42,10 @@ def test_accumulator_not_converged_below_min_errors():
 
 
 def test_accumulator_relative_target_meets_at_high_ber():
-    """target_rel can declare convergence when the absolute target is far too
-    tight to ever be met at the operating BER but the relative target is."""
+    """target_rel can declare convergence when the absolute target is far too.
+
+    tight to ever be met at the operating BER but the relative target is.
+    """
     a = _ErrorAccumulator()
     # 50000 trials, 500 errors → BER = 0.01, Wilson half-width ≈ 8.7e-4.
     a.add(n_bits=50_000, n_errors=500)
@@ -77,8 +79,10 @@ def test_accumulator_relative_target_inert_when_zero_errors():
 
 
 def test_parameter_sweep_capped_iterations():
-    """When the BER is too low to reach min_errors, the loop exits at max_iterations
-    and the result is flagged with converged=False."""
+    """When the BER is too low to reach min_errors, the loop exits at max_iterations.
+
+    and the result is flagged with converged=False.
+    """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -111,9 +115,11 @@ def test_parameter_sweep_capped_iterations():
 
 
 def test_parameter_sweep_chunk_print_carries_iter_prefix_and_tally():
-    """chunk_print receives a unified status line for both in-flight chunks
+    """chunk_print receives a unified status line for both in-flight chunks.
+
     and post-iteration tallies; both forms share fixed-width columns for the
-    cumulative bits/errors/BER/CI fields."""
+    cumulative bits/errors/BER/CI fields.
+    """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -206,8 +212,10 @@ def test_parameter_sweep_tally_flags_target_met_when_converged():
 
 
 def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
-    """At a high-BER operating point the relative target can be met long
-    before the absolute target — the sweep exits as soon as either fires."""
+    """At a high-BER operating point the relative target can be met long.
+
+    before the absolute target — the sweep exits as soon as either fires.
+    """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -240,8 +248,10 @@ def test_parameter_sweep_relative_target_short_circuits_high_ber_point():
 
 
 def test_parameter_sweep_point_summary_carries_ber_ci_ebn0(capsys):
-    """The per-point summary line printed at each sweep point includes the
-    carrier name, BER (or rule-of-three bound), CI half-width, and Eb/N0."""
+    """The per-point summary line printed at each sweep point includes the.
+
+    carrier name, BER (or rule-of-three bound), CI half-width, and Eb/N0.
+    """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,
@@ -281,8 +291,10 @@ def test_parameter_sweep_point_summary_carries_ber_ci_ebn0(capsys):
 
 
 def test_parameter_sweep_converges_in_one_iteration_with_iter_cb():
-    """Permissive CI target converges in iteration 1; iter_cb is called with the
-    iteration index and grid position."""
+    """Permissive CI target converges in iteration 1; iter_cb is called with the.
+
+    iteration index and grid position.
+    """
     carriers = [dict(
         name="c1", modulation="BPSK", symbol_rate=1e6, sps=4,
         rolloff=0.35, filter_span=8, power_db=0.0, freq=0.0,

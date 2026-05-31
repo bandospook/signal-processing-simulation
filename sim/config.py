@@ -13,6 +13,7 @@ _SIM_DEFAULTS = {
 
 
 def load_config(path: str | Path = "simulation.toml") -> dict:
+    """Load `path` as TOML, convert MHz inputs to Hz, and fill `[simulation]` defaults."""
     with open(Path(path), "rb") as f:
         cfg = tomllib.load(f)
     # TOML stores human-readable MHz; convert to Hz for the simulation.

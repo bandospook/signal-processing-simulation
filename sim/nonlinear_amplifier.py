@@ -6,16 +6,12 @@ import numpy as np
 def nonlinear_amplifier(signal_in: np.ndarray,
                         am_am_cfg: dict,
                         am_pm_cfg: dict) -> np.ndarray:
-    """
-    Apply a memoryless nonlinear amplifier using lookup-table AM-AM and AM-PM curves.
+    """Apply a memoryless nonlinear amplifier using lookup-table AM-AM/AM-PM curves.
 
-    Parameters:
-        signal_in:  Complex baseband input signal (normalised so peak amplitude = 1)
-        am_am_cfg:  Dict with keys 'input' and 'output' (amplitude → amplitude)
-        am_pm_cfg:  Dict with keys 'input' and 'phase_deg' (amplitude → degrees)
-
-    Returns:
-        Complex baseband output signal
+    `signal_in` is the complex baseband (normalised so peak amplitude = 1);
+    `am_am_cfg` and `am_pm_cfg` are dicts with `input`/`output` and
+    `input`/`phase_deg` lists respectively (piecewise-linear breakpoints).
+    Returns the complex baseband output signal.
     """
     am_in  = np.asarray(am_am_cfg["input"],    dtype=float)
     am_out = np.asarray(am_am_cfg["output"],   dtype=float)

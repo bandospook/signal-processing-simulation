@@ -1,8 +1,7 @@
-"""
-Tests for sim.modulation and the end-to-end baseband → receive chain.
+r"""Tests for sim.modulation and the end-to-end baseband → receive chain.
 
 Run with:
-    .venv\\Scripts\\python.exe -m pytest tests/ -v
+    .venv\Scripts\python.exe -m pytest tests/ -v
 """
 
 import numpy as np
@@ -92,8 +91,7 @@ _E2E_CASES = [
 
 @pytest.mark.parametrize("mod,n_sym,sym_rate,sps", _E2E_CASES)
 def test_noiseless_ber_zero(mod, n_sym, sym_rate, sps):
-    """
-    With no noise and no nonlinearity (amplitude = 1, phase = 0), BER must be 0.
+    """With no noise and no nonlinearity (amplitude = 1, phase = 0), BER must be 0.
 
     The baseband is generated, upsampled by a factor of 1 (no interpolation
     filter artefacts), then passed directly through the matched filter receiver.
@@ -118,7 +116,9 @@ def test_noiseless_ber_zero(mod, n_sym, sym_rate, sps):
 @pytest.mark.parametrize("mod,n_sym,sym_rate,sps", _E2E_CASES)
 def test_evm_noiseless_low(mod, n_sym, sym_rate, sps):
     """Noiseless EVM must be below 5% (residual from filter truncation only).
-    MSK is skipped — constant-envelope signal has no discrete constellation."""
+
+    MSK is skipped — constant-envelope signal has no discrete constellation.
+    """
     native_rate = float(sps) * sym_rate
     bb, _t, bits, _symbols = rrc_baseband(
         mod, n_sym, sym_rate, native_rate,
@@ -134,11 +134,13 @@ def test_evm_noiseless_low(mod, n_sym, sym_rate, sps):
 # ── Error paths ───────────────────────────────────────────────────────────────
 
 def test_bits_per_symbol_unknown():
+    """Bits per symbol unknown."""
     with pytest.raises(ValueError, match="Unknown modulation"):
         bits_per_symbol("UNKNOWN_MOD")
 
 
 def test_constellation_unknown():
+    """Constellation unknown."""
     with pytest.raises(ValueError, match="Unknown modulation"):
         constellation("UNKNOWN_MOD")
 

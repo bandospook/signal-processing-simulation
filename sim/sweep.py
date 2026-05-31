@@ -90,8 +90,8 @@ def parameter_sweep(carriers: list[dict],
                     chunk_print: _PrintCB = None,
                     point_cb: _PointCB = None,
                     iter_cb: _IterCB = None) -> tuple[dict, list[dict]]:
-    """
-    Run the simulation on a 2-D grid of IBO × noise density values, with
+    """Run the simulation on a 2-D grid of IBO × noise density values, with.
+
     adaptive iteration at each grid point until every demodulated carrier
     meets the Wilson-CI half-width target (or the iteration cap is hit).
 

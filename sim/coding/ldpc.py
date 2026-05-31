@@ -147,6 +147,7 @@ class LDPCCode:
     """
 
     def __init__(self, alist_path: str | Path) -> None:
+        """Load the parity-check matrix from an .alist file at `alist_path`."""
         check_vars, n, m = _parse_alist(alist_path)
         self.n = n
         self.m = m

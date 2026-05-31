@@ -1,3 +1,10 @@
+"""All matplotlib / markdown output for the simulator.
+
+Wideband PSD, AM-AM/AM-PM curves, per-carrier detector grid (BER/EVM/
+CNR-family vs IBO and vs CNR) plus standalone panel PNGs, channel response,
+phase-noise mask + cumulative RMS jitter, and the flat-table `report.md`
+writer.
+"""
 from pathlib import Path
 
 import numpy as np
@@ -23,8 +30,8 @@ def psd_db(sig: np.ndarray, fs: float,
 def plot_nl_tables(am_am_cfg: dict, am_pm_cfg: dict,
                    input_backoff_db: float = 0.0,
                    save_path: str | None = None) -> None:
-    """
-    Plot AM-AM and AM-PM curves from config lookup tables.
+    """Plot AM-AM and AM-PM curves from config lookup tables.
+
     Marks the peak-signal operating point derived from input_backoff_db.
     """
     am_in  = np.asarray(am_am_cfg["input"])
@@ -393,8 +400,7 @@ _DETECTOR_PANELS = (
 def plot_carrier_detector(sweep_results: list[dict],
                           carrier_name: str,
                           save_path: str | None = None) -> None:
-    """
-    Plot BER, EVM, and CNR/CIR/CNIR for a single carrier across the sweep.
+    """Plot BER, EVM, and CNR/CIR/CNIR for a single carrier across the sweep.
 
     Produces a combined 2×3 figure at ``save_path``:
         Row 1 — x-axis = IBO (dB); one line per noise level.
@@ -451,8 +457,8 @@ def plot_carrier_detector(sweep_results: list[dict],
 def plot_wideband_results(results: dict,
                            sample_rate: float,
                            save_path: str | None = None) -> None:
-    """
-    Composite wideband PSD: pre-NL, post-NL, and (if noise present) post-noise.
+    """Composite wideband PSD: pre-NL, post-NL, and (if noise present) post-noise.
+
     Accepts the chunk-pipeline return format: results["psd_pre_nl"] etc. are
     (f_array, psd_db_array) tuples from the Welch accumulator.
     """
@@ -499,8 +505,7 @@ def write_report(
     save_path: str | None,
     append: bool = False,
 ) -> None:
-    """
-    Write a single flat Markdown table of per-(carrier, IBO, noise) results.
+    """Write a single flat Markdown table of per-(carrier, IBO, noise) results.
 
     Each entry in `rows` is a dict for one (carrier, ibo_db, noise_density_dbfs)
     measurement and contains (all fields optional except name):

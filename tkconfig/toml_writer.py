@@ -22,11 +22,13 @@ def arr(lst) -> str:
 
 def emit_table(L: list[str], header: str, d: dict,
                keys: tuple[str, ...] | None = None) -> None:
-    """Append a `header` line followed by ``key = value`` lines, with keys
+    """Append a `header` line followed by ``key = value`` lines, with keys.
+
     padded so the ``=`` signs align within the table.  None-valued keys are
     skipped; `keys` (when given) restricts and orders the emitted keys,
     otherwise the dict's own key order is used.  List values render as inline
-    arrays."""
+    arrays.
+    """
     chosen = [k for k in (keys or tuple(d.keys()))
               if k in d and d[k] is not None]
     L.append(header)

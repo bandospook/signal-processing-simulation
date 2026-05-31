@@ -51,8 +51,10 @@ def _render_scalar(parent, fld: Field, row: int, col: int,
 def _render_field(parent, fld: Field, row: int,
                   variables: dict[str, tk.Variable],
                   texts: dict[str, tk.Text]) -> int:
-    """Create the widget(s) for one Field in a columns=1 layout; return the
-    next free row."""
+    """Create the widget(s) for one Field in a columns=1 layout; return the.
+
+    next free row.
+    """
     if fld.type == "bool":
         var = tk.BooleanVar(value=bool(fld.default))
         variables[fld.key] = var
@@ -77,8 +79,10 @@ def _render_field(parent, fld: Field, row: int,
 
 def _wire_visibility(sec: Section, variables: dict[str, tk.Variable],
                      tracker: dict[str, tuple[tk.Widget, ...]]) -> None:
-    """For each gated field, trace the controlling var so the field's widgets
-    show/hide live as the controller's value changes."""
+    """For each gated field, trace the controlling var so the field's widgets.
+
+    show/hide live as the controller's value changes.
+    """
     for fld in walk_fields(sec):
         if fld.visible_when is None:
             continue
@@ -99,9 +103,11 @@ def _wire_visibility(sec: Section, variables: dict[str, tk.Variable],
 def render_section(parent, sec: Section, section_row: int,
                    variables: dict[str, tk.Variable],
                    texts: dict[str, tk.Text]) -> int:
-    """Render one Section's fields onto `parent` starting at `section_row`;
-    return the next free row.  Section title / separator / description are
-    drawn by `render_tab`; this handles fields and visible_when gating."""
+    """Render one Section's fields onto `parent` starting at `section_row`.
+
+    Returns the next free row.  Section title / separator / description are
+    drawn by `render_tab`; this handles fields and visible_when gating.
+    """
     tracker: dict[str, tuple[tk.Widget, ...]] = {}
     if sec.columns == 2:
         for i in range(0, len(sec.fields), 2):
@@ -123,9 +129,11 @@ def render_section(parent, sec: Section, section_row: int,
 def render_tab(nb, schema: Tab,
                variables: dict[str, tk.Variable],
                texts: dict[str, tk.Text]) -> None:
-    """Build a Tab from its schema onto a Notebook.  Each section gets a bold
+    """Build a Tab from its schema onto a Notebook.  Each section gets a bold.
+
     title, optional separator, optional gray description, then its fields.
-    Columns 1 and 3 expand if extra width is available."""
+    Columns 1 and 3 expand if extra width is available.
+    """
     frame = ttk.Frame(nb); nb.add(frame, text=schema.name)
     inner = scrollable(frame)
     r = 0

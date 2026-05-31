@@ -1,4 +1,5 @@
-"""Reusable tkinter widget helpers — tooltips, scrollable frames, the
+"""Reusable tkinter widget helpers — tooltips, scrollable frames, the.
+
 labelled-entry primitive, value formatting, and a directory-picker callback.
 
 None of these know about the schema; they are the low-level building blocks
@@ -9,8 +10,10 @@ from tkinter import ttk, filedialog
 
 
 def fmt(v) -> str:
-    """Format a scalar for display: integral floats lose the trailing .0,
-    None becomes an empty string."""
+    """Format a scalar for display: integral floats lose the trailing .0,.
+
+    None becomes an empty string.
+    """
     if isinstance(v, float): return str(int(v)) if v == int(v) else f"{v:g}"
     return str(v) if v is not None else ""
 
@@ -23,7 +26,9 @@ def parse_float_list(text: str) -> list[float]:
 
 class Tip:
     """Lightweight hover tooltip attached to any widget."""
+
     def __init__(self, widget: tk.Widget, text: str):
+        """Attach a tooltip showing `text` to `widget` (no-op if `text` is empty)."""
         self._w   = widget
         self._txt = text
         self._win: tk.Toplevel | None = None

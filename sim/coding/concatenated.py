@@ -16,6 +16,7 @@ class ConcatenatedCode:
     """
 
     def __init__(self, interleaver_seed: int = 0xCAFE) -> None:
+        """Build RS(255,223) + convolutional with a seeded random interleaver."""
         self.rs = galois.ReedSolomon(255, 223)
         self.conv = ConvolutionalCode()
         self.k = self.rs.k * 8

@@ -21,6 +21,7 @@ from sim.plots import (
 # ── psd_db ────────────────────────────────────────────────────────────────────
 
 def test_psd_db_shape():
+    """Psd db shape."""
     sig = np.exp(2j * np.pi * 0.1 * np.arange(4096))
     f, psd = psd_db(sig, fs=1.0, nfft=512)
     assert len(f) == len(psd) == 512
@@ -36,24 +37,31 @@ def test_psd_db_signal_shorter_than_nfft():
 # ── _fmt_metric ───────────────────────────────────────────────────────────────
 
 def test_fmt_metric_none():
+    """Fmt metric none."""
     assert _fmt_metric("cnr_db", None) == "—"
 
 def test_fmt_metric_nan():
+    """Fmt metric nan."""
     assert _fmt_metric("cnr_db", float("nan")) == "—"
 
 def test_fmt_metric_inf():
+    """Fmt metric inf."""
     assert _fmt_metric("cnr_db", float("inf")) == "∞"
 
 def test_fmt_metric_ber_zero():
+    """Fmt metric ber zero."""
     assert _fmt_metric("ber", 0) == "0"
 
 def test_fmt_metric_ber_nonzero():
+    """Fmt metric ber nonzero."""
     assert "1.00e-02" in _fmt_metric("ber", 0.01)
 
 def test_fmt_metric_evm():
+    """Fmt metric evm."""
     assert "4.50" in _fmt_metric("evm_rms", 4.5)
 
 def test_fmt_metric_normal_float():
+    """Fmt metric normal float."""
     assert "35.5" in _fmt_metric("cnr_db", 35.5)
 
 
@@ -73,6 +81,7 @@ _SWEEP_NAN = [
 
 
 def test_enabled_carrier_names_with_data():
+    """Enabled carrier names with data."""
     assert _enabled_carrier_names(_SWEEP_FINITE) == ["c1"]
 
 
@@ -82,20 +91,26 @@ def test_enabled_carrier_names_no_finite_data():
 
 
 def test_plot_carrier_detector_no_data_early_return():
-    """plot_carrier_detector returns before creating any figure when the named
-    carrier has non-finite metrics across the sweep."""
+    """plot_carrier_detector returns before creating any figure when the named.
+
+    carrier has non-finite metrics across the sweep.
+    """
     plot_carrier_detector(_SWEEP_NAN, "c1", save_path=None)
 
 
 def test_plot_carrier_detector_unknown_carrier_early_return():
-    """plot_carrier_detector returns silently when asked for a carrier that is
-    not in the sweep results at all."""
+    """plot_carrier_detector returns silently when asked for a carrier that is.
+
+    not in the sweep results at all.
+    """
     plot_carrier_detector(_SWEEP_FINITE, "missing", save_path=None)
 
 
 def test_plot_carrier_detector_single_ibo():
-    """plot_carrier_detector with a single IBO value skips set_xlim rather than
-    triggering the 'identical low and high xlims' UserWarning."""
+    """plot_carrier_detector with a single IBO value skips set_xlim rather than.
+
+    triggering the 'identical low and high xlims' UserWarning.
+    """
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")
@@ -103,8 +118,10 @@ def test_plot_carrier_detector_single_ibo():
 
 
 def test_plot_carrier_detector_zero_ber_with_inf_cnr():
-    """CNR-row zero-BER annotation skips points where cnr_db is non-finite
-    (e.g. zero-noise → CNR = inf), avoiding an inf x-coordinate annotation."""
+    """CNR-row zero-BER annotation skips points where cnr_db is non-finite.
+
+    (e.g. zero-noise → CNR = inf), avoiding an inf x-coordinate annotation.
+    """
     sweep = [
         {"ibo_db": 3.0, "noise_density_dbfs": -160.0,
          "carriers": [{"name": "c1", "cnir_db": 40.0, "cnr_db": float("inf"),
@@ -177,7 +194,7 @@ def test_write_report_basic(tmp_path):
 
 
 def test_write_report_zero_ber_no_upper_renders_as_0(tmp_path):
-    """ber == 0 without a ber_upper_95 falls through to the literal '0' branch."""
+    """Ber == 0 without a ber_upper_95 falls through to the literal '0' branch."""
     rows = [dict(_ROWS_NO_THEORY[0])]
     rows[0]["ber_upper_95"] = None
     path = str(tmp_path / "report.md")
@@ -189,7 +206,7 @@ def test_write_report_zero_ber_no_upper_renders_as_0(tmp_path):
 
 
 def test_write_report_zero_ber_with_upper_renders_as_lt(tmp_path):
-    """ber == 0 with a ber_upper_95 set renders as '< x.xe-y'."""
+    """Ber == 0 with a ber_upper_95 set renders as '< x.xe-y'."""
     rows = [dict(_ROWS_NO_THEORY[0])]
     rows[0]["ber_upper_95"] = 3e-6
     path = str(tmp_path / "report.md")

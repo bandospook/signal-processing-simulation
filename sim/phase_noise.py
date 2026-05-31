@@ -34,6 +34,7 @@ def interp_dbc_mask(freq_hz, offsets_hz, dbc_per_hz) -> np.ndarray:
     np.ndarray
         L(f) in dBc/Hz at each requested frequency.  Flat extrapolation
         beyond either end of the anchor grid (last value held).
+
     """
     o = np.asarray(offsets_hz, dtype=float)
     d = np.asarray(dbc_per_hz, dtype=float)

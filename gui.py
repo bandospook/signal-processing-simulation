@@ -1,8 +1,13 @@
 ﻿#!/usr/bin/env python3
-"""
-gui.py — TOML editor and simulation launcher.
-No dependency on sim/* modules — interfaces only with simulation.toml and main.py.
-Usage: python gui.py [path/to/simulation.toml]
+"""TOML editor and simulation launcher for the SO-WAT simulator.
+
+Has no dependency on ``sim/*`` modules — interfaces only with
+``simulation.toml`` and ``main.py`` (the latter launched as a subprocess).
+Every tab is rendered from a Field/Section/Tab schema via the reusable
+``tkconfig`` package; only the project-specific schemas, App, CarrierFrame,
+and TOML writer live here.
+
+Usage: ``python gui.py [path/to/simulation.toml]``
 """
 import base64
 import queue
@@ -324,6 +329,11 @@ class CarrierFrame(ttk.LabelFrame):
     """
 
     def __init__(self, parent, on_remove, data: dict, **kw):
+        """Build one carrier frame from `data` (a single [[carrier]] dict).
+
+        `on_remove` is invoked when the user clicks Remove; the App uses it
+        to drop this frame from its carriers list.
+        """
         super().__init__(parent, text=data.get("name", "carrier"), padding=6, **kw)
         self._on_remove = on_remove
         self._vars:        dict[str, tk.Variable] = {}
@@ -347,6 +357,7 @@ class CarrierFrame(ttk.LabelFrame):
 
     @property
     def carrier_name(self) -> str:
+        """Current `name` field value (used by the App's filter dropdown)."""
         return self._vars.get("name", tk.StringVar()).get() or "carrier"
 
     def _build(self, d: dict):
@@ -507,9 +518,12 @@ class CarrierFrame(ttk.LabelFrame):
         return out
 
     def _populate_pn(self, pn: dict):
-        """Two text widgets — offset_hz and dbc_per_hz — for the per-carrier
-        oscillator mask.  Same units and conventions as the previous
-        global section."""
+        """Render and populate the phase-noise sub-section from `pn`.
+
+        Two text widgets — ``offset_hz`` and ``dbc_per_hz`` — for the
+        per-carrier oscillator mask.  Same units and conventions as the
+        configuration schema.
+        """
         for w in self._pn_frame.winfo_children(): w.destroy()
         self._pn_texts.clear()
         render_section(self._pn_frame, _CARRIER_PHASE_NOISE_FIELDS, 0,
@@ -518,6 +532,11 @@ class CarrierFrame(ttk.LabelFrame):
                               {}, self._pn_texts)
 
     def to_dict(self) -> dict:
+        """Collect this carrier's widgets into one [[carrier]] dict.
+
+        Includes any enabled optional sub-sections (coding / channel /
+        phase_noise) and omits those whose checkbox is currently off.
+        """
         d: dict = {}
         collect_from_schema(_CARRIER_MAIN_FIELDS, self._vars, {}, d)
         d["enabled"]     = bool(self._enabled.get())
@@ -562,7 +581,15 @@ _CHUNK_RE = re.compile(r'^\s+iter\s+\d+/\d+')
 
 
 class App:
+    """Main application window: file controls, Notebook of tabs, log pane.
+
+    Owns the tk variables and text widgets for every schema-driven tab plus
+    the per-carrier CarrierFrame instances; brokers TOML load / save and the
+    subprocess that runs `main.py`.
+    """
+
     def __init__(self, root: tk.Tk, path: Path):
+        """Build the UI on `root` and load the TOML at `path`."""
         self.root      = root
         self.path      = path
         self._carriers: list[CarrierFrame] = []

@@ -294,7 +294,7 @@ def test_build_code_unknown_scheme():
 
 
 def test_build_code_ldpc_default_matrix():
-    """ldpc scheme uses the bundled default alist when matrix is missing or blank."""
+    """Ldpc scheme uses the bundled default alist when matrix is missing or blank."""
     from sim.coding import DEFAULT_LDPC_MATRIX
     assert DEFAULT_LDPC_MATRIX.exists()
     assert isinstance(build_code({"scheme": "ldpc"}), LDPCCode)

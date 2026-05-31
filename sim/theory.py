@@ -33,9 +33,11 @@ _TABLE_CACHE: dict[str, dict | None] = {}
 
 
 def _load_table(modulation: str) -> dict | None:
-    """Return the cached AWGN reference table for `modulation`, or None when
+    """Return the cached AWGN reference table for `modulation`, or None when.
+
     the npz is absent.  The negative case is cached too so we don't stat the
-    filesystem on every call."""
+    filesystem on every call.
+    """
     if modulation in _TABLE_CACHE:
         return _TABLE_CACHE[modulation]
     path = _TABLE_DIR / f"ber_awgn_{modulation}.npz"
@@ -109,8 +111,7 @@ def _ber_from_table(modulation: str, ebn0_db: float,
 
 def ber_awgn(mod: str, EsN0_dB: float,
              mod_kwargs: dict | None = None) -> float | None:
-    """
-    Theoretical BER in pure AWGN for the given modulation at Es/N0 (dB).
+    """Theoretical BER in pure AWGN for the given modulation at Es/N0 (dB).
 
     Returns the closed-form value for BPSK, DBPSK, MSK, QPSK, OQPSK, 8PSK, and
     16QAM.  For 16APSK and 32APSK, looks up the numerical reference table
@@ -145,8 +146,7 @@ def ebn0_for_ber(mod: str, target_ber: float,
                  ebn0_hi_db: float = 25.0,
                  tol_db: float = 1e-4,
                  mod_kwargs: dict | None = None) -> float | None:
-    """
-    Numerically invert ber_awgn(): find Eb/N0 (dB) such that BER = target_ber.
+    """Numerically invert ber_awgn(): find Eb/N0 (dB) such that BER = target_ber.
 
     For APSK, inverts the numerical reference table directly (linear in
     Eb/N0_dB vs log10(BER), with linear extrapolation past the table edges).

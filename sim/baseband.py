@@ -14,32 +14,25 @@ def rrc_baseband(modulation: str,
                  bits: np.ndarray | None = None,
                  **mod_kwargs,
                  ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Generate a complex baseband RRC-filtered signal for any supported modulation.
+    """Generate a complex baseband RRC-filtered signal for any supported modulation.
 
     For OQPSK the Q rail is delayed by T/2 (sps//2 samples) relative to I.
     For DBPSK the bits are differentially encoded before BPSK mapping; the
     returned `bits` array holds the original (pre-encoding) data bits.
 
-    Parameters
-    ----------
-    modulation   : str    Modulation name (see sim.modulation.SUPPORTED)
-    num_symbols  : int    Number of symbols to generate (ignored when `bits` given)
-    symbol_rate  : float  Symbol rate in Hz
-    sample_rate  : float  Sample rate in Hz (must be integer multiple of symbol_rate)
-    rolloff      : float  RRC rolloff factor
-    filter_span  : int    RRC filter half-span in symbols
-    seed         : int    Random seed (used only when `bits` is None)
-    bits         : array  Pre-supplied transmit bits (e.g. FEC-coded bits); when
-                          given, num_symbols is derived from its length
-    **mod_kwargs          Passed to modulation helpers (e.g. apsk_gamma)
+    Inputs: `modulation` is the modulation name (see sim.modulation.SUPPORTED);
+    `num_symbols` is the symbol count to generate (ignored when `bits` is
+    given, in which case the count is derived from the bit array length);
+    `symbol_rate` and `sample_rate` are in Hz, with `sample_rate` an integer
+    multiple of `symbol_rate`; `rolloff` and `filter_span` configure the RRC
+    filter (half-span in symbols); `seed` is used only when `bits` is None;
+    `bits` lets the caller pass FEC-coded bits in directly; `**mod_kwargs`
+    are forwarded to modulation helpers (e.g. `apsk_gamma`).
 
-    Returns
-    -------
-    bb      Complex baseband signal, unit RMS power
-    t       Time axis in seconds
-    bits    Transmitted data bits (flat, 0/1 int array, length = num_symbols × bps)
-    symbols Complex constellation points that were transmitted (length = num_symbols)
+    Returns ``(bb, t, bits, symbols)``: the unit-RMS complex baseband signal,
+    the time axis in seconds, the transmitted data bits (flat int array of
+    length ``num_symbols × bps``), and the complex constellation points that
+    were transmitted (length ``num_symbols``).
     """
     mod = modulation.upper()
     sps = sample_rate / symbol_rate
@@ -85,8 +78,7 @@ def rrc_baseband(modulation: str,
 
 
 def _msk_baseband(bits: np.ndarray, sps: int) -> np.ndarray:
-    """
-    MSK baseband, built as offset-QPSK with half-sine pulse shaping.
+    """MSK baseband, built as offset-QPSK with half-sine pulse shaping.
 
     MSK is exactly offset-QPSK whose pulse is a half-sine 2*sps samples wide:
     even-indexed bits drive the in-phase rail, odd-indexed bits the quadrature
@@ -111,8 +103,7 @@ def _msk_baseband(bits: np.ndarray, sps: int) -> np.ndarray:
 
 
 def _oqpsk_baseband(symbols: np.ndarray, sps: int, h: np.ndarray) -> np.ndarray:
-    """
-    OQPSK baseband: RRC-filter I and Q rails separately, then delay Q by T/2.
+    """OQPSK baseband: RRC-filter I and Q rails separately, then delay Q by T/2.
 
     The I rail carries the real part of each QPSK symbol; the Q rail carries
     the imaginary part.  Q is delayed by sps//2 samples so that only one rail

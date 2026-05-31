@@ -38,6 +38,7 @@ class Field:
     renderer wires a trace on the controller var so the gated widgets
     show/hide live.  ``None`` (the default) means always visible.
     """
+
     path:    tuple[str, ...]
     label:   str
     type:    str
@@ -49,6 +50,7 @@ class Field:
 
     @property
     def key(self) -> str:
+        """Dotted path string used to index the variable / text dicts."""
         return ".".join(self.path)
 
 
@@ -62,6 +64,7 @@ class Section:
     in two-column layouts; (16, 4) gives a wider gap between groups, (0, 4)
     a tighter look.
     """
+
     title:          str
     fields:         tuple[Field, ...]
     columns:        int             = 2
@@ -72,5 +75,7 @@ class Section:
 
 @dataclass(frozen=True)
 class Tab:
+    """One Notebook tab — a title plus an ordered list of Sections."""
+
     name:     str
     sections: tuple[Section, ...]

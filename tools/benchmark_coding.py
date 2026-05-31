@@ -1,6 +1,6 @@
-"""Benchmark FEC decoder throughput — serial vs parallel batch decoding.
+r"""Benchmark FEC decoder throughput — serial vs parallel batch decoding.
 
-Run from the repo root:  .venv\\Scripts\\python.exe tools/benchmark_coding.py
+Run from the repo root:  .venv\Scripts\python.exe tools/benchmark_coding.py
 """
 import sys
 import time
@@ -43,6 +43,7 @@ def _row(label, decode, decode_batch, batch):
 
 
 def main():
+    """Main."""
     rng = np.random.default_rng(0)
     print(f"{'decoder':<16}{'serial ms/fr':>14}{'batch ms/fr':>14}{'speedup':>10}")
     print("-" * 54)

@@ -1,3 +1,13 @@
+"""Wideband multi-carrier simulator entry point.
+
+`simulate()` runs the full chunk-pipeline for one (IBO, noise_density) point:
+per-carrier baseband + optional channel impairment + optional phase noise →
+OLA upsample → composite → analytical-RMS normalisation → nonlinear amp →
+AWGN → per-carrier OLA downsample → matched filter / decisions / metrics.
+The body is split into named-phase helpers (`_prepare_carrier`,
+`_ChunkState`, `_process_chunk`, `_demod_carrier`) so the orchestrator
+reads as a short table of contents.
+"""
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -63,8 +73,8 @@ class _WelchState:
 
 def _decimate(filtered: np.ndarray, L: int,
               offset: int) -> tuple[np.ndarray, int]:
-    """
-    Decimate filtered by L, starting at sample index `offset` within the block.
+    """Decimate filtered by L, starting at sample index `offset` within the block.
+
     Returns (decimated_samples, next_offset).  Offset carries between blocks so
     that decimation is phase-coherent across chunk boundaries.
     """
@@ -119,7 +129,8 @@ def _composite_norm_factor(carriers: list[dict],
 def _prepare_carrier(carr: dict, sample_rate: float,
                      max_block_size_samples: int,
                      per_carrier_seed: int) -> tuple[np.ndarray, dict]:
-    """Generate one carrier's native-rate baseband and return the state dict
+    """Generate one carrier's native-rate baseband and return the state dict.
+
     consumed by the chunk pipeline.
 
     Steps: derive sample-rate ratios → derive symbol/frame counts from the
@@ -221,6 +232,7 @@ class _ChunkState:
     chunk boundaries.  Three Welch accumulators hold the wideband PSD at the
     pre-NL, post-NL, and post-noise stages.
     """
+
     up:        list[OLAState]
     dn_ref:    list[OLAState]
     dn_nl:     list[OLAState]
@@ -327,8 +339,10 @@ def _process_chunk(chunk_idx: int, chunk_state: _ChunkState,
 # ── Per-carrier demod and metrics ────────────────────────────────────────────
 
 def _mark_carrier_undemodulated(cr: dict) -> None:
-    """Annotate a carrier that wasn't in `demod_carriers` with NaN placeholders
-    so downstream code can iterate the carrier list uniformly."""
+    """Annotate a carrier that wasn't in `demod_carriers` with NaN placeholders.
+
+    so downstream code can iterate the carrier list uniformly.
+    """
     cr.update(nl=None, cnr_db=float("nan"), cir_db=float("nan"),
               cnir_db=float("nan"), ber=None, evm_rms=float("nan"),
               n_bits=0, n_errors=0,
@@ -338,7 +352,8 @@ def _mark_carrier_undemodulated(cr: dict) -> None:
 def _demod_carrier(cr: dict, n_native_rs: int,
                    chunk_state: _ChunkState, idx: int,
                    ola_filter_span: int, has_noise: bool) -> None:
-    """Concatenate the per-carrier chunk buffers, strip the OLA round-trip
+    """Concatenate the per-carrier chunk buffers, strip the OLA round-trip.
+
     filter transient, reverse the rational resample, decompose the post-NL
     signal into desired/distortion/noise via projection (→ CIR/CNR/CNIR),
     run the matched-filter receiver, and FEC-decode if the carrier is coded.
@@ -442,8 +457,7 @@ def simulate(carriers: list[dict],
              seed: int | None = None,
              demod_carriers: set[str] | None = None,
              chunk_print: _PrintCB = None) -> dict:
-    """
-    Wideband N-carrier simulation processed chunk-by-chunk (O(1) wideband RAM).
+    """Wideband N-carrier simulation processed chunk-by-chunk (O(1) wideband RAM).
 
     The wideband composite is never materialised in full.  Each OLA block of
     ola_block_size wideband samples is: formed from per-carrier upsampled

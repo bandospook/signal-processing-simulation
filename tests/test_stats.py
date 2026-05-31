@@ -6,7 +6,7 @@ from sim.stats import rule_of_three_upper, wilson_half_width, z_score
 
 
 def test_z_score_95_pct():
-    """z for 95% two-sided is ~1.96."""
+    """Z for 95% two-sided is ~1.96."""
     assert math.isclose(z_score(0.95), 1.959964, abs_tol=1e-4)
 
 
@@ -24,7 +24,7 @@ def test_wilson_zero_n_is_inf():
 
 
 def test_wilson_rejects_k_out_of_range():
-    """k must satisfy 0 ≤ k ≤ n."""
+    """K must satisfy 0 ≤ k ≤ n."""
     with pytest.raises(ValueError):
         wilson_half_width(-1, 10)
     with pytest.raises(ValueError):

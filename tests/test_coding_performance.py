@@ -112,7 +112,8 @@ def test_coding_gain_waterfall():
 
 
 def test_coding_validation():
-    """Validate that the codes reach their *expected* performance, not just
+    """Validate that the codes reach their *expected* performance, not just.
+
     "beats uncoded": convolutional against its Viterbi union bound, and
     turbo / LDPC / concatenated against reference operating points.
 
